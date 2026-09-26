@@ -1,0 +1,7 @@
+// Template for fa_version.h, written by cmake/GenerateVersion.cmake. FA_VERSION_BASE is the
+// pyproject.toml version; FA_VERSION, which the tool prints, adds the commit suffix
+// ("0.1.0+g27b015c7") unless the build is of the release tag.
+#pragma once
+
+#define FA_VERSION "@FA_VERSION_FULL@"
+#define FA_VERSION_BASE "@FA_VERSION_BASE@"

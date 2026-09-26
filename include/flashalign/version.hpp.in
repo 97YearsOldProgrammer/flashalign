@@ -1,0 +1,13 @@
+#pragma once
+
+#include <string_view>
+
+namespace flashalign {
+/**
+ * The version the tool prints: the release, plus a PEP 440 local suffix naming the commit
+ * when the build is not of the release tag ("0.1.0", "0.1.0+g27b015c7.dirty").
+ */
+inline constexpr std::string_view version = "@FA_VERSION_FULL@";
+/** The release version alone, as pyproject.toml spells it. */
+inline constexpr std::string_view version_base = "@FA_VERSION_BASE@";
+}

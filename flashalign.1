@@ -1,0 +1,708 @@
+.TH flashalign 1 "26 September 2026" "flashalign-0.1.0" "Bioinformatics tools"
+.SH NAME
+.PP
+flashalign \- long-read DNA and spliced RNA alignment against a reference genome
+.SH SYNOPSIS
+* Indexing the reference (optional):
+.RS 4
+flashalign index
+.RB [ \-x
+.IR preset ]
+.I ref.fa
+.RI [ out.faix ]
+.br
+flashalign index
+.RB [ \-k
+.IR kmer ]
+.RB [ \-s
+.IR smer ]
+.RB [ \-I
+.IR batchSize ]
+.I ref.fa
+.RI [ out.faix ]
+.RE
+
+* Long-read alignment with CIGAR:
+.RS 4
+flashalign align
+.RB [ \-x
+.IR preset ]
+.I ref.faix
+.I reads.fq
+>
+.I output.sam
+.br
+flashalign align
+.B \-f paf \-c
+.RB [ \-x
+.IR preset ]
+.I ref.fa
+.I reads.fq
+>
+.I output.paf
+.RE
+
+* Long-read mapping without CIGAR:
+.RS 4
+flashalign align
+.B \-f paf
+.RB [ \-x
+.IR preset ]
+.RB [ \-t
+.IR nThreads ]
+.I ref.fa
+.I reads.fq
+>
+.I output.paf
+.RE
+
+* Spliced alignment of long RNA reads:
+.RS 4
+flashalign align
+.B \-x splice
+.I ref.fa
+.I reads.fq
+>
+.I output.sam
+.RE
+.SH DESCRIPTION
+.PP
+FlashAlign maps long reads to a reference genome: noisy Nanopore reads, accurate
+long reads such as PacBio HiFi, and long cDNA, direct-RNA and Iso-Seq reads,
+which it aligns across introns. It outputs in the SAM, BAM or PAF format, SAM by
+default.
+.PP
+Seeds are closed syncmers, so an index is defined by the pair
+.RI ( k ,\  s )
+rather than by a minimizer window.
+.B flashalign index
+writes a reusable
+.I .faix
+index
+.RI ( ref.fa .faix
+unless
+.I out.faix
+is given) and records in it the preset it was built with;
+.B flashalign align
+adopts that preset unless
+.B \-x
+is given. The target of
+.B align
+may equally be a reference FASTA, which is indexed transiently in memory and
+never written out. FASTA or FASTQ (plain or gzip) and
+.I .faix
+targets are told apart by content, not by name, and any other file is refused.
+.PP
+The index owns the seeding:
+.B align
+has no
+.B \-k
+and no
+.BR \-s .
+A FASTA target is indexed with the preset's
+.RI ( k ,\  s ),
+a
+.I .faix
+target supplies its own, and mapping under another pair means running
+.B flashalign index
+.RB \-k / \-s
+first.
+.SH OPTIONS
+.SS Indexing options
+.TP 10
+.B \-x, \-\-preset \fISTR\fR
+Preset [lr]. It fixes the seeding of the index and is written into it. Available
+.I STR
+are
+.B lr
+.RB ( \-k21
+.BR \-s9 ),
+.B lr:hq
+.RB ( \-k21
+.BR \-s5 ),
+.B splice
+and
+.B splice:hq
+.RB ( \-k15
+.BR \-s10 ).
+See
+.BR "Preset options" .
+.TP
+.BI \-k \ INT
+Seed k-mer size, no larger than 23 [21]. A k-mer that is its own reverse
+complement, possible at an even value only, is never a seed.
+.TP
+.BI \-s \ INT
+Closed-syncmer s-mer size, 1 to
+.I k
+[9]. A closed syncmer is a k-mer whose minimal s-mer sits at one of its two
+ends; the seed density is about 2/(k\-s+1).
+.TP
+.BI \-I \ NUM
+Load at most
+.I NUM
+target bases into RAM for indexing [no split]. If there are more than
+.I NUM
+bases in
+.IR ref.fa ,
+flashalign needs to read
+.I reads.fq
+multiple times to map it against each batch of target sequences. This would
+create a multi-part index.
+.I NUM
+may be ending with k/K/m/M/g/G. NB: mapping quality is incorrect given a
+multi-part index.
+.TP
+.B \-\-idx\-no\-seq
+Don't store target sequences in the index. It saves disk space and memory but
+the index generated with this option will not work with
+.B \-f
+.BR sam ,
+.B \-f
+.BR bam ,
+.BR \-c ,
+.B \-\-cs
+or
+.BR \-\-MD ,
+nor with a splice preset. This option is not listed on the help screen.
+.TP
+.BI \-t \ INT
+Number of threads [all].
+.TP
+.B \-\-quiet
+Suppress non-error logging, including the version, command line and resource
+usage printed at the end of the run.
+.TP
+.B \-\-help
+Print the
+.B index
+help message to stdout and exit.
+.SS Placement options
+.TP 10
+.B \-r \fIINT\fR[,\fIINT\fR]
+Bandwidth for chaining and base alignment, and the bandwidth for the long join
+[500,20000]. A single
+.I INT
+sets the first value only. DNA presets only.
+.TP
+.BI \-p \ FLOAT
+Minimal rival-to-primary chain score ratio for retaining a rival [0.8]. A
+retained rival is weighed in the mapping quality, is what
+.BR s2 ,
+.B md
+and
+.B XA
+report, and is a record of its own under
+.BR "\-\-secondary yes" .
+Splice presets only.
+.TP
+.BI \-N \ INT
+Retain at most
+.I INT
+candidate loci per read, the best one included [6]. Splice presets only.
+.TP
+.BI \-\-rival\-min\-diff \ INT
+Absolute chain-score band that retains a rival beside
+.B \-p
+[30]. Splice presets only.
+.TP
+.BI \-\-min\-support \ INT
+Minimal number of seeds on a vote peak [3]. The splice presets use 2.
+.TP
+.BI \-\-max\-vote\-occ \ INT
+Ignore a seed whose reference occurrence is above
+.I INT
+when voting, and under a DNA preset when chaining too; 0 turns occurrence
+filtering off [200]. Unset, the cap is the larger of 200 and the occurrence of the
+top 1.81e\-4 fraction of the most frequent seeds in the index, at most 500 under
+.BR lr:hq ,
+and the DNA chaining gates take the same cap. The splice presets keep the fixed
+200.
+.TP
+.BI \-\-vote\-ratio \ FLOAT
+Keep every vote peak whose vote is at least
+.I FLOAT
+of the best peak's [0.25]. 0 keeps the top four peaks by count instead. DNA
+presets only.
+.TP
+.BI \-\-max\-chain\-occ \ INT
+Drop a seed whose genome-wide reference occurrence is above
+.I INT
+from the pool handed to chaining; 0 disables the gate [200]. Unset, the gate is
+the voting cap
+.RB ( \-\-max\-vote\-occ ).
+DNA presets only.
+.TP
+.BI \-\-dw \ INT
+Width in reference bases of the diagonal bin a seed votes into, greater than 0
+[64].
+.B lr:hq
+and
+.B splice:hq
+use 48. Under a DNA preset the width otherwise grows with the read length; a
+value given here fixes it and turns that growth off.
+.TP
+.BI \-\-dw\-slope\-den \ INT
+Denominator of the term that grows the vote bin with read length: the width is
+the read length divided by
+.IR INT ,
+held between the base width and the cap [128].
+.B lr:hq
+uses 64, and 0 drops the term. DNA presets only.
+.TP
+.BI \-\-dw\-max \ INT
+Largest width that growth may reach, greater than 0 [2048]. While the growth is
+on it may not be below the width
+.B \-\-dw
+sets. DNA presets only.
+.TP
+.B \-\-tile\-score \fIhit\fR=\fIINT\fR,\fIblock\fR=\fIINT\fR,\fInull\fR=\fIINT\fR,\fImiss\fR=\fIINT\fR
+Objective of the exact query partition, which decides for each of the read's 128
+query tiles which candidate owns it [hit=4,block=12,null=1,miss=0].
+.I hit
+rewards an owned tile the seeds support and is at least 1;
+.I block
+is charged each time an ownership block opens,
+.I null
+per valid tile left unowned, and
+.I miss
+per owned tile without seed support, each at least 0. Any subset of the keys may
+be given, and a repeated key keeps its last value. DNA presets only.
+.SS Alignment options
+.TP 10
+.BI \-A \ INT
+Matching score [2].
+.TP
+.BI \-B \ INT
+Mismatching penalty [4]. Use a larger value for lower divergence.
+.TP
+.B \-O \fIINT\fR[,\fIINT\fR]
+Gap open penalty [4,24]. If the second
+.I INT
+is not specified, it is set to the first.
+.TP
+.B \-E \fIINT\fR[,\fIINT\fR]
+Gap extension penalty [2,1]. A gap of length
+.I k
+costs
+.RI min{ O1 + k * E1 , O2 + k * E2 }.
+If the second
+.I INT
+is not specified, it is set to the first.
+.TP
+.BI \-z \ INT
+Truncate an alignment if the running alignment score drops too quickly along the
+diagonal of the DP matrix (diagonal X-drop, or Z-drop) [400].
+.TP
+.BI \-S \ INT
+Minimal peak DP alignment score to output [80]. Under a DNA preset an
+alignment also needs at least 40 matching bases; a value of 0 or less turns off
+the score test, not the base count. Plain PAF output, which has no DP, is not
+filtered.
+.TP
+.BI \-\-score\-N \ INT
+Penalty of a mismatch involving ambiguous bases [1].
+.TP
+.BI \-\-end\-bonus \ INT
+Score bonus when alignment extends to the end of the query sequence [\-1].
+.SS Splice options
+.TP 10
+.BI \-\-min\-intron \ INT
+Minimal reference gap that chaining accepts as an intron [20]; a shorter gap is
+left to base alignment as a deletion. It does not decide the `N' CIGAR operator:
+base alignment writes a gap as `N' once the second gap penalty makes the long
+gap cheaper (see
+.B \-O
+and
+.BR \-E ).
+Splice presets only.
+.TP
+.BI \-G \ NUM
+Maximum gap on the reference, that is the maximum intron length [200k].
+.I NUM
+may be ending with k/K/m/M/g/G. This option does not change the chaining and
+alignment band width. Splice presets only.
+.TP
+.BI \-u \ CHAR
+How to find canonical splicing sites GT-AG \-
+.BR f :
+transcript strand;
+.BR b :
+both strands;
+.BR r :
+reverse strand;
+.BR n :
+no attempt to match GT-AG [b]. Under
+.B n
+no
+.B ts
+tag is stamped. Splice presets only.
+.TP
+.BI \-\-junc\-bed \ FILE
+Junctions to prefer during base alignment [].
+.I FILE
+can be gene annotations in the BED12 format (aka 12-column BED), or intron
+positions in 6-column BED with the strand column required. BED12 file can be
+converted from GTF/GFF3 with `paftools.js gff2bed anno.gtf'. Splice presets
+only.
+.TP
+.BI \-\-junc\-bonus \ INT
+Score bonus for a splice donor or acceptor found in annotation [9]. Effective
+with
+.BR \-\-junc\-bed .
+.I INT
+ranges from 0 to 127. Splice presets only.
+.TP
+.BI \-\-realize\-max \ INT
+Realize at most
+.I INT
+rival chains by dynamic programming [5]. Splice presets only.
+.SS Input/output options
+.TP 10
+.B \-o, \-\-output \fIFILE\fR
+Output alignments to
+.I FILE
+[stdout].
+.RB ` \- '
+is stdout too.
+.TP
+.B \-f, \-\-format \fISTR\fR
+Output format:
+.BR sam ,
+.B bam
+or
+.B paf
+[sam]. When
+.B \-f
+is absent, a
+.IR .sam ,
+.I .bam
+or
+.I .paf
+extension on the
+.B \-o
+path selects the format instead; an explicit
+.B \-f
+wins over it. BAM is written natively.
+.TP
+.B \-c
+Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag. Plain
+.B \-f
+.B paf
+is placement-only: it runs no base-level dynamic programming, so its
+coordinates and its
+.B AS:i
+differ from those of a base-level alignment rather than merely lacking
+.BR cg:Z .
+.BR \-c ,
+.B \-\-cs
+and
+.B \-\-MD
+turn base-level alignment on in PAF; SAM and BAM output always has it.
+.TP
+.B \-\-cs
+Output the
+.B cs
+tag, in the short form;
+.B \-\-cs=long
+selects the long form. Implies
+.BR \-c .
+.TP
+.B \-\-MD
+Output the MD tag (see the SAM spec). Implies
+.BR \-c .
+.TP
+.B \-\-eqx
+Output =/X CIGAR operators for sequence match/mismatch. It rewrites every CIGAR
+the run realizes \- the SAM and BAM CIGAR,
+.B SA:Z
+and PAF's
+.B cg:Z
+\- and implies nothing, so plain PAF needs
+.B \-c
+beside it.
+.TP
+.B \-Y, \-\-soft\-clip\-supp
+In SAM output, use soft clipping for supplementary alignments. The default is
+hard clipping.
+.TP
+.B \-R, \-\-rg \fISTR\fR
+SAM read group line in a format like
+.B @RG\\\\tID:foo\\\\tSM:bar
+[]. It must start with
+.B @RG
+and carry an
+.B ID
+field, and it adds
+.B RG:Z
+as the first tag of every SAM and BAM record.
+.TP
+.B \-\-sam\-hit\-only
+In SAM and BAM, don't output unmapped reads. PAF never carries them.
+.TP
+.B \-\-no\-header
+Don't output the SAM header.
+.TP
+.B \-\-secondary yes|no
+Whether to output secondary alignments [no]. With
+.BR yes ,
+each alternative alignment of a read is written after the primary and its
+supplementary records: FLAG 0x100, or 0x900 on its continuation segments,
+.B tp:A:S
+in PAF, mapping quality 0, and
+.RB ` * '
+for SEQ and QUAL. A secondary record carries
+.B ms
+but no
+.BR md ,
+.BR s2 ,
+.B SA
+or
+.BR XA .
+Under a DNA preset the primary record of a read aligned in several pieces is
+first extended toward the read ends, and a piece it then covers by at least
+half of that piece's span is a secondary, not a supplementary; it is listed on
+the primary's
+.B XA
+either way.
+The value may be attached
+.RB ( \-\-secondary=yes )
+or separated; typed twice, the last one wins.
+.TP
+.B \-y
+Copy input FASTA/Q comments to output, as the last field of every record the
+read produces. In BAM the comment must already be SAM tag text, or the run
+stops.
+.TP
+.BI \-t \ INT
+Number of threads [all\-2]: mapping runs on the machine's hardware threads less
+the reader and the writer. An explicit value is the whole mapping budget, and
+decompression of compressed input borrows from it rather than adding to it.
+.TP
+.B \-K, \-\-batch\-bp \fINUM\fR
+Number of bases loaded into memory to process in a mini-batch [500M]. As with
+.BR \-I ,
+a k/K/m/M/g/G suffix is accepted. Output bytes and output order do not depend on
+it.
+.TP
+.B \-\-show\-config
+Print the fully resolved configuration to stdout and exit 0. It loads neither
+the reference nor the reads, so
+.B flashalign align \-x lr:hq \-\-show\-config
+is a complete invocation; of a
+.I .faix
+target it reads the header alone.
+.TP
+.B \-\-stats
+Print a summary of the run to stderr: reads and bases, mapped reads, records
+written, wall time, throughput and peak memory.
+.TP
+.B \-\-progress
+Print per-batch progress to stderr.
+.TP
+.B \-\-quiet
+Suppress non-error logging, including the three lines a run ends with on stderr:
+the version, the command line, and the real time, CPU time and peak memory.
+.TP
+.B \-a
+Output alignments in the SAM format. SAM is already the default; like
+.BR \-f ,
+this option outranks the format inferred from the
+.B \-o
+extension.
+.TP
+.BI \-\-batch\-window \ INT
+Number of batches in flight in the compute stage [3]. With 1, all threads finish
+a batch before the next one starts. Output bytes and order are identical for
+every value.
+.TP
+.BI \-\-io\-staging \ MIB
+Ceiling, in MiB, on the decompressed input staged ahead of the reader; 0 scales
+it with
+.B \-t
+[0]. A non-zero value must be at least 64.
+.SS Preset options
+.TP 10
+.B \-x, \-\-preset \fISTR\fR
+Preset [lr]. This option applies multiple options at the same time. An explicit
+.B \-x
+also overrides the preset recorded in a
+.I .faix
+target; the index keeps its own
+.RI ( k ", " s ).
+Available
+.I STR
+are:
+.RS
+.TP 10
+.B lr
+Align noisy long reads of ~10% error rate to a reference genome. This is the
+default mode.
+.RB ( \-k21
+.B \-s9 \-\-min\-support 3 \-A2 \-B4 \-O4,24 \-E2,1
+.B \-z400 \-r500,20000
+.BR \-S80 ).
+.TP
+.B lr:hq
+Align accurate long reads (error rate <1%), such as PacBio HiFi reads, to a
+reference genome
+.RB ( \-k21
+.B \-s5 \-\-min\-support 3 \-A1 \-B4 \-O6,26 \-E2,1
+.B \-z400 \-r500,20000
+.BR \-S200 ).
+.TP
+.B splice
+Long-read spliced alignment
+.RB ( \-k15
+.B \-s10 \-\-min\-support 2 \-A1 \-B2 \-O2,32 \-E1,0 \-z200 \-S80
+.B \-\-min\-intron 20 \-G200k \-\-junc\-bonus 9 \-ub \-p0.8
+.BR \-N6 ).
+In the splice mode a long deletion is taken as an intron and represented as the
+.RB ` N '
+CIGAR operator, and
+.B \-r
+is refused.
+.TP
+.B splice:hq
+Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq
+.RB ( \-xsplice
+.B \-B4
+.BR \-O6,24 ).
+It differs from
+.B splice
+only in scoring.
+.RE
+.SS Miscellaneous options
+.TP 10
+.B \-\-help
+Print the help screen of the subcommand to stdout and exit 0. A subcommand
+invoked with no arguments prints the same screen to stderr and exits 2.
+The help screen lists the common options; this page lists every option.
+.TP
+.B version
+Print the version number to stdout.
+.B flashalign \-\-version
+and
+.B flashalign \-V
+print the same line. Both spellings are top-level only: neither is an
+.B align
+or
+.B index
+option.
+.SH OUTPUT FORMAT
+.PP
+FlashAlign outputs alignments in the SAM format by default.
+.B \-f bam
+selects the BAM format and
+.B \-f paf
+the PAF format. PAF is a TAB-delimited text format with each line consisting of
+at least 12 fields as are described in the following table:
+.TS
+center box;
+cb | cb | cb
+r | c | l .
+Col	Type	Description
+_
+1	string	Read name
+2	int	Read length
+3	int	Read start coordinate (0-based)
+4	int	Read end coordinate (0-based)
+5	char	`+' for forward strand; `-' for reverse
+6	string	Contig name
+7	int	Contig length
+8	int	Contig start coordinate on the original strand
+9	int	Contig end coordinate on the original strand
+10	int	Number of matching bases
+11	int	Number of bases in alignment
+12	int	Mapping quality (0-60)
+.TE
+
+.PP
+When alignment is available, column 11 gives the total number of sequence
+matches, mismatches and gaps in the alignment; column 10 divided by column 11
+gives the BLAST-like alignment identity. When alignment is unavailable, these
+two columns are approximate. SAM, BAM and PAF may optionally have additional
+fields in the SAM-like typed key-value format. FlashAlign may output the
+following tags:
+.TS
+center box;
+cb | cb | cb
+r | c | l .
+Tag	Type	Description
+_
+AS	i	Alignment score from dynamic programming
+ms	i	Score of the maximum scoring segment
+md	i	Max score minus secondary max score
+NM	i	Edit distance
+nn	i	Number of ambiguous bases in the alignment
+tp	A	Type of aln: P/primary, S/secondary, I/inversion
+s2	i	Chaining score of the best secondary chain
+de	f	Gap-compressed per-base sequence divergence
+ts	A	Transcript strand (splice mode only)
+SA	Z	List of other supplementary alignments (SAM/BAM only)
+XA	Z	Secondary hits in (ctg,strandPos,CIGAR,NM;)+ (SAM/BAM only)
+cg	Z	CIGAR (PAF only)
+cs	Z	Difference string
+MD	Z	Difference string in the SAM spec
+.TE
+
+.PP
+Tags
+.BR md ,
+.B s2
+and
+.B XA
+are not written on a secondary alignment.
+.PP
+The
+.B cs
+tag encodes difference sequences in the short form or the entire query
+.I AND
+reference sequences in the long form. It consists of a series of operations:
+.TS
+center box;
+cb | cb |cb
+r | l | l .
+Op	Regex	Description
+_
+ =	[ACGTN]+	Identical sequence (long form)
+ :	[0-9]+	Identical sequence length
+ *	[acgtn][acgtn]	Substitution: ref to query
+ +	[acgtn]+	Insertion to the reference
+ \-	[acgtn]+	Deletion from the reference
+ ~	[acgtn]{2}[0-9]+[acgtn]{2}	Intron length and splice signal
+.TE
+
+.SH EXIT STATUS
+.TP 4
+.B 0
+Success, and every
+.B \-\-help
+path, which prints to stdout.
+.TP
+.B 1
+Runtime failure: a missing or unreadable input, a write failure, CRAM or SAM
+text handed in as reads, a closed output, or an option the resolved preset
+cannot honour. One error line on stderr, no hint.
+.TP
+.B 2
+Usage error: an unknown command, an unknown option, a bad value or a missing
+operand. One error line plus one hint line on stderr.
+.B flashalign
+with no arguments, and
+.B flashalign align
+or
+.B flashalign index
+with no arguments, print their help screen to stderr and exit 2 instead.
+.SH LIMITATIONS
+.TP 2
+*
+Long reads only: a read has to carry enough anchors to be collapsed into one or
+more diagonals.
+.TP
+*
+FlashAlign requires SSE4.1 instructions on x86 CPUs or NEON on ARM CPUs. A build
+without them is not provided.
+.SH SEE ALSO
+.PP
+samtools(1).

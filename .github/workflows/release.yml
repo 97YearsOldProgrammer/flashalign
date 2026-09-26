@@ -1,0 +1,173 @@
+# Builds the release files when a version tag (v*) is pushed:
+#   - Python wheels (Linux x86-64, Linux aarch64, macOS arm64) and the sdist, uploaded to PyPI
+#     after approval in the `pypi` environment;
+#   - the Linux x86-64 binary tarball, attached to a draft GitHub release to review and publish.
+# Run it by hand (Actions > release > Run workflow) with target=testpypi to rehearse the PyPI
+# upload on test.pypi.org; no GitHub release is made then.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Upload the Python packages to"
+        type: choice
+        options: [none, testpypi]
+        default: none
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match pyproject.toml version $version" >&2
+            exit 1
+          fi
+
+  wheels:
+    needs: version
+    name: wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pypa/cibuildwheel@v4.2.1
+        env:
+          CIBW_CONFIG_SETTINGS: cmake.define.FLASHALIGN_VERSION_SUFFIX=OFF
+      - uses: actions/upload-artifact@v7
+        with:
+          name: python-wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  sdist:
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: pipx run build --sdist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: python-sdist
+          path: dist/*.tar.gz
+
+  binary:
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      # manylinux2014: CentOS 7, glibc 2.17, GCC 10; the binary runs on any x86-64 Linux
+      # with glibc >= 2.17 and SSE4.1.
+      IMAGE: quay.io/pypa/manylinux2014_x86_64@sha256:6f74cabeac2432570aa4bfdb29f7c1f30313d4d6654d764c44e574b6ffdd4ed5
+      NAME: flashalign-${{ needs.version.outputs.version }}_x64-linux
+      # zlib is linked static: the image's zlib 1.2.7 is older than FlashAlign needs, and a
+      # binary linked to a newer libz.so.1 would not load on the older systems it targets.
+      ZLIB_VERSION: "1.3.2"
+      ZLIB_SHA256: bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch zlib
+        run: |
+          mkdir -p build/zlib-src
+          curl -fsSL -o build/zlib.tar.gz \
+            "https://github.com/madler/zlib/releases/download/v$ZLIB_VERSION/zlib-$ZLIB_VERSION.tar.gz"
+          echo "$ZLIB_SHA256  build/zlib.tar.gz" | sha256sum -c -
+          tar -xzf build/zlib.tar.gz -C build/zlib-src --strip-components=1
+      - name: Build in manylinux2014
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/src:ro" -v "$PWD/build:/build" "$IMAGE" bash -euo pipefail -c '
+              cd /build/zlib-src
+              CFLAGS="-O3 -fPIC" ./configure --static --prefix=/build/zlib
+              make -j "$(nproc)" install
+              cmake -S /src -B /build -G "Unix Makefiles" \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DFLASHALIGN_BUILD_PYTHON=OFF \
+                -DFLASHALIGN_VERSION_SUFFIX=OFF \
+                -DZLIB_ROOT=/build/zlib \
+                -DZLIB_USE_STATIC_LIBS=ON \
+                -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+              cmake --build /build --target flashalign -j "$(nproc)"
+              /build/flashalign --version'
+      - name: Check and package
+        run: |
+          file build/flashalign
+          ldd build/flashalign
+          if ldd build/flashalign | grep -q libz; then echo "zlib is not linked static" >&2; exit 1; fi
+          echo "max GLIBC: $(objdump -T build/flashalign | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
+          test "$(build/flashalign --version)" = "flashalign ${{ needs.version.outputs.version }}"
+          mkdir -p "stage/$NAME"
+          install -m 0755 build/flashalign "stage/$NAME/"
+          install -m 0644 flashalign.1 README.md LICENSE THIRD_PARTY_NOTICES.md "stage/$NAME/"
+          tar -C stage --sort=name --owner=0 --group=0 --numeric-owner --mode=go-w \
+            --mtime="@$(git log -1 --format=%ct)" -cjf "$NAME.tar.bz2" "$NAME"
+          sha256sum "$NAME.tar.bz2"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary
+          path: ${{ env.NAME }}.tar.bz2
+
+  pypi:
+    if: github.event_name == 'push'
+    needs: [wheels, sdist, binary]
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/flashalign
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: python-*
+          merge-multiple: true
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@v1.14.2
+
+  testpypi:
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    needs: [wheels, sdist, binary]
+    runs-on: ubuntu-24.04
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/flashalign
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: python-*
+          merge-multiple: true
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  github-release:
+    if: github.event_name == 'push'
+    needs: [binary, pypi]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: binary
+      - uses: softprops/action-gh-release@v3.0.3
+        with:
+          draft: true
+          name: FlashAlign ${{ github.ref_name }}
+          files: flashalign-*_x64-linux.tar.bz2

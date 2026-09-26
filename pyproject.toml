@@ -1,0 +1,77 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "flashalign"
+version = "0.1.0"
+description = "CPU-native long-read aligner for DNA and spliced RNA, with a mappy-style Python API"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+authors = [{name = "Gong Chen", email = "dsbchen@ucdavis.edu"}]
+keywords = [
+    "aligner",
+    "bioinformatics",
+    "long-read",
+    "nanopore",
+    "pacbio",
+    "rna-seq",
+    "sequence-alignment",
+    "spliced-alignment",
+    "syncmer",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+# The wheel is the library only; the `flashalign` CLI is built with CMake.
+
+[project.urls]
+Homepage = "https://github.com/97YearsOldProgrammer/flashalign"
+Source = "https://github.com/97YearsOldProgrammer/flashalign"
+Issues = "https://github.com/97YearsOldProgrammer/flashalign/issues"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/wheel/{wheel_tag}"
+# nanobind's stable ABI: one abi3 wheel for CPython 3.12+.
+wheel.py-api = "cp312"
+wheel.packages = ["python/flashalign"]
+cmake.version = ">=3.18"
+cmake.args = ["-DFLASHALIGN_BUILD_PYTHON=ON"]
+build.targets = ["_flashalign"]
+# Only the extension goes in the wheel; libflashalign is installed by CMake for C++ users.
+install.components = ["Python"]
+
+# The sdist builds both the wheel and the CLI, so only build output and editor files are
+# excluded.
+sdist.exclude = [
+    "build/",
+    "build-*/",
+    "cmake-build-*/",
+    ".github/",
+]
+
+[tool.cibuildwheel]
+build = "cp312-*"
+# No free-threaded or musl wheels.
+skip = ["cp3??t-*", "*musllinux*"]
+archs = ["auto64"]
+build-verbosity = 1
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+test-command = "python -c 'import flashalign; print(flashalign.__version__)'"
+
+[tool.cibuildwheel.macos.environment]
+MACOSX_DEPLOYMENT_TARGET = "11.0"
