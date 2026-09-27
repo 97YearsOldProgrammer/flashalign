@@ -1,6 +1,6 @@
 # FlashAlign
 
-Handle high-throughput long-read DNA and RNA data by flashalign.
+Handle high-throughput long-read DNA and RNA data with flashalign.
 
 [![GitHub Downloads](https://img.shields.io/github/downloads/97YearsOldProgrammer/flashalign/total.svg?style=social&logo=github&label=Download)](https://github.com/97YearsOldProgrammer/flashalign/releases)
 [![PyPI](https://img.shields.io/pypi/v/flashalign.svg?style=flat)](https://pypi.org/project/flashalign/)
