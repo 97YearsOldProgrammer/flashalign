@@ -1,5 +1,7 @@
 # FlashAlign
 
+Handle high-throughput long-read DNA and RNA data by flashalign.
+
 [![GitHub Downloads](https://img.shields.io/github/downloads/97YearsOldProgrammer/flashalign/total.svg?style=social&logo=github&label=Download)](https://github.com/97YearsOldProgrammer/flashalign/releases)
 [![PyPI](https://img.shields.io/pypi/v/flashalign.svg?style=flat)](https://pypi.org/project/flashalign/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/flashalign.svg?label=PyPI%20downloads)](https://pypi.org/project/flashalign/)
@@ -94,8 +96,7 @@ flashalign align ref.fa.faix reads.fq > aln.sam   # alignment
 The index records the preset it was built with, and `align` maps under that preset unless `-x`
 is given. The index owns the seeding: `-k`, `-s` and `-I` are indexing options and can't be
 changed during mapping, and an explicit `-x` at mapping time keeps the index's own `-k` and
-`-s`. Keep one index per seeding: `lr` (`-k21 -s9`), `lr:hq` (`-k21 -s5`), and one index shared
-by `splice` and `splice:hq` (`-k15 -s10`).
+`-s`.
 
 ### Use cases
 
@@ -113,24 +114,12 @@ flashalign align -x lr:hq ref.fa hifi.fq.gz > aln.sam   # PacBio HiFi reads
 error rate below 1%; PacBio HiFi reads belong there, and there is no separate HiFi preset. The
 two differ in seeding (`-s9` and `-s5`) and in scoring.
 
-Seeds that occur too often in the reference are ignored. The cutoff follows the reference: it is
-the larger of 200 and the occurrence of the top 1.81e-4 fraction of the most frequent seeds in
-the index, at most 500 under `lr:hq`, and voting and chaining use the same number. On a human
-genome it is 200; on a repeat-rich genome such as wheat it is about 2,200 under `lr` and 500
-under `lr:hq`. `--max-vote-occ` sets it for both.
-
 #### Map long mRNA/cDNA reads
 
 ```sh
 flashalign align -x splice ref.fa cdna.fq.gz > aln.sam            # Nanopore cDNA or direct RNA
 flashalign align -x splice:hq -u f ref.fa isoseq.fq.gz > aln.sam  # PacBio Iso-Seq
 ```
-
-In the splice presets a long deletion is taken as an intron and written as the `N` CIGAR
-operator; `-G` sets the maximum intron length (200k by default). By default (`-u b`) the
-canonical GT-AG splice sites are looked for on both strands and the transcript strand is
-written to the `ts` tag; `-u f` looks on the transcript strand only, for reads that are already
-on that strand. `splice:hq` differs from `splice` only in scoring.
 
 FlashAlign can take annotated junctions and prefer them during base alignment:
 
@@ -139,9 +128,7 @@ paftools.js gff2bed anno.gtf > anno.bed
 flashalign align -x splice --junc-bed anno.bed ref.fa cdna.fq.gz > aln.sam
 ```
 
-`--junc-bed` takes gene annotations in the 12-column BED format, which `paftools.js gff2bed`
-converts from GTF or GFF3, or intron positions in 6-column BED with the strand column. A splice
-donor or acceptor found in the annotation gets a score bonus, `--junc-bonus` (9 by default).
+`--junc-bed` works as in minimap2.
 
 ### Output
 
@@ -191,7 +178,8 @@ list the common options. Bugs and questions go to the
 
 ### Citing FlashAlign
 
-The manuscript is not yet public. Until it is, cite the repository by URL and commit.
+The manuscript is not yet public. Until then, please cite the software:
+[doi:10.5281/zenodo.22985251](https://doi.org/10.5281/zenodo.22985251).
 
 ## Developers' guide
 
@@ -210,8 +198,9 @@ The package needs CPython 3.12 or newer and installs no `flashalign` command.
 
 ## Limitations
 
-- Long reads only: a read has to carry enough anchors to be collapsed into one or more
-  diagonals.
+- Built for long reads: a read has to carry enough anchors to be collapsed into one or more
+  diagonals. Short reads with enough anchors also work, but without a speed advantage over
+  minimap2.
 - FlashAlign requires SSE4.1 instructions on x86 CPUs or NEON on ARM CPUs. A build without
   them is not provided.
 
