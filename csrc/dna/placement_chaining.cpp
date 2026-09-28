@@ -304,12 +304,15 @@ bool chain_candidate(
   const int chromosome_length =
       static_cast<int>(context.ref.contig_length(candidate.peak.chr));
   const std::int64_t expected = candidate.peak.raw_ref_start;
+  // harvest_below / harvest_above widen the window to the whole-read winner's
+  // per-read line (vote_slope_widen_winner); both are 0 on every other peak.
   const int interval_pad =
       context.opts.cigar_local_interval_anchor_interval_pad;
-  const std::int64_t low64 =
-      std::max<std::int64_t>(0, expected - interval_pad);
+  const std::int64_t low64 = std::max<std::int64_t>(
+      0, expected - candidate.peak.harvest_below - interval_pad);
   const std::int64_t high64 = std::min<std::int64_t>(
-      chromosome_length, expected + family.read_length + interval_pad);
+      chromosome_length, expected + family.read_length +
+                             candidate.peak.harvest_above + interval_pad);
   const std::uint64_t* offsets =
       context.ref.index->chrom_offsets_data();
   if (high64 <= low64 || offsets == nullptr) {

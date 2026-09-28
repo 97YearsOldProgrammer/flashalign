@@ -319,6 +319,9 @@ struct ChainAnchorScratch {
     std::vector<uint32_t> captured_fwd_slots;
     std::vector<KmerPostingView> captured_rc_views;
     std::vector<uint32_t> captured_rc_slots;
+    // Each lane's exact-refine views ([0] forward, [1] reverse), kept for the winner's
+    // line fit after the vote and the reverse prepare have cleared their own copies.
+    std::vector<DnaLongSeedView> slope_refine_views[2];
 
     void clear_for_read() {
         raw.clear();
@@ -332,6 +335,8 @@ struct ChainAnchorScratch {
         captured_fwd_slots.clear();
         captured_rc_views.clear();
         captured_rc_slots.clear();
+        for (int lane = 0; lane < 2; ++lane)
+            slope_refine_views[lane].clear();
     }
 
     template <class T>
@@ -356,6 +361,8 @@ struct ChainAnchorScratch {
         release_vec_if_excessive(captured_fwd_slots, seed_retain);
         release_vec_if_excessive(captured_rc_views, seed_retain);
         release_vec_if_excessive(captured_rc_slots, seed_retain);
+        for (int lane = 0; lane < 2; ++lane)
+            release_vec_if_excessive(slope_refine_views[lane], seed_retain * 2);
         fwd.release_excess_for_read(seed_retain);
         rc.release_excess_for_read(seed_retain);
         shadow_rc.release_excess_for_read(seed_retain);

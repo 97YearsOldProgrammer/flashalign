@@ -318,22 +318,32 @@ bool plan_block_split(const DnaContext& context,
 
 std::vector<chaining::Anchor>
 selected_sibling_path(const DnaPlacementCandidateChain& evidence,
-                      int oriented_begin, int oriented_end) {
+                      int oriented_begin, int oriented_end,
+                      int* sibling = nullptr) {
   std::vector<chaining::Anchor> best;
   std::vector<chaining::Anchor> inside;
+  const std::vector<chaining::Anchor>* chosen = nullptr;
+  if (sibling != nullptr)
+    *sibling = -1;
   for (const std::vector<chaining::Anchor>& path : evidence.sibling_paths) {
     inside.clear();
     for (const chaining::Anchor& anchor : path) {
       if (anchor.q >= oriented_begin && anchor.q_end() <= oriented_end)
         inside.push_back(anchor);
     }
-    if (inside.size() > best.size())
+    if (inside.size() > best.size()) {
       best = inside;
+      chosen = &path;
+    }
   }
   if (best.size() < 2)
     return {};
   deduplicate_exact_anchors(best);
-  return best.size() < 2 ? std::vector<chaining::Anchor>{} : best;
+  if (best.size() < 2)
+    return {};
+  if (sibling != nullptr)
+    *sibling = static_cast<int>(chosen - evidence.sibling_paths.data());
+  return best;
 }
 
 // Plans the block's verified geometry and runs every step: a verified region
@@ -1323,6 +1333,14 @@ bool dna_family_seam_has_duplicate_anchor(
                             right.selected[right_index]);
 }
 
+std::vector<chaining::Anchor>
+dna_selected_sibling_path(const DnaPlacementCandidateChain& evidence,
+                          int oriented_begin, int oriented_end,
+                          int* sibling) {
+  return selected_sibling_path(evidence, oriented_begin, oriented_end,
+                               sibling);
+}
+
 const char* dna_family_failure_name(DnaFamilyFailure failure) noexcept {
   switch (failure) {
   case DnaFamilyFailure::None:
@@ -1385,8 +1403,12 @@ realize_full_cigar_family(const DnaContext& context,
     const std::size_t group_begin = segments.size();
     BlockPlan current = std::move(blocks[index]);
     current.split_group = static_cast<int>(index);
-    const bool trim_left = index == 0;
-    const bool trim_right = index + 1 == blocks.size();
+    // The bad-end trim falls on the read's two ends, never on a seam. The
+    // flags name ends of the oriented path, so a reverse block swaps them.
+    const bool read_start = index == 0;
+    const bool read_end = index + 1 == blocks.size();
+    const bool trim_left = current.reverse ? read_end : read_start;
+    const bool trim_right = current.reverse ? read_start : read_end;
     for (;;) {
       DnaFamilyFailure failure = DnaFamilyFailure::None;
       BlockSplit split;

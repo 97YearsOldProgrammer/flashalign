@@ -20,10 +20,8 @@ namespace lr {
 // absolute anchor and span floors; stable partition blocks need two.
 inline constexpr int kDnaPostCommitRecordMinBlockTiles = 1;
 
-// minimap2's emission floor (mm_filter_regs), CIGAR output only: a record is
-// dropped when its matched bases fall under this or its DP score under
-// cigar_dp_min_dp_max (-s).
-inline constexpr int kDnaEmissionFloorMatchedBases = 40;
+// minimap2's opt->min_chain_score (-m); map-ont and map-hifi keep the default.
+inline constexpr int kDnaMinChainScore = 40;
 
 // The options the DNA stages read, copied from the typed options at the call
 // boundary. Defaults are the shipped settings.
@@ -66,7 +64,7 @@ struct ResolvedDnaOptions {
   // minimap2 opt->zdrop_inv and opt->min_chain_score, for the local-inversion
   // probe (mm_test_zdrop) and the minimum size of an inversion middle.
   int cigar_dp_inversion_zdrop = 200;
-  int cigar_dp_inversion_min_chain_score = 40;
+  int cigar_dp_inversion_min_chain_score = kDnaMinChainScore;
   int cigar_dp_split_min_anchors = 3;  // minimap2 opt->min_cnt
   // minimap2 opt->min_ksw_len: a stretch piece ends once both spans reach it.
   int cigar_dp_min_ksw_len = 200;

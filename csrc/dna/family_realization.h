@@ -73,6 +73,15 @@ bool dna_family_seam_has_duplicate_anchor(
     const ordered_anchor::OrderedAnchorPath& right,
     bool reverse) noexcept;
 
+// The anchors for a block whose oriented query interval [oriented_begin,
+// oriented_end) holds none of the primary's anchors, in realization and in the
+// map-only projection: those of the sibling path with the most anchors inside
+// the interval (the first on ties), deduplicated; empty when fewer than two
+// remain. `sibling` receives that path's index in sibling_paths, or -1.
+std::vector<chaining::Anchor>
+dna_selected_sibling_path(const DnaPlacementCandidateChain& evidence,
+                          int oriented_begin, int oriented_end, int* sibling);
+
 struct DnaFamilyRealizationRequest {
   const DnaPlacementFamily* family = nullptr;
   const DnaPlacementChainingResult* placement = nullptr;

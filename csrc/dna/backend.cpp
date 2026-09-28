@@ -27,6 +27,7 @@
 #include "../seeding/tie_hash.h" // tie_read_seed (the vote's tie-break)
 #include "../seeding/types.h"
 #include "../voting/vote.h"
+#include "../voting/vote_slope.h" // vote_slope_fit_winner (the winner's window)
 
 #include <algorithm>
 #include <tuple>
@@ -954,8 +955,8 @@ DnaChainMapqEvidenceRealizations realize_chain_mapq_evidence(
       sibling.refusal = DnaChainMapqRealizeRefusal::NoSibling;
       return out;
     }
-    const double floor = static_cast<double>(std::max(
-        winner_chain->rival_chain_score, kDnaChainMapqMinChainScore));
+    const double floor = static_cast<double>(
+        std::max(winner_chain->rival_chain_score, kDnaMinChainScore));
     if (floor < kDnaChainMapqSiblingRealizeMin *
                     static_cast<double>(winner_chain->chain_score)) {
       sibling.refusal = DnaChainMapqRealizeRefusal::WeakSibling;
@@ -1108,7 +1109,7 @@ DnaChainMapqEvidenceRealizations realize_chain_mapq_evidence(
 // under min_chain_score or DP score under min_dp_max (-s). min_dp_max <= 0
 // disables the DP half.
 bool clears_dna_emission_floor(const AlignResult& record, int min_dp_max) {
-  if (record.matches < kDnaEmissionFloorMatchedBases)
+  if (record.matches < kDnaMinChainScore)
     return false;
   return min_dp_max <= 0 || record.score >= min_dp_max;
 }
@@ -1181,6 +1182,194 @@ void apply_dna_emission_floor(int min_dp_max, dna::Result& realized) {
   realized.supplementary.clear();
   realized.supplementary_candidates.clear();
   realized.secondary.clear();
+}
+
+// Map-only's floor. minimap2 keeps no chain under min_chain_score
+// (mm_chain_dp) and does not test again what it splits off one
+// (mm_split_reg), so a block record is judged by the whole-query chain its
+// MAPQ is scored on, which a sibling slice prints only a share of. A record
+// the MAPQ scores on no chain (a terminal clip, a secondary) is judged by its
+// AS. The others print as before: a failing head gives its place to the next
+// record. `owners`, when given, is parallel to `rest`. Returns false when no
+// record is left.
+bool keep_dna_min_chain_score(
+    AlignResult& head, int head_chain_score, std::vector<AlignResult>& rest,
+    std::vector<::fa::cpu::voting::CandidateId>* owners,
+    const DnaPlacementChainingResult* placement) {
+  std::size_t kept = 0;
+  for (std::size_t index = 0; index < rest.size(); ++index) {
+    const DnaPlacementCandidateChain* chain =
+        owners != nullptr && placement != nullptr &&
+                (*owners)[index] != ::fa::cpu::voting::kNullCandidate
+            ? placement->find((*owners)[index])
+            : nullptr;
+    if ((chain != nullptr ? chain->chain_score : rest[index].score) <
+        kDnaMinChainScore)
+      continue;
+    if (kept != index) {
+      rest[kept] = std::move(rest[index]);
+      if (owners != nullptr)
+        (*owners)[kept] = (*owners)[index];
+    }
+    ++kept;
+  }
+  rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(kept), rest.end());
+  if (owners != nullptr)
+    owners->resize(kept);
+  if (head_chain_score >= kDnaMinChainScore)
+    return true;
+  if (rest.empty())
+    return false;
+  // `rest` aliases head.supplementary: move everything out first.
+  std::vector<AlignResult> survivors = std::move(rest);
+  std::vector<AlignResult> secondaries = std::move(head.secondary);
+  AlignResult next = std::move(survivors.front());
+  survivors.erase(survivors.begin());
+  if (owners != nullptr)
+    owners->erase(owners->begin());
+  // Read-level fields carry over; the record keeps its own MAPQ.
+  next.read_len = head.read_len;
+  next.median_occurrence = head.median_occurrence;
+  head = std::move(next);
+  head.supplementary = std::move(survivors);
+  head.secondary = std::move(secondaries);
+  return true;
+}
+
+// Applies it to a read, whose head the MAPQ scores on `winner_chain`. Only a
+// read left with no record is unmapped.
+void apply_dna_min_chain_score(const DnaPlacementCandidateChain* winner_chain,
+                               const DnaPlacementChainingResult* placement,
+                               dna::Result& realized) {
+  for (std::vector<AlignResult>::iterator it = realized.secondary.begin();
+       it != realized.secondary.end();) {
+    if (keep_dna_min_chain_score(*it, it->score, it->supplementary, nullptr,
+                                 nullptr))
+      ++it;
+    else
+      it = realized.secondary.erase(it);
+  }
+  if (keep_dna_min_chain_score(
+          static_cast<AlignResult&>(realized),
+          winner_chain != nullptr ? winner_chain->chain_score : realized.score,
+          realized.supplementary, &realized.supplementary_candidates,
+          placement))
+    return;
+  demote_unmapped(realized);
+  realized.supplementary.clear();
+  realized.supplementary_candidates.clear();
+  realized.secondary.clear();
+}
+
+// The whole-read winner: the best peak of fwd, then rc, by
+// chain_peak_better_seeded under the read's tie seed, the first on an exact
+// tie. It is catalogue candidate 0.
+VotePeak* vote_slope_best_peak(std::vector<VotePeak>& fwd,
+                               std::vector<VotePeak>& rc,
+                               std::uint32_t tie_seed) {
+  VotePeak* best = nullptr;
+  for (std::vector<VotePeak>* lane : {&fwd, &rc})
+    for (VotePeak& peak : *lane)
+      if (best == nullptr || chain_peak_better_seeded(peak, *best, tie_seed))
+        best = &peak;
+  return best;
+}
+
+// Widens the winner's harvest window to its per-read line (vote_slope.h),
+// fitted on the seeds its lane's exact refine walked. When the fit passes its
+// gate, every chain pass harvests the winner over
+// [min(raw, a) - pad, max(raw + L, a + L + stretch(L, b)) + pad]. Nothing else
+// about the winner changes, and every other peak keeps the plain window.
+void vote_slope_widen_winner(const LongReadSeedContext& seed_ctx,
+                             std::uint32_t tie_seed, int span,
+                             const ChainAnchorScratch& scratch,
+                             std::vector<VotePeak>& fwd,
+                             std::vector<VotePeak>& rc) {
+  VotePeak* winner = vote_slope_best_peak(fwd, rc, tie_seed);
+  if (winner == nullptr)
+    return;
+  const int lane = winner->is_rc ? 1 : 0;
+  const std::uint64_t* chr_bounds = seed_ctx.index->chrom_offsets_data();
+  std::vector<VoteSlopePair> pairs;
+  std::vector<std::int64_t> residuals;
+  const std::vector<DnaLongSeedView>& refine = scratch.slope_refine_views[lane];
+  const VoteSlopeFit fit =
+      !refine.empty()
+          ? vote_slope_fit_winner(refine, chr_bounds, *winner, span, pairs,
+                                  residuals)
+          : vote_slope_fit_winner(
+                (lane ? scratch.rc : scratch.fwd).retained_seeds, chr_bounds,
+                *winner, span, pairs, residuals);
+  if (!fit.gate)
+    return;
+  // b1_q20 is clamped to [-6 %, +10 %], well inside int32.
+  const std::int64_t line_end =
+      fit.a + vote_slope_stretch(span, static_cast<std::int32_t>(fit.b1_q20));
+  winner->harvest_below = static_cast<std::int32_t>(
+      std::max<std::int64_t>(0, winner->raw_ref_start - fit.a));
+  winner->harvest_above = static_cast<std::int32_t>(
+      std::max<std::int64_t>(0, line_end - winner->raw_ref_start));
+}
+
+// Map-only's alternative commit. The retained alternative, projected as the
+// incumbent is, is promoted when its exact whole-query chain is strictly above
+// the committed owner's, through the -c lane's
+// commit_dna_alternative_hypothesis; otherwise it is the incumbent's MAPQ-0
+// secondary.
+struct DnaMapOnlyCommit {
+  dna::Result primary;
+  ::fa::cpu::voting::CandidateId primary_candidate =
+      ::fa::cpu::voting::kNullCandidate;
+  bool promoted = false;
+  // The promoted record's pieces, for the map-only join.
+  std::vector<DnaJoinPiece> pieces;
+};
+
+// `incumbent` is mapped and projected from `placement`.
+DnaMapOnlyCommit commit_map_only_hypothesis(
+    const DnaContext& dctx, const DnaPlacementChainingResult& placement,
+    const DnaPlacementChainingResult& alternative_chaining,
+    dna::Result incumbent,
+    ::fa::cpu::voting::CandidateId incumbent_candidate) {
+  DnaMapOnlyCommit out;
+  out.primary_candidate = incumbent_candidate;
+  if (alternative_chaining.accepted && alternative_chaining.family.valid &&
+      alternative_chaining.family.original_candidate_id) {
+    DnaFamilyProjectionResult projection =
+        project_map_only_placement_family(dctx, alternative_chaining,
+                                          incumbent);
+    if (projection.committed && projection.output.mapped() &&
+        projection.output.supplementary.empty()) {
+      std::vector<DnaJoinPiece> pieces = std::move(projection.pieces);
+      dna::Result alternative =
+          settle_map_only_projection(std::move(projection));
+      const DnaPlacementCandidateChain* incumbent_chain =
+          placement.find(incumbent_candidate);
+      const int incumbent_score =
+          incumbent_chain != nullptr ? incumbent_chain->chain_score : 0;
+      // The restricted family's only candidate has solver id 0.
+      const DnaPlacementCandidateChain* alternative_chain =
+          alternative_chaining.find(0);
+      if (alternative_chain != nullptr &&
+          alternative_chain->chain_score > incumbent_score) {
+        DnaAlternativeCommit committed = commit_dna_alternative_hypothesis(
+            std::move(incumbent), incumbent_candidate, incumbent_score,
+            std::move(alternative),
+            *alternative_chaining.family.original_candidate_id,
+            alternative_chain->chain_score);
+        out.primary = std::move(committed.primary);
+        out.primary_candidate = committed.primary_candidate;
+        out.promoted = committed.promoted;
+        out.pieces = std::move(pieces);
+        return out;
+      }
+      zero_hypothesis_mapq(alternative);
+      incumbent.secondary.push_back(
+          static_cast<AlignResult&&>(std::move(alternative)));
+    }
+  }
+  out.primary = std::move(incumbent);
+  return out;
 }
 
 } // namespace
@@ -1301,6 +1490,9 @@ AlignResult map_read(const DnaContext& base_dctx,
     scratch.fwd.pending_exact_refine_views =
         fwd_exact_refine_views ? *fwd_exact_refine_views
                                : std::vector<DnaLongSeedView>{};
+    // Kept for vote_slope_widen_winner: the reverse prepare below clears the
+    // bundle these views live in.
+    scratch.slope_refine_views[0] = scratch.fwd.pending_exact_refine_views;
     WindowAnchorPeakParams fwd_peak_params;
     fwd_peak_params.lookup_cache = lookup_cache;
     fwd_peak_params.seed_view_override = fwd_seed_views;
@@ -1324,12 +1516,16 @@ AlignResult map_read(const DnaContext& base_dctx,
     scratch.rc.pending_exact_refine_views =
         rc_exact_refine_views ? *rc_exact_refine_views
                               : std::vector<DnaLongSeedView>{};
+    scratch.slope_refine_views[1] = scratch.rc.pending_exact_refine_views;
     WindowAnchorPeakParams rc_peak_params;
     rc_peak_params.lookup_cache = lookup_cache;
     rc_peak_params.seed_view_override = rc_seed_views;
     rc_peak_params.tie_seed = dctx.vote_tie_seed;
     auto rc = window_anchor_peaks(seed_ctx, nullptr, span, /*is_rc=*/true,
                                   scratch.rc, rc_peak_params);
+    // The winner's harvest window, widened to its line.
+    vote_slope_widen_winner(seed_ctx, dctx.vote_tie_seed, span, scratch, fwd,
+                            rc);
     raw.insert(raw.end(), fwd.begin(), fwd.end());
     raw.insert(raw.end(), rc.begin(), rc.end());
   }
@@ -1545,6 +1741,7 @@ AlignResult map_read(const DnaContext& base_dctx,
     realized.pos = 0;
     realized.score = std::max(0, chain.front().support);
   }
+  std::vector<DnaJoinPiece> join_pieces;
   if (realized.mapped()) {
     if (!dctx.opts.enable_full_read_cigar) {
       // Placement chaining always ran here: a best peak exists past the
@@ -1553,33 +1750,26 @@ AlignResult map_read(const DnaContext& base_dctx,
       DnaFamilyProjectionResult projection =
           project_map_only_placement_family(dctx, placement_chaining, realized);
       primary_candidate = projection.primary_candidate;
+      join_pieces = std::move(projection.pieces);
       realized = settle_map_only_projection(std::move(projection));
-      if (realized.mapped() && alternative_chaining.accepted &&
-          alternative_chaining.family.valid &&
-          alternative_chaining.family.original_candidate_id) {
-        DnaFamilyProjectionResult alternative_projection =
-            project_map_only_placement_family(dctx, alternative_chaining,
-                                              realized);
-        if (alternative_projection.committed &&
-            alternative_projection.output.mapped() &&
-            alternative_projection.output.supplementary.empty()) {
-          dna::Result alternative =
-              settle_map_only_projection(std::move(alternative_projection));
-          zero_hypothesis_mapq(alternative);
-          realized.secondary.push_back(
-              static_cast<AlignResult&&>(std::move(alternative)));
+      if (realized.mapped()) {
+        const ::fa::cpu::voting::CandidateId incumbent_candidate =
+            primary_candidate;
+        DnaMapOnlyCommit committed = commit_map_only_hypothesis(
+            dctx, placement_chaining, alternative_chaining,
+            std::move(realized), incumbent_candidate);
+        realized = std::move(committed.primary);
+        primary_candidate = committed.primary_candidate;
+        if (committed.promoted) {
+          // As after the -c lane's promotion: the promoted hypothesis owns
+          // the winner chain and the demoted incumbent is the dp2 owner.
+          alternative_promoted = true;
+          join_pieces = std::move(committed.pieces);
+          chain_mapq_dp2_owner = incumbent_candidate;
         }
       }
     }
     if (realized.mapped()) {
-      // Confidence belongs to the committed hypothesis. Both output modes
-      // reach this point, so MAPQ cannot affect placement, realization or
-      // record-family decisions.
-      const DnaPlacementCandidateChain* winner_chain =
-          dna_committed_winner_chain(
-              placement_chaining_ran ? &placement_chaining : nullptr,
-              alternative_promoted ? &alternative_chaining : nullptr,
-              primary_candidate, alternative_promoted);
       // The selected record family is now committed. Terminal-clip records are
       // appended before MAPQ routing so they inherit read-level confidence
       // without entering selection.
@@ -1596,6 +1786,20 @@ AlignResult map_read(const DnaContext& base_dctx,
                                        dctx.opts.enable_full_read_cigar,
                                        realized);
       }
+      // Map-only joins the block records the -c lane would bridge, so the
+      // MAPQ below scores a joined record on its owner's chain.
+      if (!dctx.opts.enable_full_read_cigar)
+        dna_join_map_only_family(dctx, placement_chaining,
+                                 std::move(join_pieces), realized,
+                                 primary_candidate);
+      // Confidence belongs to the committed hypothesis. Both output modes
+      // reach this point, so MAPQ cannot affect placement, realization or
+      // record-family decisions.
+      const DnaPlacementCandidateChain* winner_chain =
+          dna_committed_winner_chain(
+              placement_chaining_ran ? &placement_chaining : nullptr,
+              alternative_promoted ? &alternative_chaining : nullptr,
+              primary_candidate, alternative_promoted);
       // The pre-extension family stands in for the MAPQ stage and its
       // routing (see exchange_alignment_fields). Terminal-clip recovery above
       // has already run on the extended family.
@@ -1825,9 +2029,9 @@ AlignResult map_read(const DnaContext& base_dctx,
       remove_mapq_stand_in(demoted, stand_in_slots, realized);
     }
   }
-  // The emitted family is final here. Two demotions follow, CIGAR output
-  // only: map-only records carry projection scores and approximate match
-  // counts, which a score floor must not read.
+  // The emitted family is final here, MAPQ included. Two demotions follow on
+  // CIGAR output, and one on map-only, whose records carry chain scores and
+  // approximate match counts that the CIGAR floor must not read.
   //
   // (1) A mapped primary with an empty CIGAR is a realization refusal. Emit
   // it unmapped, as minimap2 does for a read it cannot align, rather than as
@@ -1844,6 +2048,17 @@ AlignResult map_read(const DnaContext& base_dctx,
   // nothing becomes unmapped.
   if (dctx.opts.enable_full_read_cigar && realized.mapped()) {
     apply_dna_emission_floor(dctx.opts.cigar_dp_min_dp_max, realized);
+  }
+  // (3) Map-only: no record under min_chain_score, judged on the chains the
+  // MAPQ reads (apply_dna_min_chain_score).
+  if (!dctx.opts.enable_full_read_cigar && realized.mapped()) {
+    const DnaPlacementChainingResult* placement =
+        placement_chaining_ran ? &placement_chaining : nullptr;
+    apply_dna_min_chain_score(
+        dna_committed_winner_chain(
+            placement, alternative_promoted ? &alternative_chaining : nullptr,
+            primary_candidate, alternative_promoted),
+        placement, realized);
   }
   // ms:i: the max-scoring segment of each emitted record's CIGAR. Stamped
   // after the floor, which can erase records, promote a supplementary or

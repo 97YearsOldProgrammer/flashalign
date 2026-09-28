@@ -64,6 +64,11 @@ struct VotePeak {
   int center_support = 0;
   int vote_score = 0;
   LongWindowAnchor anchor;
+  // How much further the chain's harvest window reaches below raw_ref_start - pad and
+  // above raw_ref_start + L + pad, to cover the whole-read winner's per-read line
+  // (vote_slope.h). Nonzero only on that winner, when its line passes the gate.
+  std::int32_t harvest_below = 0;
+  std::int32_t harvest_above = 0;
   // Median reference-start diagonal before whole-read projection clamps it to
   // chromosome bounds. Coarse block projection must not inherit that clamp.
   int64_t raw_ref_start = 0;
@@ -75,6 +80,19 @@ struct VotePeak {
 };
 
 static_assert(std::is_trivially_copyable_v<VotePeak>);
+
+// The per-read line's stretch over q query bases, floor(q * b_q20 / 2^20) for a slope
+// carried as b_q20 = round(b 2^20). Integer only, so no target's float contraction can
+// move a window edge; both factors are 32-bit, so the product fits int64.
+inline constexpr int kVoteSlopeFractionBits = 20;
+inline int vote_slope_stretch(int q, std::int32_t b_q20) {
+  const std::int64_t product = static_cast<std::int64_t>(q) * b_q20;
+  const std::int64_t one = std::int64_t{1} << kVoteSlopeFractionBits;
+  std::int64_t quotient = product / one;
+  if (product % one != 0 && product < 0)
+    --quotient;
+  return static_cast<int>(quotient);
+}
 
 inline bool chain_peak_better(const VotePeak &a, const VotePeak &b) {
   if (a.vote_score != b.vote_score)

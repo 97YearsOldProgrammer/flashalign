@@ -298,7 +298,8 @@ diagonal of the DP matrix (diagonal X-drop, or Z-drop) [400].
 Minimal peak DP alignment score to output [80]. Under a DNA preset an
 alignment also needs at least 40 matching bases; a value of 0 or less turns off
 the score test, not the base count. Plain PAF output, which has no DP, is not
-filtered.
+filtered by this score; under a DNA preset it prints no record whose chaining
+score is below 40.
 .TP
 .BI \-\-score\-N \ INT
 Penalty of a mismatch involving ambiguous bases [1].

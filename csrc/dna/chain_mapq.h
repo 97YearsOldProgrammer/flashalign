@@ -80,14 +80,15 @@
 #error "flashalign_rna may not include DNA chain MAPQ"
 #endif
 
+#include "context.h" // kDnaMinChainScore
+
 #include <cstdint>
 #include <vector>
 
 namespace fa::cpu::lr {
 
 // minimap2 constants.
-inline constexpr double kDnaChainMapqCoef = 40.0;     // q_coef
-inline constexpr int kDnaChainMapqMinChainScore = 40; // opt->min_chain_score
+inline constexpr double kDnaChainMapqCoef = 40.0; // q_coef
 // minimap2's mask_level: a rival overlapping the committed hypothesis over
 // more than half the shorter query span competes with it; less overlap means
 // another segment of the same read.
@@ -146,7 +147,7 @@ inline constexpr int kDnaChainMapqChainShadowFraction = 5;
 inline constexpr int kDnaChainMapqPeakShadowFloorBp = 2000;
 inline constexpr int kDnaChainMapqPeakShadowFraction = 10;
 // The winner's sibling chain is realized only when
-// max(sib_f2, kDnaChainMapqMinChainScore) / f1 reaches this; below it the
+// max(sib_f2, kDnaMinChainScore) / f1 reaches this; below it the
 // ratio form is flat and the DP would change nothing.
 inline constexpr double kDnaChainMapqSiblingRealizeMin = 0.5;
 // At most this many block-rival realizations per read, blocks taken by query

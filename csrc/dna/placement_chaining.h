@@ -36,13 +36,15 @@ struct DnaPlacementCandidateChain {
   ::fa::cpu::voting::QueryTileMask sparse_support;
   ::fa::cpu::voting::QueryTileMask dense_support;
   std::vector<chaining::Anchor> primary;
-  // Sibling paths from the same exact DP. Realization may use one when the
-  // primary path has no anchors in a selected block.
+  // Sibling paths from the same exact DP. Realization and the map-only
+  // projection may use one when the primary path has no anchors in a selected
+  // block (dna_selected_sibling_path).
   std::vector<std::vector<chaining::Anchor>> sibling_paths;
   // Parallel to sibling_paths: each sibling's chain score. rival_sibling is
   // the index of the sibling rival_chain_score came from
   // (ChainPartition::f2_index), or -1 when there is none or it was not
-  // materialized. Whole-query passes only; read by dna_sibling_rival_chain.
+  // materialized. Whole-query passes only; read by dna_sibling_rival_chain,
+  // and by the map-only projection for a record projected from a sibling.
   std::vector<int> sibling_scores;
   int rival_sibling = -1;
   DnaPlacementChainStatus status = DnaPlacementChainStatus::NotSelected;

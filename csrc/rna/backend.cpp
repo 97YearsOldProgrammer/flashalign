@@ -1,12 +1,14 @@
 // RnaBackend::map_read: vote capture, exon peaks, the coarse locus catalogue and the
-// rank-1 exact anchor path, then either map-only projection with the chain MAPQ or splice
-// realization with the rival lifecycle and the query partition's second families.
+// rank-1 exact anchor path, then either the map-only election and projection with the
+// chain MAPQ or splice realization with the rival lifecycle and the query partition's
+// second families.
 #include "backend.h"
 
 #include "result.h"
 #include "output.h"
 #include "chain_mapq.h"
 #include "rival_pricing.h" // segment-0 and overlap prices of a realization
+#include "plain_elect.h"   // the map-only lane's catalogue election
 #include "../core/sequence.h"                   // reverse_complement_encoded_u8
 #include "../index/seed.h" // ClosedSyncmerConfig / extract_closed_syncmer_query_seeds_into
 #include "../core/checked_range.h" // signed RNA coordinate/count domain
@@ -729,8 +731,8 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
       chain_evidence.winner_q_begin = selected_path_summary.first_query_begin;
       chain_evidence.winner_q_end = selected_path_summary.last_query_end;
       chain_evidence.rank1_score = selected_locus->rank_score;
-      // The disjoint-vote floor's numerator, from the catalogue. Map-only output never
-      // adopts a rival, so the demoted locus is always catalogue rank 2.
+      // The disjoint-vote floor's numerator, from the catalogue: rank 2's vote, or
+      // rank 1's when the election below adopts a rival.
       chain_evidence.rank2_score = catalogue_rank2_score;
       chain_evidence.read_len = read_len;
       // `selected_reverse` is already the post-repair strand; never XOR'd again.
@@ -743,17 +745,108 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
       std::vector<ProductionRival> production_rivals;
       chain_production_rivals(chain_evidence, production_rivals,
                               /*committed_index=*/0, committed_geometry_ptr);
+      // The election (plain_elect.h): the incumbent and every chained rival are scored,
+      // and the best eligible rival takes the primary when it scores strictly higher; a
+      // tie between rivals goes to the lower catalogue index. An adoption swaps the roles
+      // as the CIGAR lane's lifecycle does: the elected chain owns the MAPQ evidence and
+      // the record, the demoted incumbent joins the rivals in catalogue order, rs2 is
+      // rank 1's vote, and every shadow verdict is re-read against the elected chain.
+      const rna::placement::CoarseLocus* committed_locus = selected_locus;
+      const rna::ExactAnchorPathSummary* committed_summary =
+          &selected_path_summary;
+      std::uint64_t committed_qcov = selected_query_covered_bases;
+      {
+        const std::int64_t incumbent_score =
+            rna::rna_plain_elect_score(anchor_path, min_intron);
+        const std::size_t rivals = production_rivals.size();
+        std::vector<std::int64_t> rival_scores(rivals, 0);
+        std::vector<std::uint64_t> rival_qcov(rivals, 0);
+        std::optional<std::size_t> elected;
+        for (std::size_t i = 0; i < rivals; ++i) {
+          const ProductionRival& entry = production_rivals[i];
+          if (!entry.rival.chained)
+            continue;
+          const int qspan = entry.rival.q_end - entry.rival.q_begin;
+          rival_scores[i] =
+              rna::rna_plain_elect_score(entry.chained_path, min_intron);
+          // Eligible on the incumbent's terms: an anchor union the record can report,
+          // and on a second-pass catalogue the rescue floor.
+          const bool eligible =
+              rna::anchor_union_query_coverage(entry.chained_path,
+                                               rival_qcov[i]) &&
+              (coarse_pass != 2 || qspan >= rna::kRnaChimeraMinQueryBases);
+          if (eligible &&
+              (!elected || rival_scores[i] > rival_scores[*elected]))
+            elected = i;
+        }
+        if (elected && rival_scores[*elected] > incumbent_score) {
+          const ProductionRival& winner = production_rivals[*elected];
+          committed_locus = &winner.locus;
+          committed_summary = &winner.summary;
+          committed_qcov = rival_qcov[*elected];
+          chain_evidence.f1 = winner.rival.chain_score;
+          chain_evidence.cnt = winner.rival.chain_anchors;
+          chain_evidence.sib_f2 = winner.siblings.sib_score;
+          chain_evidence.winner_q_begin = winner.rival.q_begin;
+          chain_evidence.winner_q_end = winner.rival.q_end;
+          chain_evidence.rank1_score = winner.locus.rank_score;
+          chain_evidence.rank2_score = catalogue_rank1_score;
+          chain_evidence.winner_reverse = winner.rival.reverse;
+          chain_evidence.selected_query_covered_bases = committed_qcov;
+          // The shadow rule's geometry, as chain_one_rival builds it.
+          const auto chain_geometry = [&](const ProductionRival& entry) {
+            rna::RnaSegmentGeometry geometry;
+            geometry.reference_id = entry.reference_id;
+            geometry.reverse = entry.rival.reverse;
+            geometry.reference_begin = static_cast<std::uint64_t>(
+                std::max(0, entry.summary.first_reference_begin));
+            geometry.reference_end = static_cast<std::uint64_t>(
+                std::max(0, entry.summary.last_reference_end));
+            geometry.forward_span = rna::rna_forward_query_span(
+                entry.rival.q_begin, entry.rival.q_end, entry.rival.reverse,
+                read_len);
+            return geometry;
+          };
+          const rna::RnaSegmentGeometry winner_geometry =
+              chain_geometry(winner);
+          chain_evidence.rivals.clear();
+          rna::RnaChainMapqRival demoted;
+          demoted.candidate = 0;
+          demoted.chained = true;
+          demoted.chain_score = anchor_path.anchor_path_score;
+          demoted.chain_anchors =
+              static_cast<int>(anchor_path.anchor_path_anchor_count);
+          demoted.q_begin = selected_path_summary.first_query_begin;
+          demoted.q_end = selected_path_summary.last_query_end;
+          demoted.rank_score = selected_locus->rank_score;
+          demoted.reverse = selected_reverse;
+          // committed_geometry is still the incumbent's chain.
+          demoted.shadow = rna::rna_same_place(winner_geometry,
+                                               committed_geometry, max_intron);
+          chain_evidence.rivals.push_back(demoted);
+          for (std::size_t i = 0; i < rivals; ++i) {
+            if (i == *elected)
+              continue;
+            rna::RnaChainMapqRival rival = production_rivals[i].rival;
+            rival.shadow =
+                rival.chained &&
+                rna::rna_same_place(winner_geometry,
+                                    chain_geometry(production_rivals[i]),
+                                    max_intron);
+            chain_evidence.rivals.push_back(rival);
+          }
+        }
+      }
       // The breakdown is a pure out-parameter; its f2 is the s2:i tag.
       rna::RnaChainMapqBreakdown plain_breakdown;
       const int chain_mapq =
           rna::rna_chain_mapq(chain_evidence, &plain_breakdown);
       if (!rna::placement::project_fine_path_placement(
-              *selected_locus, selected_path_summary.first_reference_begin,
-              selected_path_summary.last_reference_end,
-              selected_path_summary.first_query_begin,
-              selected_path_summary.last_query_end,
-              selected_query_covered_bases, chain_mapq, read_len,
-              reference_count, *rctx.ref.names, out)) {
+              *committed_locus, committed_summary->first_reference_begin,
+              committed_summary->last_reference_end,
+              committed_summary->first_query_begin,
+              committed_summary->last_query_end, committed_qcov, chain_mapq,
+              read_len, reference_count, *rctx.ref.names, out)) {
         continue;
       }
       // s2:i: the best competing chain score the formula weighed, seeded with the
@@ -804,8 +897,9 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
   rna::RnaSpliceRealizationResult realized =
       rna::realize_exact_anchor_path(request, anchor_path);
 
-  // CIGAR-only arbitration over the bounded catalogue's rivals. The incumbent family is
-  // kept unless the election adopts a rival; ties and failures keep the incumbent.
+  // The CIGAR lane's arbitration over the bounded catalogue's rivals. The incumbent
+  // family is kept unless the election adopts a rival; ties and failures keep the
+  // incumbent.
   const rna::placement::CoarseLocus* committed_locus = selected_locus;
   const rna::ExactAnchorPath* committed_path = &anchor_path;
   const rna::ExactAnchorPathSummary* committed_path_summary =

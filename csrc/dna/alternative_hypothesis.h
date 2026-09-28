@@ -83,9 +83,10 @@ struct DnaAlternativeCommit {
   bool promoted = false;
 };
 
-// CIGAR output: the higher decision score becomes primary (a tie keeps the
-// incumbent) and the other is kept as a secondary with MAPQ 0. Each record's
-// emitted score stays the score of its own CIGAR.
+// The higher decision score becomes primary (a tie keeps the incumbent) and
+// the other is kept as a secondary with MAPQ 0. The decision scores are the DP
+// scores under CIGAR output and the exact whole-query chain scores in map-only.
+// Each record keeps its own emitted score.
 DnaAlternativeCommit commit_dna_alternative_hypothesis(
     dna::Result incumbent,
     ::fa::cpu::voting::CandidateId incumbent_candidate,
