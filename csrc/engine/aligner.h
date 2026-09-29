@@ -703,6 +703,16 @@ private:
     dctx.opts.cigar_dp_mismatch = mapping.cigar_dp_mismatch;
     dctx.opts.cigar_dp_tail_end_bonus = mapping.cigar_dp_tail_end_bonus;
     dctx.opts.cigar_dp_tail_zdrop = mapping.cigar_dp_tail_zdrop;
+    dctx.opts.fill_dp_match = mapping.fill_dp_match;
+    dctx.opts.fill_dp_mismatch = mapping.fill_dp_mismatch;
+    dctx.opts.fill_dp_ambi = mapping.fill_dp_ambi;
+    dctx.opts.fill_dp_gap_open1 = mapping.fill_dp_gap_open1;
+    dctx.opts.fill_dp_gap_extend1 = mapping.fill_dp_gap_extend1;
+    dctx.opts.fill_dp_gap_open2 = mapping.fill_dp_gap_open2;
+    dctx.opts.fill_dp_gap_extend2 = mapping.fill_dp_gap_extend2;
+    dctx.opts.fill_dp_tail_zdrop = mapping.fill_dp_tail_zdrop;
+    dctx.opts.fill_dp_inversion_zdrop = mapping.fill_dp_inversion_zdrop;
+    dctx.opts.fill_dp_min_dp_max = mapping.fill_dp_min_dp_max;
     dctx.opts.enable_full_read_cigar =
         cfg_.common.enable_full_read_cigar;
     dctx.opts.cigar_replay_request = cigar_replay_request_for(cfg_.common);

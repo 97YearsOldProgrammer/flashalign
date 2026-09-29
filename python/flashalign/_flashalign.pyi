@@ -175,6 +175,10 @@ class Config:
     def dp_zdrop(self, arg: int, /) -> None: ...
 
     @property
+    def dp_zdrop_inv(self) -> int:
+        """Inversion Z-drop, the second -z value; read only. -1 = dp_zdrop."""
+
+    @property
     def dp_end_bonus(self) -> int:
         """Alignment end bonus [--end-bonus]. -2 = preset-owned."""
 

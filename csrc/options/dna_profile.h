@@ -128,8 +128,23 @@ struct DnaLongOptions {
   // minimap2 -s: the DP half of the DNA per-record emission floor
   // (mm_filter_regs) and the inversion-segment gate. 0 disables.
   int cigar_dp_min_dp_max = 80;
-  // minimap2's zdrop_inv and min_chain_score defaults; not settable.
+  // minimap2's zdrop_inv; on a DNA preset the end row's, fixed.
   int cigar_dp_inversion_zdrop = 200;
+  // DNA presets: the gap-fill row, which -A -B -O -E -z --score-N set; the
+  // cigar_dp_* row above is then the preset's end row, which prices every
+  // path. fill_dp_min_dp_max is -S scaled by fill_dp_match / cigar_dp_match.
+  // Defaults are lr's.
+  int fill_dp_match = 4;
+  int fill_dp_mismatch = 8;
+  int fill_dp_ambi = 2;
+  int fill_dp_gap_open1 = 8;
+  int fill_dp_gap_extend1 = 4;
+  int fill_dp_gap_open2 = 48;
+  int fill_dp_gap_extend2 = 1;
+  int fill_dp_tail_zdrop = 800;
+  int fill_dp_inversion_zdrop = 200;
+  int fill_dp_min_dp_max = 160;
+  // minimap2's min_chain_score default; not settable.
   int cigar_dp_inversion_min_chain_score = 40;
   // As minimap2, a Z-dropped region is split and continues while at least
   // this many anchors remain.

@@ -398,14 +398,18 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 opt.dp_gap_extend2 = p.second;
                 break;
             }
-            case OptionId::DpZdrop:
-                // minimap2's pair form is refused: there is no inversion Z-drop.
-                if (val.find(',') != std::string::npos) {
-                    throw UsageError(
-                        "-z takes a single Z-drop score, not a pair");
-                }
-                opt.dp_zdrop = parse_int(val, arg);
+            case OptionId::DpZdrop: {
+                // The second value is the inversion Z-drop; a lone value sets
+                // it too, as in minimap2 (options/resolve.cpp).
+                const auto comma = val.find(',');
+                opt.dp_zdrop = parse_int(
+                    comma == std::string::npos ? val : val.substr(0, comma), arg);
+                if (comma != std::string::npos)
+                    opt.dp_zdrop_inv = parse_int(val.substr(comma + 1), arg);
+                else
+                    opt.dp_zdrop_inv.reset();
                 break;
+            }
             case OptionId::DpScoreN:   opt.dp_score_n = parse_int(val, arg); break;
             case OptionId::DpEndBonus: opt.dp_end_bonus = parse_int(val, arg); break;
             case OptionId::DpMinScore: opt.dp_min_score = parse_int(val, arg); break;

@@ -109,6 +109,7 @@ struct AlignOptions {
     std::optional<int> dp_gap_extend1; // -E (1st)    -> cigar_dp_gap_extend1_
     std::optional<int> dp_gap_extend2; // -E (2nd)    -> cigar_dp_gap_extend2_
     std::optional<int> dp_zdrop;       // -z (1st)    -> cigar_dp_tail_zdrop_
+    std::optional<int> dp_zdrop_inv;   // -z (2nd)    -> cigar_dp_inversion_zdrop_
     std::optional<int> dp_end_bonus;   // --end-bonus -> cigar_dp_tail_end_bonus_
     std::optional<int> dp_min_score;   // -S (mm2 -s) -> cigar_dp_min_dp_max_
     // DP bandwidths. A single -r value leaves the long-join bandwidth unset.

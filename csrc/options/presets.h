@@ -42,6 +42,17 @@ struct DnaPresetProfile {
   int cigar_dp_bw_long;
   int cigar_dp_max_gap;
   int cigar_dp_min_dp_max;
+  // The gap-fill row -A -B -O -E -z --score-N set; the cigar_dp_* row above
+  // is the end row, which prices every path.
+  int fill_dp_match;
+  int fill_dp_mismatch;
+  int fill_dp_ambi;
+  int fill_dp_gap_open1;
+  int fill_dp_gap_extend1;
+  int fill_dp_gap_open2;
+  int fill_dp_gap_extend2;
+  int fill_dp_tail_zdrop;
+  int fill_dp_inversion_zdrop;
   int cli_chain_max_gap;
   // Residue recovery does not run below this many chain anchors.
   int residue_recovery_anchor_floor;
@@ -50,14 +61,18 @@ struct DnaPresetProfile {
 };
 
 inline constexpr std::array<DnaPresetProfile, 2> kDnaPresetProfiles{{
-    // Scoring as minimap2: lr is map-ont (-A2 -B4 -O4,24 -E2,1), lr:hq is
-    // map-hifi (-A1 -B4 -O6,26 -E2,1).
+    // End row as minimap2: lr is map-ont (-A2 -B4 -O4,24 -E2,1), lr:hq is
+    // map-hifi (-A1 -B4 -O6,26 -E2,1). The fill rows are gentler on gaps.
     {"lr", DnaPresetKind::Ont, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
-     5000, 80, 20000, 800, 200, 9},
+     5000, 80,
+     4, 8, 2, 8, 4, 48, 1, 800, 200,
+     20000, 800, 200, 9},
     {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048, {4, 12, 0, 1, 2},
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
-     10000, 200, 10000, 1600, 100, 9},
+     10000, 200,
+     3, 12, 3, 18, 6, 78, 1, 1200, 600,
+     10000, 1600, 100, 9},
 }};
 
 inline const DnaPresetProfile* find_dna_preset_profile(
@@ -120,6 +135,15 @@ inline void set_dna_long_platform_fields(
     mapping.cigar_dp_bw_long = profile.cigar_dp_bw_long;
     mapping.cigar_dp_max_gap = profile.cigar_dp_max_gap;
     mapping.cigar_dp_min_dp_max = profile.cigar_dp_min_dp_max;
+    mapping.fill_dp_match = profile.fill_dp_match;
+    mapping.fill_dp_mismatch = profile.fill_dp_mismatch;
+    mapping.fill_dp_ambi = profile.fill_dp_ambi;
+    mapping.fill_dp_gap_open1 = profile.fill_dp_gap_open1;
+    mapping.fill_dp_gap_extend1 = profile.fill_dp_gap_extend1;
+    mapping.fill_dp_gap_open2 = profile.fill_dp_gap_open2;
+    mapping.fill_dp_gap_extend2 = profile.fill_dp_gap_extend2;
+    mapping.fill_dp_tail_zdrop = profile.fill_dp_tail_zdrop;
+    mapping.fill_dp_inversion_zdrop = profile.fill_dp_inversion_zdrop;
     mapping.residue_recovery_anchor_floor =
         profile.residue_recovery_anchor_floor;
     mapping.residue_min_interval_bp = profile.residue_min_interval_bp;

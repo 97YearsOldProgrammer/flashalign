@@ -223,6 +223,8 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.dp_gap_extend2 = *opt.dp_gap_extend2;
   if (opt.dp_zdrop)
     u.dp_tail_zdrop = *opt.dp_zdrop;
+  if (opt.dp_zdrop_inv)
+    u.dp_inversion_zdrop = *opt.dp_zdrop_inv;
   if (opt.dp_end_bonus)
     u.dp_tail_end_bonus = *opt.dp_end_bonus;
   if (opt.dp_min_score)

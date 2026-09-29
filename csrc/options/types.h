@@ -63,6 +63,7 @@ struct UserOverrides {
   std::optional<int> dp_gap_extend1;
   std::optional<int> dp_gap_extend2;
   std::optional<int> dp_tail_zdrop;
+  std::optional<int> dp_inversion_zdrop; // -z's second value
   std::optional<int> dp_tail_end_bonus;
   std::optional<int> dp_min_dp_max; // -S (minimap2 -s)
   // DP bandwidths (-r INT[,INT]) and maximum gap.

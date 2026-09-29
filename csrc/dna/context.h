@@ -71,6 +71,19 @@ struct ResolvedDnaOptions {
   int cigar_dp_mismatch = 4;
   int cigar_dp_tail_end_bonus = -1;
   int cigar_dp_tail_zdrop = 400;       // -z
+  // The gap-fill row, -A -B -O -E -z --score-N; the cigar_dp_* row above is
+  // the preset's end row, which prices every path. fill_dp_min_dp_max is -S
+  // in the fill row's units (family_realization.cpp).
+  int fill_dp_match = 4;
+  int fill_dp_mismatch = 8;
+  int fill_dp_ambi = 2;
+  int fill_dp_gap_open1 = 8;
+  int fill_dp_gap_extend1 = 4;
+  int fill_dp_gap_open2 = 48;
+  int fill_dp_gap_extend2 = 1;
+  int fill_dp_tail_zdrop = 800;
+  int fill_dp_inversion_zdrop = 200;
+  int fill_dp_min_dp_max = 160;
   float cigar_band_frac = 0.10f;
   bool enable_full_read_cigar = true;
   // Optional cs:Z / MD:Z output (minimap2 --cs / --MD); empty by default.

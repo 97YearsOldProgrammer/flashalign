@@ -107,14 +107,91 @@ DpScoringParams dp_scoring_from_opts(const ResolvedDnaOptions& opts) {
   scoring.tail_end_bonus = opts.cigar_dp_tail_end_bonus;
   scoring.bw = opts.cigar_dp_bw;
   scoring.bw_long = opts.cigar_dp_bw_long;
-  // minimap2 requires zdrop_inv <= zdrop. -z takes one value here, so a low
-  // -z clamps zdrop_inv instead.
-  scoring.inversion_zdrop =
-      std::min(opts.cigar_dp_inversion_zdrop, opts.cigar_dp_tail_zdrop);
+  scoring.inversion_zdrop = opts.cigar_dp_inversion_zdrop;
   scoring.inversion_max_gap = opts.cigar_dp_max_gap;
   scoring.inversion_min_chain_score = opts.cigar_dp_inversion_min_chain_score;
   scoring.inversion_min_dp_max = opts.cigar_dp_min_dp_max;
   return scoring;
+}
+
+// The gap fills between anchors (a block's seams, stretch pieces and verified
+// regions with the gap certificate that plans them, the bridge between
+// blocks, and the inversion probe and middle a fill's Z-drop test starts) run
+// under the fill row, -A -B -O -E -z --score-N. The read-end extensions, seam
+// settling and EXTEND run under the preset's end row (cigar_dp_*), which also
+// prices every path. The inversion gates of a fill read -S scaled to the fill
+// row (options/resolve.cpp).
+DpScoringParams fill_dp_scoring(const ResolvedDnaOptions& opts) {
+  DpScoringParams scoring = dp_scoring_from_opts(opts);
+  scoring.match = opts.fill_dp_match;
+  scoring.mismatch = opts.fill_dp_mismatch;
+  scoring.ambi = opts.fill_dp_ambi;
+  scoring.gap_open1 = opts.fill_dp_gap_open1;
+  scoring.gap_extend1 = opts.fill_dp_gap_extend1;
+  scoring.gap_open2 = opts.fill_dp_gap_open2;
+  scoring.gap_extend2 = opts.fill_dp_gap_extend2;
+  scoring.zdrop = opts.fill_dp_tail_zdrop;
+  scoring.inversion_zdrop = opts.fill_dp_inversion_zdrop;
+  scoring.inversion_min_dp_max = opts.fill_dp_min_dp_max;
+  return scoring;
+}
+
+// Restates a fill path's score under the end row, as the kernels score a
+// path: the substitution matrix per aligned base and min(O1 + E1 * L,
+// O2 + E2 * L) per gap run. `query` and `target` are the packet's slices; the
+// path starts at their first bases. Nothing to do when the two rows agree.
+void price_fill_path(const ResolvedDnaOptions& opts,
+                     const std::uint8_t* query, int query_length,
+                     const std::uint8_t* target, int target_length,
+                     realization::RealizationOutcome& outcome) {
+  const DpScoringParams fill = fill_dp_scoring(opts);
+  const DpScoringParams end = dp_scoring_from_opts(opts);
+  if (fill.match == end.match && fill.mismatch == end.mismatch &&
+      fill.ambi == end.ambi && fill.gap_open1 == end.gap_open1 &&
+      fill.gap_extend1 == end.gap_extend1 &&
+      fill.gap_open2 == end.gap_open2 && fill.gap_extend2 == end.gap_extend2)
+    return;
+  const std::vector<std::uint32_t>& path = outcome.raw.packed_cigar;
+  int query_used = 0;
+  int target_used = 0;
+  for (const std::uint32_t run : path) {
+    const int op = static_cast<int>(run & 0xf);
+    const int length = static_cast<int>(run >> 4);
+    if (op == 0 || op == 1)
+      query_used += length;
+    if (op != 1)
+      target_used += length;
+  }
+  if (query_used > query_length || target_used > target_length)
+    return;
+  std::array<std::int8_t, 25> matrix{};
+  ::fa::cpu::ksw2_simple_mat(matrix.data(), end.match, end.mismatch, end.ambi);
+  const auto gap = [&end](std::int64_t length) {
+    return std::min(end.gap_open1 + end.gap_extend1 * length,
+                    end.gap_open2 + end.gap_extend2 * length);
+  };
+  int q = 0;
+  int t = 0;
+  std::int64_t score = 0;
+  for (const std::uint32_t run : path) {
+    const int op = static_cast<int>(run & 0xf);
+    const int length = static_cast<int>(run >> 4);
+    if (op == 0) {
+      for (int k = 0; k < length; ++k)
+        score += matrix[static_cast<std::size_t>(
+            std::min<int>(target[t + k], 4) * 5 +
+            std::min<int>(query[q + k], 4))];
+      q += length;
+      t += length;
+    } else if (op == 1) {
+      score -= gap(length);
+      q += length;
+    } else {
+      score -= gap(length);
+      t += length;
+    }
+  }
+  outcome.alignment.score = static_cast<int>(score);
 }
 
 void add_saturating(std::int64_t value, std::int64_t& total) {
@@ -357,7 +434,7 @@ bool plan_and_realize_packets(const DnaContext& context,
       plan.reverse ? *request.reverse_query : *request.forward_query;
   const auto& reference =
       (*context.ref.encoded)[static_cast<std::size_t>(plan.chromosome)];
-  const DpScoringParams scoring = dp_scoring_from_opts(context.opts);
+  const DpScoringParams scoring = fill_dp_scoring(context.opts);
   ::fa::cpu::DpMapOpt map_opt;
   map_opt.bw = context.opts.cigar_dp_bw;
   map_opt.bw_long = context.opts.cigar_dp_bw_long;
@@ -416,7 +493,7 @@ bool plan_and_realize_packets(const DnaContext& context,
         result.geometry.failing_gaps += first_piece_of->failing_gaps;
       }
     }
-    const realization::RealizationOutcome outcome = run_dna_long_realization(
+    realization::RealizationOutcome outcome = run_dna_long_realization(
         realization::RealizationRole::DnaInternalFill, scoring,
         realization::make_query_slice(
             q_span > 0 ? query.data() + step.query_begin : nullptr, q_span,
@@ -426,6 +503,8 @@ bool plan_and_realize_packets(const DnaContext& context,
             step.target_begin),
         two_axis ? step.selected_band : -1, scoring.zdrop, step.long_join, nullptr,
         /*inversion_probe_enabled=*/true, verified_region);
+    price_fill_path(context.opts, query.data() + step.query_begin, q_span,
+                    reference.data() + step.target_begin, r_span, outcome);
     record_kernel_work(outcome, q_span, r_span, result);
     record_inversion_probe(outcome, result);
     const bool successful =
@@ -574,9 +653,9 @@ bool attempt_bridge(const DnaContext& context,
   const auto& query = reverse ? *request.reverse_query : *request.forward_query;
   const auto& reference =
       (*context.ref.encoded)[static_cast<std::size_t>(left.chromosome)];
-  const DpScoringParams scoring = dp_scoring_from_opts(context.opts);
+  const DpScoringParams scoring = fill_dp_scoring(context.opts);
   const bool two_axis = q_gap > 0 && r_gap > 0;
-  const realization::RealizationOutcome outcome = run_dna_long_realization(
+  realization::RealizationOutcome outcome = run_dna_long_realization(
       realization::RealizationRole::DnaInternalFill, scoring,
       realization::make_query_slice(
           q_gap > 0 ? query.data() + q_begin : nullptr, q_gap, q_begin,
@@ -585,6 +664,8 @@ bool attempt_bridge(const DnaContext& context,
           r_gap > 0 ? reference.data() + r_begin : nullptr, r_gap, r_begin),
       two_axis ? std::max(q_gap, r_gap) : -1, scoring.zdrop,
       /*long_join=*/two_axis, nullptr, /*inversion_probe_enabled=*/true);
+  price_fill_path(context.opts, query.data() + q_begin, q_gap,
+                  reference.data() + r_begin, r_gap, outcome);
   record_kernel_work(outcome, q_gap, r_gap, result);
   record_inversion_probe(outcome, result);
   if (outcome.trace.zdrop_test.code == 2)
@@ -1125,7 +1206,7 @@ bool realize_inversion_middle(const DnaContext& context,
                      : continuation_begin - incumbent_end;
   const int tl = continuation.target_begin - incumbent.target_end;
 
-  const DpScoringParams scoring = dp_scoring_from_opts(context.opts);
+  const DpScoringParams scoring = fill_dp_scoring(context.opts);
   // As mm_align1_inv: min_chain_score <= ql, tl <= max_gap.
   if (ql < scoring.inversion_min_chain_score || ql > scoring.inversion_max_gap)
     return false;
@@ -1181,7 +1262,7 @@ bool realize_inversion_middle(const DnaContext& context,
 
   const int oriented_begin = query_origin + q_off;
   const int target_begin = target_origin + t_off;
-  const realization::RealizationOutcome outcome = run_dna_long_realization(
+  realization::RealizationOutcome outcome = run_dna_long_realization(
       realization::RealizationRole::DnaLocalInversionMiddle, scoring,
       realization::make_query_slice(oriented_query.data() + oriented_begin,
                                     query_span, oriented_begin, read_length,
@@ -1189,6 +1270,9 @@ bool realize_inversion_middle(const DnaContext& context,
       realization::make_target_slice(reference.data() + target_begin,
                                      target_span, target_begin),
       static_cast<int>(scoring.bw * 1.5));
+  price_fill_path(context.opts, oriented_query.data() + oriented_begin,
+                  query_span, reference.data() + target_begin, target_span,
+                  outcome);
   record_kernel_work(outcome, query_span, target_span, result);
   // As mm_align1_inv, any traceback is accepted; a Z-dropped extension still
   // ends at its maximum cell.

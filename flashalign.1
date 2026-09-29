@@ -269,20 +269,35 @@ per valid tile left unowned, and
 per owned tile without seed support, each at least 0. Any subset of the keys may
 be given, and a repeated key keeps its last value. DNA presets only.
 .SS Alignment options
+Under a DNA preset,
+.BR \-A ", " \-B ", " \-O ", " \-E ", " \-z " and " \-\-score\-N
+set the scoring of the gap fills between anchors. The read-end extensions use
+the preset's own row, which also scores every alignment, so AS,
+.B \-S
+and
+.B \-\-end\-bonus
+are in its units: for
+.B lr
+.BR \-A2 " " \-B4 " " \-O4,24 " " \-E2,1 " " \-z400,200 " " \-\-score\-N " 1,"
+for
+.B lr:hq
+.BR \-A1 " " \-B4 " " \-O6,26 " " \-E2,1 " " \-z400,200 " " \-\-score\-N " 1."
+The defaults below are those of
+.BR lr .
 .TP 10
 .BI \-A \ INT
-Matching score [2].
+Matching score [4].
 .TP
 .BI \-B \ INT
-Mismatching penalty [4]. Use a larger value for lower divergence.
+Mismatching penalty [8]. Use a larger value for lower divergence.
 .TP
 .B \-O \fIINT\fR[,\fIINT\fR]
-Gap open penalty [4,24]. If the second
+Gap open penalty [8,48]. If the second
 .I INT
 is not specified, it is set to the first.
 .TP
 .B \-E \fIINT\fR[,\fIINT\fR]
-Gap extension penalty [2,1]. A gap of length
+Gap extension penalty [4,1]. A gap of length
 .I k
 costs
 .RI min{ O1 + k * E1 , O2 + k * E2 }.
@@ -290,9 +305,18 @@ If the second
 .I INT
 is not specified, it is set to the first.
 .TP
-.BI \-z \ INT
+.BI \-z \ INT1[,INT2]
 Truncate an alignment if the running alignment score drops too quickly along the
-diagonal of the DP matrix (diagonal X-drop, or Z-drop) [400].
+diagonal of the DP matrix (diagonal X-drop, or Z-drop) [800,200]. Under a DNA
+preset, a drop above
+.I INT2
+tests the dropped region for a small inversion, aligning the reverse complement
+of the query there. If
+.I INT2
+is not specified, it is set to
+.IR INT1 ;
+it may not exceed
+.IR INT1 .
 .TP
 .BI \-S \ INT
 Minimal peak DP alignment score to output [80]. Under a DNA preset an
@@ -302,7 +326,7 @@ filtered by this score; under a DNA preset it prints no record whose chaining
 score is below 40.
 .TP
 .BI \-\-score\-N \ INT
-Penalty of a mismatch involving ambiguous bases [1].
+Penalty of a mismatch involving ambiguous bases [2].
 .TP
 .BI \-\-end\-bonus \ INT
 Score bonus when alignment extends to the end of the query sequence [\-1].
@@ -540,16 +564,16 @@ are:
 Align noisy long reads of ~10% error rate to a reference genome. This is the
 default mode.
 .RB ( \-k21
-.B \-s9 \-\-min\-support 3 \-A2 \-B4 \-O4,24 \-E2,1
-.B \-z400 \-r500,20000
+.B \-s9 \-\-min\-support 3 \-A4 \-B8 \-O8,48 \-E4,1
+.B \-z800,200 \-\-score\-N 2 \-r500,20000
 .BR \-S80 ).
 .TP
 .B lr:hq
 Align accurate long reads (error rate <1%), such as PacBio HiFi reads, to a
 reference genome
 .RB ( \-k21
-.B \-s5 \-\-min\-support 3 \-A1 \-B4 \-O6,26 \-E2,1
-.B \-z400 \-r500,20000
+.B \-s5 \-\-min\-support 3 \-A3 \-B12 \-O18,78 \-E6,1
+.B \-z1200,600 \-\-score\-N 3 \-r500,20000
 .BR \-S200 ).
 .TP
 .B splice

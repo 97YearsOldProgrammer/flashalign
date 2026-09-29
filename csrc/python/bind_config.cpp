@@ -185,6 +185,9 @@ void bind_config(nb::module_& module) {
   config.def_rw(#field, &flashalign::Config::field, doc);
   FA_CONFIG_FIELDS(FA_CONFIG_PROP)
 #undef FA_CONFIG_PROP
+  config.def_ro("dp_zdrop_inv", &flashalign::Config::dp_zdrop_inv,
+                "Inversion Z-drop, the second -z value; read only. -1 = "
+                "dp_zdrop.");
 
   config.def_prop_rw(
       "cs",

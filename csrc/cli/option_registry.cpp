@@ -82,18 +82,22 @@ const std::vector<OptionSpec>& specs_table() {
          "INT", SEC_PLACEMENT,
          "max diagonal bin width in voting [2048]"},
 
+        // On a DNA preset -A -B -O -E -z --score-N set the DP row of the gap
+        // fills between anchors; the read ends keep the preset's own row,
+        // which also prices every path. Defaults are lr's.
         {OptionId::DpMatch, 'A', "", kInt, kStable, A,
-         "INT", SEC_ALIGN, "matching score [2]"},
+         "INT", SEC_ALIGN, "matching score [4]"},
         {OptionId::DpMismatch, 'B', "", kInt, kStable, A,
          "INT", SEC_ALIGN,
-         "mismatch penalty (larger value for lower divergence) [4]"},
+         "mismatch penalty (larger value for lower divergence) [8]"},
         {OptionId::DpGapOpen, 'O', "", kPair, kStable, A,
-         "INT[,INT]", SEC_ALIGN, "gap open penalty [4,24]"},
+         "INT[,INT]", SEC_ALIGN, "gap open penalty [8,48]"},
         {OptionId::DpGapExtend, 'E', "", kPair, kStable, A,
          "INT[,INT]", SEC_ALIGN,
-         "gap extension penalty; a k-long gap costs min{O1+k*E1,O2+k*E2} [2,1]"},
-        {OptionId::DpZdrop, 'z', "", kInt, kStable, A,
-         "INT", SEC_ALIGN, "Z-drop score [400]"},
+         "gap extension penalty; a k-long gap costs min{O1+k*E1,O2+k*E2} [4,1]"},
+        {OptionId::DpZdrop, 'z', "", kPair, kStable, A,
+         "INT[,INT]", SEC_ALIGN,
+         "Z-drop score and inversion Z-drop score [800,200]"},
         // RNA refuses a realization whose DP maximum is below it (minimap2
         // -s). DNA uses it as the per-record emission floor when a CIGAR is
         // realized, as minimap2's mm_filter_regs; map-only ignores it.
@@ -101,7 +105,7 @@ const std::vector<OptionSpec>& specs_table() {
          "INT", SEC_ALIGN,
          "minimal peak DP alignment score [80]"},
         {OptionId::DpScoreN, '\0', "--score-N", kInt, kStable, A,
-         "INT", SEC_ALIGN, "score of a mismatch involving ambiguous bases [1]"},
+         "INT", SEC_ALIGN, "score of a mismatch involving ambiguous bases [2]"},
         {OptionId::DpEndBonus, '\0', "--end-bonus", kInt, kStable, A,
          "INT", SEC_ALIGN,
          "score bonus when alignment extends to the end of the query [-1]"},

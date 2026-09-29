@@ -241,18 +241,31 @@ std::string resolved_config_text(const AlignOptions& opt,
   row("local_diag_band", i2s(mapping.cigar_local_diag_band), "builtin");
   row("cigar_band_frac", f2s(mapping.cigar_band_frac), "builtin");
 
-  row("dp_match", i2s(mapping.cigar_dp_match), dp_src(opt.dp_match));
-  row("dp_mismatch", i2s(mapping.cigar_dp_mismatch), dp_src(opt.dp_mismatch));
-  row("dp_score_n", i2s(mapping.cigar_dp_ambi), dp_src(opt.dp_score_n));
-  row("dp_gap_open1", i2s(mapping.cigar_dp_gap_open1),
+  // DNA: -A -B -O -E -z --score-N are the gap-fill row; the end row, which
+  // prices every path, is the preset's (dp_end_row).
+  const bool fill = !is_rna;
+  row("dp_match", i2s(fill ? mapping.fill_dp_match : mapping.cigar_dp_match),
+      dp_src(opt.dp_match));
+  row("dp_mismatch",
+      i2s(fill ? mapping.fill_dp_mismatch : mapping.cigar_dp_mismatch),
+      dp_src(opt.dp_mismatch));
+  row("dp_score_n", i2s(fill ? mapping.fill_dp_ambi : mapping.cigar_dp_ambi),
+      dp_src(opt.dp_score_n));
+  row("dp_gap_open1",
+      i2s(fill ? mapping.fill_dp_gap_open1 : mapping.cigar_dp_gap_open1),
       dp_src(opt.dp_gap_open1));
-  row("dp_gap_extend1", i2s(mapping.cigar_dp_gap_extend1),
+  row("dp_gap_extend1",
+      i2s(fill ? mapping.fill_dp_gap_extend1 : mapping.cigar_dp_gap_extend1),
       dp_src(opt.dp_gap_extend1));
-  row("dp_gap_open2", i2s(mapping.cigar_dp_gap_open2),
+  row("dp_gap_open2",
+      i2s(fill ? mapping.fill_dp_gap_open2 : mapping.cigar_dp_gap_open2),
       dp_src(opt.dp_gap_open2));
-  row("dp_gap_extend2", i2s(mapping.cigar_dp_gap_extend2),
+  row("dp_gap_extend2",
+      i2s(fill ? mapping.fill_dp_gap_extend2 : mapping.cigar_dp_gap_extend2),
       dp_src(opt.dp_gap_extend2));
-  row("dp_zdrop", i2s(mapping.cigar_dp_tail_zdrop), dp_src(opt.dp_zdrop));
+  row("dp_zdrop",
+      i2s(fill ? mapping.fill_dp_tail_zdrop : mapping.cigar_dp_tail_zdrop),
+      dp_src(opt.dp_zdrop));
   row("dp_end_bonus", i2s(mapping.cigar_dp_tail_end_bonus),
       dp_src(opt.dp_end_bonus));
   row("dp_bw", i2s(mapping.cigar_dp_bw), dp_src(opt.dp_bw));
@@ -262,7 +275,22 @@ std::string resolved_config_text(const AlignOptions& opt,
       dp_src(opt.dp_min_score));
   row("dp_split_min_anchors", i2s(mapping.cigar_dp_split_min_anchors),
       "builtin");
-  row("dp_inversion_zdrop", i2s(mapping.cigar_dp_inversion_zdrop), "builtin");
+  row("dp_inversion_zdrop",
+      i2s(fill ? mapping.fill_dp_inversion_zdrop
+               : mapping.cigar_dp_inversion_zdrop),
+      dp_src(opt.dp_zdrop));
+  if (fill)
+    row("dp_end_row",
+        "A" + i2s(mapping.cigar_dp_match) + " B" +
+            i2s(mapping.cigar_dp_mismatch) + " N" +
+            i2s(mapping.cigar_dp_ambi) + " O" +
+            i2s(mapping.cigar_dp_gap_open1) + "," +
+            i2s(mapping.cigar_dp_gap_open2) + " E" +
+            i2s(mapping.cigar_dp_gap_extend1) + "," +
+            i2s(mapping.cigar_dp_gap_extend2) + " z" +
+            i2s(mapping.cigar_dp_tail_zdrop) + "," +
+            i2s(mapping.cigar_dp_inversion_zdrop),
+        "preset");
   row("dp_inv_min_chain", i2s(mapping.cigar_dp_inversion_min_chain_score),
       "builtin");
 
@@ -321,7 +349,7 @@ std::string resolved_config_text(const AlignOptions& opt,
     row("rna_strand_mode", strand,
         src(opt.splice_strand.has_value(), "builtin"));
     row("splice_transition", i2s(rna->splice_transition), "preset");
-    // minimap2's scalar -z sets the inversion Z-drop alongside the tail one.
+    // -z's second value; as in minimap2, a scalar -z sets it too.
     row("splice_inv_zdrop", i2s(rna->splice_inversion_zdrop),
         dp_src(opt.dp_zdrop));
     row("rna_max_loci", i2s(rna->max_locus_chains),

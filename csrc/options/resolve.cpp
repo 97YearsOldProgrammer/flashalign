@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -321,31 +322,59 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
     }
     mapping.vote_diag_width_max = *user.vote_diag_width_max;
   }
+  // On a DNA preset -A -B -O -E -z --score-N set the gap-fill row and the
+  // end row stays the preset's; a splice preset has one row.
+  const bool fill_row = !rna_mode;
+  int& dp_match = fill_row ? mapping.fill_dp_match : mapping.cigar_dp_match;
+  int& dp_mismatch =
+      fill_row ? mapping.fill_dp_mismatch : mapping.cigar_dp_mismatch;
+  int& dp_ambi = fill_row ? mapping.fill_dp_ambi : mapping.cigar_dp_ambi;
+  int& dp_gap_open1 =
+      fill_row ? mapping.fill_dp_gap_open1 : mapping.cigar_dp_gap_open1;
+  int& dp_gap_open2 =
+      fill_row ? mapping.fill_dp_gap_open2 : mapping.cigar_dp_gap_open2;
+  int& dp_gap_extend1 =
+      fill_row ? mapping.fill_dp_gap_extend1 : mapping.cigar_dp_gap_extend1;
+  int& dp_gap_extend2 =
+      fill_row ? mapping.fill_dp_gap_extend2 : mapping.cigar_dp_gap_extend2;
+  int& dp_tail_zdrop =
+      fill_row ? mapping.fill_dp_tail_zdrop : mapping.cigar_dp_tail_zdrop;
+  int& dp_inversion_zdrop = fill_row ? mapping.fill_dp_inversion_zdrop
+                                     : mapping.cigar_dp_inversion_zdrop;
   if (user.dp_match)
-    mapping.cigar_dp_match = std::max(1, *user.dp_match);
+    dp_match = std::max(1, *user.dp_match);
   if (user.dp_mismatch)
-    mapping.cigar_dp_mismatch = std::max(0, *user.dp_mismatch);
+    dp_mismatch = std::max(0, *user.dp_mismatch);
   if (user.dp_ambi)
-    mapping.cigar_dp_ambi = std::max(0, *user.dp_ambi);
+    dp_ambi = std::max(0, *user.dp_ambi);
   if (user.dp_gap_open1)
-    mapping.cigar_dp_gap_open1 = std::max(1, *user.dp_gap_open1);
+    dp_gap_open1 = std::max(1, *user.dp_gap_open1);
   if (user.dp_gap_open2)
-    mapping.cigar_dp_gap_open2 = std::max(0, *user.dp_gap_open2);
+    dp_gap_open2 = std::max(0, *user.dp_gap_open2);
   if (user.dp_gap_extend1)
-    mapping.cigar_dp_gap_extend1 = std::max(1, *user.dp_gap_extend1);
+    dp_gap_extend1 = std::max(1, *user.dp_gap_extend1);
   if (user.dp_gap_extend2)
-    mapping.cigar_dp_gap_extend2 = std::max(0, *user.dp_gap_extend2);
+    dp_gap_extend2 = std::max(0, *user.dp_gap_extend2);
   if (user.dp_tail_zdrop) {
-    mapping.cigar_dp_tail_zdrop = *user.dp_tail_zdrop;
+    dp_tail_zdrop = *user.dp_tail_zdrop;
     // As in minimap2, a scalar -z also sets the inversion Z-drop.
+    const int inversion_zdrop =
+        user.dp_inversion_zdrop.value_or(*user.dp_tail_zdrop);
+    dp_inversion_zdrop = inversion_zdrop;
     if (rna)
-      rna->splice_inversion_zdrop = *user.dp_tail_zdrop;
+      rna->splice_inversion_zdrop = inversion_zdrop;
   }
   if (user.dp_tail_end_bonus)
     mapping.cigar_dp_tail_end_bonus = *user.dp_tail_end_bonus;
   if (user.dp_min_dp_max) {
     mapping.cigar_dp_min_dp_max = std::max(0, *user.dp_min_dp_max);
   }
+  // -S is in the end row's units; the inversion gates of a fill compare
+  // fill-row scores.
+  mapping.fill_dp_min_dp_max = static_cast<int>(std::min<std::int64_t>(
+      std::numeric_limits<int>::max(),
+      static_cast<std::int64_t>(mapping.cigar_dp_min_dp_max) *
+          mapping.fill_dp_match / mapping.cigar_dp_match));
   if (user.dp_bw)
     mapping.cigar_dp_bw = std::max(1, *user.dp_bw);
   if (user.dp_bw_long)
@@ -427,13 +456,22 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
     if (mapping.cigar_dp_tail_zdrop < 0 || rna->splice_inversion_zdrop < 0 ||
         mapping.cigar_dp_tail_zdrop < rna->splice_inversion_zdrop) {
       throw std::invalid_argument(
-          "RNA Z-drop must be nonnegative and not less "
-          "than inversion Z-drop");
+          "RNA Z-drop must be nonnegative and should not be less than "
+          "inversion-Z-drop");
     }
     if (mapping.cigar_dp_tail_end_bonus < -1) {
       throw std::invalid_argument(
           "RNA --end-bonus must be >= -1");
     }
+  }
+  // minimap2's mm_check_opt; the splice presets check it above.
+  if (!rna_mode &&
+      mapping.fill_dp_tail_zdrop < mapping.fill_dp_inversion_zdrop) {
+    throw std::invalid_argument(
+        "Z-drop should not be less than inversion-Z-drop");
+  }
+  if (!rna_mode && mapping.fill_dp_inversion_zdrop < 0) {
+    throw std::invalid_argument("inversion Z-drop should not be negative");
   }
   if (mapping.vote_diag_bin_width <= 0) {
     throw std::invalid_argument(

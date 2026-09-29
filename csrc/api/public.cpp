@@ -107,6 +107,8 @@ fa::cpu::options::ResolvedOptions resolve_config(
     request.user.dp_gap_extend2 = source.dp_gap_extend2;
   if (source.dp_zdrop >= 0)
     request.user.dp_tail_zdrop = source.dp_zdrop;
+  if (source.dp_zdrop >= 0 && source.dp_zdrop_inv >= 0)
+    request.user.dp_inversion_zdrop = source.dp_zdrop_inv;
   if (source.dp_end_bonus >= -1) {
     request.user.dp_tail_end_bonus = source.dp_end_bonus;
   }
@@ -159,14 +161,23 @@ Config to_public_config(const fa::cpu::options::ResolvedOptions& source,
   config.long_primary_occ_cap = mapping.long_primary_occ_cap;
   config.threads = source.common.num_threads;
   config.cigar_band_frac = mapping.cigar_band_frac;
-  config.dp_match = mapping.cigar_dp_match;
-  config.dp_mismatch = mapping.cigar_dp_mismatch;
-  config.dp_score_n = mapping.cigar_dp_ambi;
-  config.dp_gap_open1 = mapping.cigar_dp_gap_open1;
-  config.dp_gap_extend1 = mapping.cigar_dp_gap_extend1;
-  config.dp_gap_open2 = mapping.cigar_dp_gap_open2;
-  config.dp_gap_extend2 = mapping.cigar_dp_gap_extend2;
-  config.dp_zdrop = mapping.cigar_dp_tail_zdrop;
+  // DNA: the gap-fill row, which these set; the end row is the preset's.
+  config.dp_match = rna ? mapping.cigar_dp_match : mapping.fill_dp_match;
+  config.dp_mismatch =
+      rna ? mapping.cigar_dp_mismatch : mapping.fill_dp_mismatch;
+  config.dp_score_n = rna ? mapping.cigar_dp_ambi : mapping.fill_dp_ambi;
+  config.dp_gap_open1 =
+      rna ? mapping.cigar_dp_gap_open1 : mapping.fill_dp_gap_open1;
+  config.dp_gap_extend1 =
+      rna ? mapping.cigar_dp_gap_extend1 : mapping.fill_dp_gap_extend1;
+  config.dp_gap_open2 =
+      rna ? mapping.cigar_dp_gap_open2 : mapping.fill_dp_gap_open2;
+  config.dp_gap_extend2 =
+      rna ? mapping.cigar_dp_gap_extend2 : mapping.fill_dp_gap_extend2;
+  config.dp_zdrop =
+      rna ? mapping.cigar_dp_tail_zdrop : mapping.fill_dp_tail_zdrop;
+  config.dp_zdrop_inv = rna ? rna->splice_inversion_zdrop
+                            : mapping.fill_dp_inversion_zdrop;
   config.dp_end_bonus = mapping.cigar_dp_tail_end_bonus;
   config.dp_min_score = mapping.cigar_dp_min_dp_max;
   // A splice preset fixes the bandwidth, so report -1 and keep config() -> reconfigure() valid.

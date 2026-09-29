@@ -36,6 +36,9 @@ struct Config {
   int dp_gap_open2 = -1;        ///< second gap-open penalty [-O]
   int dp_gap_extend2 = -1;      ///< second gap-extension penalty [-E]
   int dp_zdrop = -1;            ///< Z-drop [-z]
+  /// Inversion Z-drop, -z's second value. -1 takes dp_zdrop, as a lone -z does. Python reads it
+  /// only; config() reports it so config() -> reconfigure() keeps it.
+  int dp_zdrop_inv = -1;
   int dp_end_bonus = -2;        ///< end bonus [--end-bonus]; -2 = preset's value
   int rna_min_intron = 20;      ///< splice: minimum intron length [--min-intron]
   int rna_max_intron = 200000;  ///< splice: maximum intron length [-G]
