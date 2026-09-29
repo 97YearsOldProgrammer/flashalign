@@ -3,8 +3,9 @@
 Handle high-throughput long-read DNA and RNA data with flashalign.
 
 [![GitHub Downloads](https://img.shields.io/github/downloads/97YearsOldProgrammer/flashalign/total.svg?style=social&logo=github&label=Download)](https://github.com/97YearsOldProgrammer/flashalign/releases)
+[![Bioconda](https://img.shields.io/conda/vn/bioconda/flashalign.svg?label=bioconda)](https://anaconda.org/bioconda/flashalign)
+[![Bioconda downloads](https://img.shields.io/conda/dn/bioconda/flashalign.svg?label=bioconda%20downloads)](https://anaconda.org/bioconda/flashalign)
 [![PyPI](https://img.shields.io/pypi/v/flashalign.svg?style=flat)](https://pypi.org/project/flashalign/)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/flashalign.svg?label=PyPI%20downloads)](https://pypi.org/project/flashalign/)
 [![License](https://img.shields.io/github/license/97YearsOldProgrammer/flashalign.svg)](LICENSE)
 
 ## Getting started
@@ -40,6 +41,13 @@ x86-64 Linux with glibc 2.17 or newer and needs no installation:
 ```sh
 curl -L https://github.com/97YearsOldProgrammer/flashalign/releases/download/v0.1.0/flashalign-0.1.0_x64-linux.tar.bz2 | tar -jxvf -
 ./flashalign-0.1.0_x64-linux/flashalign version
+```
+
+FlashAlign is on [Bioconda](https://anaconda.org/bioconda/flashalign), for Linux and macOS on
+x86-64 and ARM:
+
+```sh
+conda install -c conda-forge -c bioconda flashalign
 ```
 
 The Python package (see the [Developers' guide](#developers-guide)) installs with pip. Prebuilt
