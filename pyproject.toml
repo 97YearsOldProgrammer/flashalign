@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "flashalign"
-version = "0.1.0"
+version = "0.2.0"
 description = "CPU-native long-read aligner for DNA and spliced RNA, with a mappy-style Python API"
 readme = "README.md"
 license = {text = "MIT"}

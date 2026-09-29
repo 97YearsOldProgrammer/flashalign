@@ -38,8 +38,8 @@ For Linux x86-64, a precompiled binary is on the
 x86-64 Linux with glibc 2.17 or newer and needs no installation:
 
 ```sh
-curl -L https://github.com/97YearsOldProgrammer/flashalign/releases/download/v0.1.0/flashalign-0.1.0_x64-linux.tar.bz2 | tar -jxvf -
-./flashalign-0.1.0_x64-linux/flashalign version
+curl -L https://github.com/97YearsOldProgrammer/flashalign/releases/download/v0.2.0/flashalign-0.2.0_x64-linux.tar.bz2 | tar -jxvf -
+./flashalign-0.2.0_x64-linux/flashalign version
 ```
 
 The Python package (see the [Developers' guide](#developers-guide)) installs with pip. Prebuilt

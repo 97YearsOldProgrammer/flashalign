@@ -104,6 +104,9 @@ void append(std::ostringstream& out, const char* name,
   X(dp_gap_open2, "Second gap-open penalty [-O]. -1 = preset-owned.")          \
   X(dp_gap_extend2, "Second gap-extension penalty [-E]. -1 = preset-owned.")   \
   X(dp_zdrop, "Z-drop score [-z]. -1 = preset-owned.")                         \
+  X(dp_zdrop_inv,                                                              \
+    "Inversion Z-drop, the second -z value (row dp_inversion_zdrop).\n"        \
+    "-1 = dp_zdrop; on a copy of Aligner.config, set it with dp_zdrop.")       \
   X(dp_end_bonus, "Alignment end bonus [--end-bonus]. -2 = preset-owned.")     \
   X(rna_min_intron, "Minimum intron length [--min-intron]; splice only.")      \
   X(rna_max_intron, "Maximum intron length [-G]; splice only.")                \
@@ -147,7 +150,7 @@ void bind_config(nb::module_& module) {
       "    fa.Config(preset='lr:hq', threads=8, dp_min_score=50)\n"
       "\n"
       "Aligner.config returns the resolved configuration, with every field\n"
-      "set to the value in use.");
+      "set to the value in use, or -1 / None where the preset decides it.");
 
   config.def(
       "__init__",
@@ -171,8 +174,7 @@ void bind_config(nb::module_& module) {
 #undef FA_CONFIG_KWARG
           throw std::invalid_argument(
               "flashalign: Config has no field '" + name +
-              "' (the field names are the rows `flashalign align "
-              "--show-config` prints)");
+              "' (see help(flashalign.Config) for the field names)");
         }
       },
       nb::arg("preset") = "lr", nb::arg("fields"),
@@ -185,9 +187,6 @@ void bind_config(nb::module_& module) {
   config.def_rw(#field, &flashalign::Config::field, doc);
   FA_CONFIG_FIELDS(FA_CONFIG_PROP)
 #undef FA_CONFIG_PROP
-  config.def_ro("dp_zdrop_inv", &flashalign::Config::dp_zdrop_inv,
-                "Inversion Z-drop, the second -z value; read only. -1 = "
-                "dp_zdrop.");
 
   config.def_prop_rw(
       "cs",

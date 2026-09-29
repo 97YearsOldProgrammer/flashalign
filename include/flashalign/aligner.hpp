@@ -85,8 +85,8 @@ class Aligner {
       const std::string& name, const std::string& read,
       bool with_cigar = false) const;
   /**
-   * The resolved configuration, for inspection. Passing it back to reconfigure() is not
-   * a no-op: the resolved values become explicit settings.
+   * The resolved configuration. Passed back to reconfigure() it maps as before, with the
+   * resolved values now explicit settings.
    */
   Config config() const;
   /**
