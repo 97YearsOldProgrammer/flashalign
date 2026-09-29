@@ -107,8 +107,21 @@ fa::cpu::options::ResolvedOptions resolve_config(
     request.user.dp_gap_extend2 = source.dp_gap_extend2;
   if (source.dp_zdrop >= 0)
     request.user.dp_tail_zdrop = source.dp_zdrop;
-  if (source.dp_zdrop >= 0 && source.dp_zdrop_inv >= 0)
+  // dp_zdrop_inv is -z's second value: -1 follows dp_zdrop, as a lone -z does.
+  if (source.dp_zdrop_inv >= 0) {
+    if (source.dp_zdrop < 0) {
+      throw std::invalid_argument(
+          "flashalign: dp_zdrop_inv needs dp_zdrop, as -z INT1,INT2 does");
+    }
+    if (source.dp_zdrop < source.dp_zdrop_inv) {
+      throw std::invalid_argument(
+          "flashalign: dp_zdrop (" + std::to_string(source.dp_zdrop) +
+          ") is less than dp_zdrop_inv (" +
+          std::to_string(source.dp_zdrop_inv) +
+          "); lower dp_zdrop_inv too, or set it to -1 to follow dp_zdrop");
+    }
     request.user.dp_inversion_zdrop = source.dp_zdrop_inv;
+  }
   if (source.dp_end_bonus >= -1) {
     request.user.dp_tail_end_bonus = source.dp_end_bonus;
   }
@@ -148,15 +161,21 @@ Config to_public_config(const fa::cpu::options::ResolvedOptions& source,
   config.k = source.index.k;
   config.min_support = source.common.min_support;
   config.max_query_seeds = source.common.max_query_seeds_per_strand;
-  config.tile_score_hit = mapping.query_partition.supported_tile_reward;
-  config.tile_score_block = mapping.query_partition.block_open_cost;
-  config.tile_score_null = mapping.query_partition.null_tile_cost;
-  config.tile_score_miss =
-      mapping.query_partition.unsupported_ownership_cost;
+  // A splice preset rejects --tile-score, so report None there, as dp_bw below.
+  if (!rna) {
+    config.tile_score_hit = mapping.query_partition.supported_tile_reward;
+    config.tile_score_block = mapping.query_partition.block_open_cost;
+    config.tile_score_null = mapping.query_partition.null_tile_cost;
+    config.tile_score_miss =
+        mapping.query_partition.unsupported_ownership_cost;
+  }
   config.full_read_cigar = source.common.enable_full_read_cigar;
   config.syncmer_s = source.index.syncmer_s;
   config.syncmer_downsample = source.index.syncmer_downsample;
-  config.vote_diag_bin_width = mapping.vote_diag_bin_width;
+  // An explicit width turns the adaptive width off, so an adaptive one reports -1.
+  config.vote_diag_bin_width = mapping.vote_diag_bin_width_adaptive
+                                   ? -1
+                                   : mapping.vote_diag_bin_width;
   config.long_occ_cap = mapping.long_occ_cap;
   config.long_primary_occ_cap = mapping.long_primary_occ_cap;
   config.threads = source.common.num_threads;

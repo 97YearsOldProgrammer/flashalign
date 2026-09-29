@@ -20,7 +20,7 @@ class Config:
         fa.Config(preset='lr:hq', threads=8, dp_min_score=50)
 
     Aligner.config returns the resolved configuration, with every field
-    set to the value in use.
+    set to the value in use, or -1 / None where the preset decides it.
     """
 
     def __init__(self, preset: str = 'lr', **fields) -> None:
@@ -176,7 +176,13 @@ class Config:
 
     @property
     def dp_zdrop_inv(self) -> int:
-        """Inversion Z-drop, the second -z value; read only. -1 = dp_zdrop."""
+        """
+        Inversion Z-drop, the second -z value (row dp_inversion_zdrop).
+        -1 = dp_zdrop; on a copy of Aligner.config, set it with dp_zdrop.
+        """
+
+    @dp_zdrop_inv.setter
+    def dp_zdrop_inv(self, arg: int, /) -> None: ...
 
     @property
     def dp_end_bonus(self) -> int:
