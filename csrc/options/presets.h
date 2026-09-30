@@ -120,6 +120,9 @@ inline void set_dna_long_platform_fields(
     mapping.postdp_rescoring = profile.kind == DnaPresetKind::HiFi;
     // HiFi only: the chain MAPQ margin rule (dna/chain_mapq.h).
     mapping.chain_mapq_hifi_margin = profile.kind == DnaPresetKind::HiFi;
+    // HiFi only: the late inversion probe's local-chain gate
+    // (dna/inv_local_chain.h).
+    mapping.inversion_probe_local_gate = profile.kind == DnaPresetKind::HiFi;
     common.min_support = 3;
     common.max_query_seeds_per_strand = 128;
     mapping.cigar_dp_match = profile.cigar_dp_match;
@@ -231,6 +234,7 @@ inline void set_splice_fields(
     mapping.base.cigar_dp_min_ksw_len = 0;
     mapping.base.postdp_rescoring = false;
     mapping.base.chain_mapq_hifi_margin = false;
+    mapping.base.inversion_probe_local_gate = false;
     mapping.base.dna_pool_gate_occ = 0;
     mapping.base.long_occ_ceiling = 0;
     // RNA's own support floor.

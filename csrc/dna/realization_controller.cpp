@@ -80,6 +80,9 @@ normalize_zdrop_test(const ::fa::cpu::dp::DpZdropResult& test) {
   case ::fa::cpu::dp::DpInversionProbeStatus::Accepted:
     out.inversion_status = InversionProbeStatus::Accepted;
     break;
+  case ::fa::cpu::dp::DpInversionProbeStatus::Gated:
+    out.inversion_status = InversionProbeStatus::Gated;
+    break;
   }
   out.reverse_probe_attempted = test.reverse_probe.attempted;
   out.reverse_score = test.reverse_probe.score;
@@ -235,6 +238,9 @@ ExecutorResult ksw2_execute(const RealizationRequest& request,
     inversion_control.max_gap = request.inversion_max_gap;
     inversion_control.min_chain_score = request.inversion_min_chain_score;
     inversion_control.min_dp_max = request.inversion_min_dp_max;
+    inversion_control.gate = request.inversion_probe_gate.count;
+    inversion_control.gate_source = request.inversion_probe_gate.source;
+    inversion_control.gate_min_count = request.inversion_probe_gate.min_count;
     raw = ::fa::cpu::dp::dp_fill_gap(
         opt, request.query.length, request.query.data, request.target.length,
         request.target.data, request.long_join, &observer,

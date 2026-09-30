@@ -1563,6 +1563,7 @@ AlignResult map_read(const DnaContext& base_dctx,
       placement_chaining =
           chain_placement_family(placement_family, DnaTileOwnership::Span);
       placement_chaining_ran = true;
+      dctx.inversion_gate_seeds = placement_chaining.inversion_gate_seeds.get();
       if (placement_chaining.span_widened)
         unspanned_retry_family = std::move(placement_family);
       placement_family = placement_chaining.family;
@@ -1627,6 +1628,7 @@ AlignResult map_read(const DnaContext& base_dctx,
     if (!family_outcome.accepted() && unspanned_retry_family.valid) {
       placement_chaining = chain_placement_family(
           std::move(unspanned_retry_family), DnaTileOwnership::AnchorTiles);
+      dctx.inversion_gate_seeds = placement_chaining.inversion_gate_seeds.get();
       placement_family = placement_chaining.family;
       alternative_chaining = build_dna_alternative_placement(
           dctx, placement_family, placement_chaining, fwd_enc, reverse_query);

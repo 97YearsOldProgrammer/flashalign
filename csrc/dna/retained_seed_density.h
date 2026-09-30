@@ -51,7 +51,7 @@ class RetainedSeedDensity {
                                 std::uint32_t entry_index,
                                 int chromosome,
                                 std::uint32_t low,
-                                std::uint32_t high);
+                                std::uint32_t high) const;
 
   // Resolves n intervals for the same (chromosome, low, high) window; result i
   // equals slice(index, entry_indices[i], chromosome, low, high). The binary

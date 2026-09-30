@@ -220,7 +220,7 @@ KmerPostingIntervalView RetainedSeedDensity::slice(
     std::uint32_t entry_index,
     int chromosome,
     std::uint32_t low,
-    std::uint32_t high) {
+    std::uint32_t high) const {
   if (entry_index >= entries_.size() || chromosome < 0 ||
       chromosome >= static_cast<int>(index.chrom_count()) || high <= low) {
     return {};

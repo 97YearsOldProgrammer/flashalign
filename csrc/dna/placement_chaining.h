@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <memory>
 #include <vector>
 
 namespace fa::cpu::lr {
@@ -289,6 +290,9 @@ struct DnaPlacementChainingResult {
   int mapq_rival_chains = 0;
   std::vector<RetainedSeedRef> residue_fine_forward;
   std::vector<RetainedSeedRef> residue_fine_reverse;
+  // The read's seed density, kept past placement when realization gates the
+  // late inversion probe on it (inv_local_chain.h); null otherwise.
+  std::shared_ptr<const RetainedSeedDensity> inversion_gate_seeds;
   std::int64_t initial_score = 0;
   int initial_blocks = 0;
   bool selection_changed = false;

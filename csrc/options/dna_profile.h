@@ -178,6 +178,10 @@ struct DnaLongOptions {
   // BWA-MEM's margin Phred on the raw ksw2 margin. The full guard is in
   // chain_mapq.h.
   bool chain_mapq_hifi_margin = false;
+  // HiFi only (dna/inv_local_chain.h): the late inversion probe of a seam or
+  // piece runs only where the read's opposite-lane fine seeds in the drop
+  // window chain to kDnaInvLocalMinAnchors anchors. Bridges keep their probe.
+  bool inversion_probe_local_gate = false;
   // Terminal clip nomination: a terminal clip of at least
   // kDnaClipNominateMinIntervalBp unclaimed query gets a second recovery
   // attempt after the production one declines, with an interval-scaled

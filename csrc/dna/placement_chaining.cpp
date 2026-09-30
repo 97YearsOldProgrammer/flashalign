@@ -1971,7 +1971,15 @@ DnaPlacementChainingResult build_dna_placement_chains(
     return result;
   }
 
-  RetainedSeedDensity seed_index;
+  // Realization reads this density when it gates the late inversion probe
+  // (inv_local_chain.h), so it then outlives placement.
+  std::shared_ptr<RetainedSeedDensity> kept_seed_index;
+  if (context.opts.inversion_probe_local_gate &&
+      context.opts.enable_full_read_cigar)
+    kept_seed_index = std::make_shared<RetainedSeedDensity>();
+  RetainedSeedDensity local_seed_index;
+  RetainedSeedDensity& seed_index =
+      kept_seed_index ? *kept_seed_index : local_seed_index;
   if (!seed_index.build(
           *context.ref.index, forward_seeds, reverse_seeds, fine_forward_seeds,
           fine_reverse_seeds, lookup_cache, fine_forward_slots,
@@ -1979,6 +1987,7 @@ DnaPlacementChainingResult build_dna_placement_chains(
     result.family = std::move(family);
     return result;
   }
+  result.inversion_gate_seeds = std::move(kept_seed_index);
 
   // The screening pass over the catalogue: one cheap chain per candidate from
   // the representative seeds, with no deferral.

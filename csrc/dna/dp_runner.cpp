@@ -18,7 +18,8 @@ realization::RealizationOutcome run_dna_long_realization(
     realization::RealizationRole role, const DpScoringParams &dp,
     realization::SequenceSlice query, realization::SequenceSlice target,
     int caller_requested_band, int interior_zdrop, bool long_join, realization::ExecutionContext *execution_context,
-    bool inversion_probe_enabled, const VerifiedRegionInputs *verified_region) {
+    bool inversion_probe_enabled, const VerifiedRegionInputs *verified_region,
+    const realization::InversionProbeGate *inversion_probe_gate) {
   realization::RealizationRequest request;
   request.role = role;
   request.objective = realization::objective_for_role(role);
@@ -67,6 +68,8 @@ realization::RealizationOutcome run_dna_long_realization(
   request.inversion_max_gap = dp.inversion_max_gap;
   request.inversion_min_chain_score = dp.inversion_min_chain_score;
   request.inversion_min_dp_max = dp.inversion_min_dp_max;
+  if (inversion_probe_gate != nullptr)
+    request.inversion_probe_gate = *inversion_probe_gate;
   request.end_bonus =
       request.objective == realization::EndpointObjective::PinnedGlobal ||
               role == realization::RealizationRole::DnaLocalInversionMiddle

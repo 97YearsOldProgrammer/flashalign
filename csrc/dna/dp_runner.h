@@ -39,14 +39,16 @@ struct VerifiedRegionInputs {
 };
 
 // Runs one realization packet through the controller. Slicing the packet and
-// committing the resulting CIGAR are left to the caller.
+// committing the resulting CIGAR are left to the caller. `inversion_probe_gate`,
+// when set, gates the late probe of a fill whose probe is enabled.
 realization::RealizationOutcome run_dna_long_realization(
     realization::RealizationRole role, const DpScoringParams &dp,
     realization::SequenceSlice query, realization::SequenceSlice target,
     int caller_requested_band, int interior_zdrop = -1, bool long_join = false,
     realization::ExecutionContext *execution_context = nullptr,
     bool inversion_probe_enabled = false,
-    const VerifiedRegionInputs *verified_region = nullptr);
+    const VerifiedRegionInputs *verified_region = nullptr,
+    const realization::InversionProbeGate *inversion_probe_gate = nullptr);
 
 } // namespace lr
 } // namespace cpu

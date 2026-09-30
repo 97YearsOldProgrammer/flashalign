@@ -723,6 +723,7 @@ private:
         mapping.residue_recovery_anchor_floor;
     dctx.opts.postdp_rescoring = mapping.postdp_rescoring;
     dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
+    dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
     dctx.opts.clip_nominate = mapping.dna_clip_nominate;
     dctx.opts.chain_syncmer_s = cfg_.index.syncmer_s;
     dctx.opts.chain_syncmer_downsample = cfg_.index.syncmer_downsample;

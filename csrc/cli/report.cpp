@@ -363,6 +363,10 @@ std::string resolved_config_text(const AlignOptions& opt,
     // HiFi only: the chain MAPQ margin rule (dna/chain_mapq.h).
     row("dna_chain_mapq.hifi_margin", b2s(mapping.chain_mapq_hifi_margin),
         "builtin");
+    // HiFi only: the late inversion probe's local-chain gate
+    // (dna/inv_local_chain.h).
+    row("dna_inv_probe.local_gate", b2s(mapping.inversion_probe_local_gate),
+        "builtin");
   } else if (rna != nullptr) {
     row("rna_rival.pri_ratio", f2s(rna->rival_pri_ratio),
         src(opt.rna_pri_ratio.has_value(), "builtin"));

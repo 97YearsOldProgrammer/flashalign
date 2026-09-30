@@ -26,13 +26,26 @@ enum class DpInversionProbeStatus : std::uint8_t {
   InvalidBounds,
   WeakReverseScore,
   Accepted,
+  // The control's gate kept the probe from running.
+  Gated,
 };
+
+// A count over a drop window (query_begin, query_end, target_begin,
+// target_end; fill-local, half-open), from the caller's source.
+using DpInversionProbeGate = int (*)(const void* source, int query_begin,
+                                     int query_end, int target_begin,
+                                     int target_end);
 
 struct DpInversionProbeControl {
   bool enabled = false;
   int max_gap = 0;
   int min_chain_score = 0;
   int min_dp_max = 0;
+  // When set, the probe runs only where the gate counts at least
+  // gate_min_count over the drop window.
+  DpInversionProbeGate gate = nullptr;
+  const void* gate_source = nullptr;
+  int gate_min_count = 0;
 };
 
 struct DpLocalScoreResult {
@@ -184,7 +197,8 @@ inline DpLocalScoreResult dp_local_score(const uint8_t* qseq, int qlen,
 // Port of minimap2's mm_test_zdrop: re-scores the CIGAR over (qseq, tseq), records the
 // region with the largest diagonal-corrected score drop and returns code 1 when it exceeds
 // opt.zdrop. With an enabled inversion control it also runs the reverse-complement probe
-// over that region and returns code 2 when both reverse-score floors pass.
+// over that region, unless the control's gate is closed there, and returns code 2 when
+// both reverse-score floors pass.
 inline DpZdropResult
 dp_test_zdrop(const DpMapOpt& opt, const uint8_t* qseq, const uint8_t* tseq,
               const std::vector<uint32_t>& cigar, const int8_t* mat,
@@ -247,6 +261,13 @@ dp_test_zdrop(const DpMapOpt& opt, const uint8_t* qseq, const uint8_t* tseq,
           result.query_end <= j && result.target_end <= i;
       if (!valid_bounds) {
         result.inversion_status = DpInversionProbeStatus::InvalidBounds;
+      } else if (inversion_control->gate != nullptr &&
+                 inversion_control->gate(inversion_control->gate_source,
+                                         result.query_begin, result.query_end,
+                                         result.target_begin,
+                                         result.target_end) <
+                     inversion_control->gate_min_count) {
+        result.inversion_status = DpInversionProbeStatus::Gated;
       } else {
         std::vector<uint8_t> reverse_query(
             static_cast<std::size_t>(query_length));

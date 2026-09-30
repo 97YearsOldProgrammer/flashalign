@@ -311,7 +311,10 @@ diagonal of the DP matrix (diagonal X-drop, or Z-drop) [800,200]. Under a DNA
 preset, a drop above
 .I INT2
 tests the dropped region for a small inversion, aligning the reverse complement
-of the query there. If
+of the query there; under
+.BR lr:hq ,
+only where the read's own seeds of the other strand chain inside that region.
+If
 .I INT2
 is not specified, it is set to
 .IR INT1 ;

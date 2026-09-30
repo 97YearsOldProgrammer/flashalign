@@ -4,6 +4,7 @@
 #include "cigar_geometry.h"
 #include "dp_runner.h"
 #include "../chaining/dense_chain.h"
+#include "inv_local_chain.h"
 #include "ordered_anchor_path.h"
 #include "placement_chaining.h"
 #include "record_family.h"
@@ -17,6 +18,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <string>
 #include <tuple>
@@ -459,12 +462,47 @@ bool plan_and_realize_packets(const DnaContext& context,
 
   int q_cursor = plan.query_begin_cut;
   int r_cursor = plan.target_begin_cut;
+  // HiFi presets: a seam's or piece's late inversion probe runs only over a
+  // local chain of the read's opposite-lane seeds in its drop window. A
+  // bridge's probe, a veto, is not gated.
+  const bool gate_probe = context.opts.inversion_probe_local_gate;
+  DnaInvLocalChainSource local_source;
+  realization::InversionProbeGate probe_gate;
+  if (gate_probe) {
+    // Placement keeps the read's seed list for the gate (map_read); checked
+    // in release builds too.
+    if (context.inversion_gate_seeds == nullptr) {
+      std::fputs("flashalign: internal error: the inversion probe gate has "
+                 "no seed list\n",
+                 stderr);
+      std::abort();
+    }
+    local_source.seeds = context.inversion_gate_seeds;
+    local_source.index = context.ref.index;
+    local_source.chromosome = plan.chromosome;
+    local_source.block_reverse = plan.reverse;
+    local_source.read_length = request.family->read_length;
+    local_source.seed_length = request.family->seed_length;
+    // The whole-query harvest's occurrence gate.
+    local_source.occurrence_cap =
+        context.opts.dna_pool_gate_occ > 0
+            ? static_cast<std::uint32_t>(context.opts.dna_pool_gate_occ)
+            : 0u;
+    probe_gate.count = dna_inv_local_chain;
+    probe_gate.source = &local_source;
+    probe_gate.min_count = kDnaInvLocalMinAnchors;
+  }
   for (const ordered::GeometryStep& step : plan.geometry.steps) {
     const int q_span = step.query_end - step.query_begin;
     const int r_span = step.target_end - step.target_begin;
     // A pure-axis step is materialized by the controller without an executor.
     const bool two_axis = q_span > 0 && r_span > 0;
     const bool verified = step.kind == ordered::GeometryStepKind::Verified;
+    const bool gated = gate_probe && two_axis && !verified;
+    if (gated) {
+      local_source.query_offset = step.query_begin;
+      local_source.target_offset = step.target_begin;
+    }
     VerifiedRegionInputs region;
     region.gaps = step.gap_count > 0
                       ? plan.geometry.gaps.data() + step.gap_begin
@@ -502,7 +540,7 @@ bool plan_and_realize_packets(const DnaContext& context,
             r_span > 0 ? reference.data() + step.target_begin : nullptr, r_span,
             step.target_begin),
         two_axis ? step.selected_band : -1, scoring.zdrop, step.long_join, nullptr,
-        /*inversion_probe_enabled=*/true, verified_region);
+        /*inversion_probe_enabled=*/true, verified_region, gated ? &probe_gate : nullptr);
     price_fill_path(context.opts, query.data() + step.query_begin, q_span,
                     reference.data() + step.target_begin, r_span, outcome);
     record_kernel_work(outcome, q_span, r_span, result);

@@ -56,6 +56,7 @@ add_library(flashalign_dna STATIC
     csrc/dna/postdp_scoring.cpp
     csrc/dna/mapq_routing.cpp
     csrc/dna/retained_seed_density.cpp
+    csrc/dna/inv_local_chain.cpp
     csrc/dna/placement_chaining.cpp
     csrc/dna/placement_family_adapter.cpp
     csrc/dna/record_family.cpp

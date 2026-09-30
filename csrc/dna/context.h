@@ -23,6 +23,8 @@ inline constexpr int kDnaPostCommitRecordMinBlockTiles = 1;
 // minimap2's opt->min_chain_score (-m); map-ont and map-hifi keep the default.
 inline constexpr int kDnaMinChainScore = 40;
 
+class RetainedSeedDensity;
+
 // The options the DNA stages read, copied from the typed options at the call
 // boundary. Defaults are the shipped settings.
 struct ResolvedDnaOptions {
@@ -98,6 +100,10 @@ struct ResolvedDnaOptions {
   // Chain MAPQ, HiFi presets only: on the DP branch the raw ksw2 margin
   // replaces the ratio form.
   bool chain_mapq_hifi_margin = false;
+  // HiFi presets only: a seam's or piece's late inversion probe runs only
+  // over a local chain of the read's opposite-lane seeds in its drop window
+  // (inv_local_chain.h).
+  bool inversion_probe_local_gate = false;
   // Off by default: nominate a second locus from the read's unclaimed
   // terminal query.
   bool clip_nominate = false;
@@ -125,6 +131,10 @@ struct DnaContext {
   // tie_read_seed(read_name_hash, read length), set by map_read before the
   // vote. Every tie-break of the read uses this value.
   std::uint32_t vote_tie_seed = 0;
+  // The read's seed density for the inversion probe's local chain, kept by
+  // placement (DnaPlacementChainingResult::inversion_gate_seeds) and set by
+  // map_read for every realization of the read; null when not kept.
+  const RetainedSeedDensity* inversion_gate_seeds = nullptr;
 };
 
 } // namespace lr

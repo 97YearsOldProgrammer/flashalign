@@ -66,6 +66,15 @@ struct ScoringContract {
   ScoreModel model = ScoreModel::DualAffine;
 };
 
+// dp/control.h DpInversionProbeControl's gate: the late probe runs only where
+// count(source, window) is at least min_count; source is borrowed for the call.
+struct InversionProbeGate {
+  int (*count)(const void* source, int query_begin, int query_end,
+               int target_begin, int target_end) = nullptr;
+  const void* source = nullptr;
+  int min_count = 0;
+};
+
 struct RealizationRequest {
   RealizationRole role = RealizationRole::DnaInternalFill;
   EndpointObjective objective = EndpointObjective::PinnedGlobal;
@@ -83,6 +92,7 @@ struct RealizationRequest {
   int inversion_max_gap = 0;
   int inversion_min_chain_score = 0;
   int inversion_min_dp_max = 0;
+  InversionProbeGate inversion_probe_gate;
   int end_bonus = -1;
   std::int64_t matrix_cell_cap = 0;
   bool long_join = false;
@@ -188,6 +198,7 @@ enum class InversionProbeStatus : std::uint8_t {
   InvalidBounds,
   WeakReverseScore,
   Accepted,
+  Gated,
 };
 
 struct ZdropTestEvidence {
