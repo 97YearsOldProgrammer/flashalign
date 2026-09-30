@@ -263,6 +263,12 @@ struct WideVisit {
 };
 #endif // FA_DENSE_EXACT_WIDE
 
+// The key of a diagonal in the two maps below. FlatInt64Map's hash folds the
+// high word into the low one, which sends diagonal -a to the slot of a - 1.
+// Biased by 2^31, every diagonal of int32 coordinates is a key in [0, 2^32),
+// where that hash is the identity, so a diagonal d >= 0 keeps its slot.
+inline int64_t dense_diagonal_key(int64_t d) { return d + (int64_t{1} << 31); }
+
 // Per-thread scratch for dense_run_chain and chain_dense_colinear, kept at capacity across
 // calls. Every vector is resized or assigned before it is read.
 struct DenseChainScratch {
@@ -328,9 +334,10 @@ dense_collapse_runs_stream(const std::vector<Anchor>& pool, int32_t span,
     const Anchor& anchor = pool[at_pool];
     const int32_t index = static_cast<int32_t>(at_pool);
     const int64_t d = static_cast<int64_t>(anchor.r) - anchor.q;
-    auto found = open.find(d);
+    auto found = open.find(dense_diagonal_key(d));
     const bool inserted = found == open.end();
-    int32_t& which = inserted ? (open[d] = -1) : found->second;
+    int32_t& which =
+        inserted ? (open[dense_diagonal_key(d)] = -1) : found->second;
     if (!inserted && which >= 0) {
       const size_t at = static_cast<size_t>(which);
       const int64_t step = static_cast<int64_t>(anchor.r) - previous_r[at];
@@ -431,7 +438,7 @@ public:
     const HotRun& r = hot_[static_cast<size_t>(i)];
     const int64_t d = diagonal(r);
     // Runs activate in ascending i, so this keeps the largest index on the diagonal.
-    diag_last_[d] = i;
+    diag_last_[dense_diagonal_key(d)] = i;
     for (int32_t at = leaf_[static_cast<size_t>(i)]; at >= 0;
          at = tree_[static_cast<size_t>(at)].parent) {
       ExactNode& n = tree_[static_cast<size_t>(at)];
@@ -464,8 +471,8 @@ public:
     // drift vanishes. The election rule is a total order on (score, index), with the fresh
     // start highest, so evaluation order cannot change the result; a better incumbent
     // only prunes more.
-    const auto seed =
-        diag_last_.find(static_cast<int64_t>(b.r_begin) - b.q_begin);
+    const auto seed = diag_last_.find(
+        dense_diagonal_key(static_cast<int64_t>(b.r_begin) - b.q_begin));
     if (seed != diag_last_.end())
       elect(b, seed->second, best_score, best_predecessor);
     // A node that can only tie the best is entered only for a predecessor above the elected
@@ -952,7 +959,7 @@ public:
   void activate(int32_t i) {
     const HotRun& r = hot_[static_cast<size_t>(i)];
     const int32_t d = r.r_end - r.q_end;
-    diag_last_[static_cast<int64_t>(d)] = i;
+    diag_last_[dense_diagonal_key(d)] = i;
     const int32_t packed = run_leaf_[static_cast<size_t>(i)];
     WideLeaf& leaf = leaves_[static_cast<size_t>(packed / kWideLanes)];
     leaf.score[packed % kWideLanes] = r.score;
@@ -986,8 +993,8 @@ public:
   // the incumbent when popped.
   void search(int32_t i, int32_t& best_score, int32_t& best_predecessor) {
     const HotRun& b = hot_[static_cast<size_t>(i)];
-    const auto seed =
-        diag_last_.find(static_cast<int64_t>(b.r_begin) - b.q_begin);
+    const auto seed = diag_last_.find(
+        dense_diagonal_key(static_cast<int64_t>(b.r_begin) - b.q_begin));
     if (seed != diag_last_.end())
       elect(b, seed->second, best_score, best_predecessor);
     stack_.clear();
