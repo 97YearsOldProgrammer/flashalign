@@ -37,15 +37,11 @@ inline constexpr int kDnaTandemWindow = 1000;
 // it.
 inline constexpr int kDnaMinKswLen = 200;
 
-// Dense-chain pool admission. The whole-query pool has two size bounds,
-// chaining::kDenseRawAnchorCeiling and chaining::kDenseRunCap, and neither
-// refuses a read. Postings are harvested under a per-read budget
+// Dense-chain pool admission. Postings are harvested under a per-pass budget
 // (dna/placement_chaining.h kDnaSkipPoolBudget) shared over the query tiles
 // that hold them; a tile over its share keeps only slices at or under the
-// global occurrence cap, rarest first. A ceiling breach keeps the rarest-first
-// prefix that fits, and a run-cap breach drops the satellite tiles from the
-// collapse (chaining::dense_skip_satellite_tiles); the chain crosses a skipped
-// tile as a gap. The budget bounds work rather than evidence: any occurrence
+// global occurrence cap, rarest first, and the chain crosses a tile that keeps
+// none as a gap. The budget bounds work rather than evidence: any occurrence
 // threshold on runs low enough to shrink a satellite pool also cuts the unique
 // flanks a placement rests on.
 //

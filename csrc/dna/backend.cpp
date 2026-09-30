@@ -1549,7 +1549,7 @@ AlignResult map_read(const DnaContext& base_dctx,
                                           DnaTileOwnership ownership) {
     return build_dna_placement_chains(
         dctx, std::move(family), fwd_enc, reverse_query_stream(),
-        &scratch.fwd.retained_seeds, &scratch.rc.retained_seeds, 60000,
+        &scratch.fwd.retained_seeds, &scratch.rc.retained_seeds,
         shared_fwd_syncmer_seeds, shared_rc_syncmer_seeds, lookup_cache,
         query_seed_pool.captured_slots(DnaQuerySeedStrand::Forward),
         query_seed_pool.captured_slots(DnaQuerySeedStrand::Reverse),

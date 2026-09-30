@@ -1728,160 +1728,6 @@ DenseRunResult dense_run_chain(const std::vector<DenseRun>& runs,
   return result;
 }
 
-namespace {
-
-// The satellite skip's grouping of runs by (query tile, diagonal). Compact keys are
-// sorted rather than run indices, so a comparison does not chase two DenseRuns.
-struct TileKey {
-  int64_t d = 0;
-  int32_t tile = 0;
-  int32_t idx = 0;
-  int32_t w = 0;
-};
-
-struct DiagGroup {
-  int64_t d = 0;
-  int64_t sum_w = 0; // this TILE's weight on this diagonal
-  int32_t tile = 0;
-  int32_t begin = 0; // half-open range of `keys`
-  int32_t end = 0;
-};
-
-// `keys` comes back one entry per run in (tile, d, pool index) order and `groups` holds its
-// maximal (tile, d) ranges in the same order, so a tile is a contiguous range of `groups`.
-// The order is total, so the grouping is a pure function of the pool.
-void dense_tile_groups(const std::vector<DenseRun>& runs,
-                       std::vector<TileKey>& keys,
-                       std::vector<DiagGroup>& groups) {
-  const int64_t count = static_cast<int64_t>(runs.size());
-  keys.assign(static_cast<size_t>(count), TileKey{});
-  groups.clear();
-  for (int64_t i = 0; i < count; ++i) {
-    const DenseRun& run = runs[static_cast<size_t>(i)];
-    TileKey& key = keys[static_cast<size_t>(i)];
-    key.d = run.d;
-    // A run's tile is its query midpoint's, so each run belongs to exactly one tile.
-    key.tile = static_cast<int32_t>(
-        (static_cast<int64_t>(run.q_begin) + run.q_end) / 2 /
-        static_cast<int64_t>(kDenseAdmitTileBp));
-    key.idx = static_cast<int32_t>(i);
-    key.w = run.w;
-  }
-  std::sort(keys.begin(), keys.end(),
-            [](const TileKey& left, const TileKey& right) {
-              if (left.tile != right.tile)
-                return left.tile < right.tile;
-              if (left.d != right.d)
-                return left.d < right.d;
-              return left.idx < right.idx;
-            });
-  for (int64_t at = 0; at < count;) {
-    DiagGroup group;
-    group.tile = keys[static_cast<size_t>(at)].tile;
-    group.d = keys[static_cast<size_t>(at)].d;
-    group.begin = static_cast<int32_t>(at);
-    while (at < count && keys[static_cast<size_t>(at)].tile == group.tile &&
-           keys[static_cast<size_t>(at)].d == group.d) {
-      group.sum_w += keys[static_cast<size_t>(at)].w;
-      ++at;
-    }
-    group.end = static_cast<int32_t>(at);
-    groups.push_back(group);
-  }
-}
-
-} // namespace
-
-// The satellite skip (see dense_chain.h), for a pool over the run cap with
-// skip_satellites set; the DNA pool trim usually drops satellite tiles earlier. A chain
-// through a satellite ladder buys nothing the output reads: realization spans the interior
-// by DP whatever anchors the chain carries across it. A tile is classified and acted on as
-// a unit. The DP crosses a dropped tile as a colinear jump while the query gap stays within
-// max_dist_x; a wider hole splits the chain. Every order ends in the pool index, so the kept
-// set is a pure function of the pool.
-std::vector<int32_t>
-dense_skip_satellite_tiles(const std::vector<DenseRun>& runs, int64_t run_cap,
-                           int64_t* skipped_tiles, int64_t* coherent_tiles) {
-  std::vector<int32_t> kept;
-  if (skipped_tiles != nullptr)
-    *skipped_tiles = 0;
-  if (coherent_tiles != nullptr)
-    *coherent_tiles = 0;
-  const int64_t count = static_cast<int64_t>(runs.size());
-  if (count == 0)
-    return kept;
-
-  std::vector<TileKey> keys;
-  std::vector<DiagGroup> groups;
-  dense_tile_groups(runs, keys, groups);
-
-  kept.reserve(static_cast<size_t>(count));
-  int64_t skipped = 0;
-  int64_t coherent = 0;
-  const auto keep_group = [&kept, &keys](const DiagGroup& group) {
-    for (int32_t at = group.begin; at < group.end; ++at)
-      kept.push_back(keys[static_cast<size_t>(at)].idx);
-  };
-  // Tiles are contiguous ranges of `groups`, so one walk classifies them.
-  for (size_t g = 0; g < groups.size();) {
-    const int32_t tile = groups[g].tile;
-    const size_t first = g;
-    int64_t tile_runs = 0;
-    int64_t total_w = 0;
-    size_t top = first;
-    while (g < groups.size() && groups[g].tile == tile) {
-      tile_runs += static_cast<int64_t>(groups[g].end) - groups[g].begin;
-      total_w += groups[g].sum_w;
-      // Strictly heavier keeps the first maximum, so ties go to the lower diagonal.
-      if (groups[g].sum_w > groups[top].sum_w)
-        top = g;
-      ++g;
-    }
-    const size_t last = g;
-    if (tile_runs < kDenseSkipTileRuns) {
-      for (size_t which = first; which < last; ++which)
-        keep_group(groups[which]);
-      continue;
-    }
-    // Guards the division; every run a collapse emits has w > 0.
-    const double share =
-        total_w > 0 ? static_cast<double>(groups[top].sum_w) /
-                          static_cast<double>(total_w)
-                    : 0.0;
-    if (share < kDenseSkipCoherentShare) {
-      ++skipped;
-      continue;
-    }
-    ++coherent;
-    keep_group(groups[top]);
-  }
-  if (skipped_tiles != nullptr)
-    *skipped_tiles = skipped;
-  if (coherent_tiles != nullptr)
-    *coherent_tiles = coherent;
-
-  // A kept set still over the cap keeps the run_cap heaviest runs rather than refusing.
-  // Ties go by r_begin, then pool index: a strict order, so the kept set is unique.
-  if (run_cap > 0 && static_cast<int64_t>(kept.size()) > run_cap) {
-    const auto heavier = [&runs](int32_t left, int32_t right) {
-      const DenseRun& a = runs[static_cast<size_t>(left)];
-      const DenseRun& b = runs[static_cast<size_t>(right)];
-      if (a.w != b.w)
-        return a.w > b.w;
-      if (a.r_begin != b.r_begin)
-        return a.r_begin < b.r_begin;
-      return left < right;
-    };
-    std::nth_element(kept.begin(),
-                     kept.begin() + static_cast<std::ptrdiff_t>(run_cap),
-                     kept.end(), heavier);
-    kept.resize(static_cast<size_t>(run_cap));
-  }
-  // Back to ascending pool order, i.e. ascending r_begin, which dense_run_chain requires.
-  std::sort(kept.begin(), kept.end());
-  return kept;
-}
-
 ChainResult chain_dense_colinear(std::vector<Anchor> anchors,
                                  DenseChainParams params,
                                  DenseChainStats* stats) {
@@ -1913,44 +1759,15 @@ ChainResult chain_dense_colinear(std::vector<Anchor> anchors,
   std::vector<int32_t>& links = dense_chain_scratch().links;
   const std::vector<DenseRun> runs =
       dense_collapse_runs_stream(result.anchors, params.span, links);
-  const bool over_cap =
-      params.run_cap > 0 && static_cast<int64_t>(runs.size()) > params.run_cap;
-  // Over the cap, skip_satellites chooses between the satellite skip and a refusal.
-  const bool skip = over_cap && params.skip_satellites;
-  const bool refused = over_cap && !skip;
-  // The DP's input when skipping; otherwise it stays empty and the DP reads `runs`.
-  std::vector<DenseRun> dp_runs;
-  int64_t skipped_tiles = 0;
-  int64_t coherent_tiles = 0;
-  if (skip) {
-    const std::vector<int32_t> dp_pool_index = dense_skip_satellite_tiles(
-        runs, params.run_cap, &skipped_tiles, &coherent_tiles);
-    dp_runs.reserve(dp_pool_index.size());
-    for (const int32_t which : dp_pool_index)
-      dp_runs.push_back(runs[static_cast<size_t>(which)]);
-  }
-  const std::vector<DenseRun>& dp_input = skip ? dp_runs : runs;
   if (stats != nullptr) {
     stats->runs = static_cast<int64_t>(runs.size());
     stats->anchors = static_cast<int64_t>(result.anchors.size());
-    // dense_run_chain's use_exact test, on the DP's actual input.
-    stats->used_exact_arm = !refused && params.diag_min_runs >= 0 &&
-                            static_cast<int64_t>(dp_input.size()) >=
+    // dense_run_chain's use_exact test.
+    stats->used_exact_arm = params.diag_min_runs >= 0 &&
+                            static_cast<int64_t>(runs.size()) >=
                                 static_cast<int64_t>(params.diag_min_runs);
-    stats->run_cap_refused = refused;
-    // -1 when the skip did not run; skipped_runs includes the over-cap trim.
-    stats->pool_skipped = skip;
-    stats->skipped_tiles = skip ? skipped_tiles : -1;
-    stats->coherent_tiles = skip ? coherent_tiles : -1;
-    stats->kept_runs = skip ? static_cast<int64_t>(dp_runs.size()) : -1;
-    stats->skipped_runs =
-        skip ? static_cast<int64_t>(runs.size()) -
-                   static_cast<int64_t>(dp_runs.size())
-             : -1;
   }
-  if (refused)
-    return result;
-  const DenseRunResult collapsed = dense_run_chain(dp_input, params);
+  const DenseRunResult collapsed = dense_run_chain(runs, params);
   if (stats != nullptr) {
     stats->exact_runs = collapsed.exact_runs;
     stats->exact_nodes = collapsed.exact_nodes;
@@ -1967,7 +1784,7 @@ ChainResult chain_dense_colinear(std::vector<Anchor> anchors,
     std::vector<int32_t> idx;
     int32_t reserve = 0;
     for (const int32_t which : chain.idx)
-      reserve += dp_input[static_cast<size_t>(which)].raw_count;
+      reserve += runs[static_cast<size_t>(which)].raw_count;
     idx.reserve(static_cast<size_t>(reserve));
     int32_t last_q = INT32_MIN;
     int32_t last_r = INT32_MIN;
@@ -1983,7 +1800,7 @@ ChainResult chain_dense_colinear(std::vector<Anchor> anchors,
       }
     };
     for (size_t position = 0; position < chain.idx.size(); ++position)
-      emit_run(dp_input[static_cast<size_t>(chain.idx[position])]);
+      emit_run(runs[static_cast<size_t>(chain.idx[position])]);
     if (idx.empty())
       continue;
     result.chains.push_back(Chain{std::move(idx), chain.score});

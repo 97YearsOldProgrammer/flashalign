@@ -80,18 +80,6 @@ struct DnaPlacementCandidateChain {
   std::uint64_t rescued_anchors = 0;
   // Runs produced by the whole-query pass's collapse; 0 on the screening pass.
   std::int64_t dense_runs = 0;
-  // The raw anchor ceiling was hit during the deferred restore and the pool
-  // was rebuilt as the rarest-first prefix that fits.
-  bool pool_truncated = false;
-  // The run cap fired and chaining::dense_skip_satellite_tiles dropped the
-  // runs of skipped_tiles query tiles: kept_runs reached the DP, skipped_runs
-  // did not, and coherent_tiles dense tiles were kept at their dominant
-  // diagonal. The stage 1 trim below makes this rare.
-  bool pool_skipped = false;
-  int skipped_tiles = 0;
-  int skipped_runs = 0;
-  int kept_runs = 0;
-  int coherent_tiles = 0;
   // The stage 1 trim (see kDnaSkipPoolBudget), run on the deferred slices'
   // metadata before any is restored. pool_trimmed: some tile was over its
   // share. trimmed_tiles: how many. trimmed_postings: postings never
@@ -129,21 +117,21 @@ inline constexpr int kDnaMapqRivalChains = 2;
 // owner's vote are chained; the rest still enter the MAPQ through their vote.
 inline constexpr int kDnaMapqRivalVoteDenominator = 4;
 
-// Stage 1 of the pool admission, run on the deferred slices' metadata before
-// any anchor is built. kDnaSkipPoolBudget postings are shared among the
-// chaining::kDenseAdmitTileBp oriented-query tiles that hold a slice, each
-// getting max(kDnaSkipTileFloor, budget / occupied tiles). A tile within its
-// share is restored whole. A tile over it keeps only slices whose key is under
-// cigar_local_global_occ, rarest first by (global_count, count, read_pos,
-// slot), while their total stays within the share (the rarest admissible
-// slice always); a tile with no admissible slice keeps nothing, and the DP
-// crosses it as a gap. The budget equals chaining::kDenseRunCap, so the
-// collapse stays under the run cap even at one anchor per run. The budget is
-// per read because a per-tile bar does not bound a sum of many ordinary
-// tiles, and rarity is genome-wide because a key rare in the genome
-// localizes the read while one merely rare in the window may not.
-inline constexpr std::uint64_t kDnaSkipPoolBudget =
-    static_cast<std::uint64_t>(chaining::kDenseRunCap);
+// Stage 1 of the pool admission: a posting budget per whole-query pass, spent
+// on the deferred slices' metadata before any anchor is built.
+// kDnaSkipPoolBudget postings are shared among the chaining::kDenseAdmitTileBp
+// oriented-query tiles that hold a slice, each getting max(kDnaSkipTileFloor,
+// budget / occupied tiles). A tile within its share is restored whole. A tile
+// over it keeps only slices whose key is under cigar_local_global_occ, rarest
+// first by (global_count, count, read_pos, slot), while their total stays
+// within the share (the rarest admissible slice always); a tile with no
+// admissible slice keeps nothing, and the DP crosses it as a gap. The floor
+// and the rarest admissible slice can take a long read's pool above the
+// budget, so the bound grows with read length. The budget spans the whole
+// query because a per-tile bar does not bound a sum of many ordinary tiles,
+// and rarity is genome-wide because a key rare in the genome localizes the
+// read while one merely rare in the window may not.
+inline constexpr std::uint64_t kDnaSkipPoolBudget = 65536;
 inline constexpr std::uint64_t kDnaSkipTileFloor = 128;
 
 // Top histogram clusters considered per strand.
@@ -204,8 +192,7 @@ dna_residue_diagonal_clusters(const std::vector<DnaResidueAnchor>& anchors,
 // dna_candidate_chain_params and applies the admission bar to the expanded
 // chain: at least bar.min_chain_anchors anchors, a score of at least
 // kDnaResidueScoreFloorMatches * min(seed_length, 255), and the anchor
-// density per 100 query bases. A run-cap refusal leaves the cluster
-// unadmitted; it never unmaps the read.
+// density per 100 query bases.
 DnaResidueChainOutcome dna_residue_chain_cluster(
     const DnaContext& context, std::vector<chaining::Anchor> anchors,
     int seed_length, int read_length,
@@ -344,16 +331,13 @@ chaining::ColinearChainParams
 dna_candidate_chain_params(const DnaContext& context, int seed_length,
                            int read_length);
 
-// The same parameters for the dense run chain: the scoring is unchanged and
-// the run cap replaces max_iter and max_skip. The diagonal-keyed search runs
+// The same parameters for the dense run chain: the scoring is unchanged, and
+// max_iter and max_skip have no counterpart. The diagonal-keyed search runs
 // when diag_min_runs >= 0 && runs >= diag_min_runs, the linear scan
-// otherwise; both are exact. `skip_satellites` makes a run-cap breach drop
-// satellite tiles instead of refusing: true for whole-query pools, false for
-// residue clusters, where a refusal loses only the cluster.
+// otherwise; both are exact.
 chaining::DenseChainParams
 dna_dense_chain_params(const chaining::ColinearChainParams& params,
-                       int seed_length, int diag_min_runs,
-                       bool skip_satellites);
+                       int seed_length, int diag_min_runs);
 
 // Runs the restore/stabilize pipeline over {retained alternative, null}. The
 // returned family uses solver id 0 and records the catalogue id in
@@ -363,8 +347,7 @@ build_dna_alternative_placement(const DnaContext& context,
                                 const DnaPlacementFamily& stable_family,
                                 const DnaPlacementChainingResult& stable,
                                 const std::vector<std::uint8_t>& forward_query,
-                                const std::vector<std::uint8_t>& reverse_query,
-                                std::size_t selected_anchor_limit = 60000);
+                                const std::vector<std::uint8_t>& reverse_query);
 
 // The same over {one catalogue candidate, null}, from a given exact
 // whole-query chain.
@@ -374,8 +357,7 @@ build_dna_rival_placement(const DnaContext& context,
                           ::fa::cpu::voting::CandidateId original,
                           const DnaPlacementCandidateChain& exact_chain,
                           const std::vector<std::uint8_t>& forward_query,
-                          const std::vector<std::uint8_t>& reverse_query,
-                          std::size_t selected_anchor_limit = 60000);
+                          const std::vector<std::uint8_t>& reverse_query);
 
 // Which query tiles an accepted whole-query chain owns when stabilization
 // re-solves the partition (see stabilize_selected_family).
@@ -394,7 +376,6 @@ DnaPlacementChainingResult build_dna_placement_chains(
     const std::vector<std::uint8_t>& reverse_query,
     const std::vector<ChainWindowRetainedSeed>* forward_seeds,
     const std::vector<ChainWindowRetainedSeed>* reverse_seeds,
-    std::size_t selected_anchor_limit,
     const std::vector<QuerySeed>* fine_forward_seeds,
     const std::vector<QuerySeed>* fine_reverse_seeds,
     ChainSeedLookupCache* lookup_cache,

@@ -43,24 +43,11 @@ inline constexpr int32_t kDenseDiagMinRuns = 512;
 // 2^30; a pool outside that domain takes the portable arm. dense_chain.cpp is compiled with
 // -ffp-contract=off so the vector floats equal dense_step's.
 
-// Runs per candidate above which the chain is refused (or the satellite skip runs). It
-// bounds the collapsed pool, not the anchor count: a huge anchor pool that collapses to few
-// runs is the case the collapse exists for.
-inline constexpr int64_t kDenseRunCap = 65536;
-// Memory ceiling on the anchor pool the collapse consumes; the run cap is the operative bound.
-inline constexpr size_t kDenseRawAnchorCeiling = 1000000;
-// Query-tile width, in oriented-query bp, of the pool's spatial cut; a run's tile is that of
-// its query midpoint. The DNA pool trim shares its per-read budget over these tiles and the
-// satellite skip classifies them, so a satellite stretch gets a share by the query it covers
-// rather than by how many runs it piles up. Far below max_dist_x, far above a seed length.
+// Query-tile width, in oriented-query bp, of the pool's spatial cut. The DNA pool trim
+// shares its posting budget over these tiles, so a satellite stretch gets a share by the
+// query it covers rather than by how many postings it piles up. Far below max_dist_x, far
+// above a seed length.
 inline constexpr int32_t kDenseAdmitTileBp = 1024;
-// Runs in one query tile at or above which the tile is dense. A unique kilobase collapses
-// to a handful of runs and a few-copy duplication to tens; hundreds means a tandem ladder.
-inline constexpr int64_t kDenseSkipTileRuns = 256;
-// Share of a dense tile's weight its heaviest diagonal must hold for the tile to be coherent
-// (one densely supported alignment, kept at that diagonal) rather than a ladder of rungs of
-// comparable weight (dropped).
-inline constexpr double kDenseSkipCoherentShare = 0.5;
 
 // A maximal same-diagonal anchor run, cut on a diagonal change or an r-step above `span`.
 // `w` is its length, span plus the r-steps: the score the anchor-level DP gives it.
@@ -94,11 +81,6 @@ struct DenseChainParams {
   // Exact-arm implementation: 1 uses the wide arm where the CPU and the pool allow it and
   // the portable one otherwise; 2 forces the portable one. Both give the same result.
   int32_t exact = 1;
-  // Runs above which the candidate is refused before the DP runs; 0 disables the cap.
-  int64_t run_cap = kDenseRunCap;
-  // Over the run cap, drop the satellite query tiles (dense_skip_satellite_tiles) and
-  // chain the rest instead of refusing. Nothing reads it below the cap.
-  bool skip_satellites = false;
 };
 
 // Builds the runs in one pass: a same-diagonal anchor joins its diagonal's open run when
@@ -131,39 +113,16 @@ struct DenseRunResult {
 DenseRunResult dense_run_chain(const std::vector<DenseRun>& runs,
                                const DenseChainParams& params);
 
-// The satellite skip for a pool over the run cap: classifies each query tile and returns
-// the kept runs' indices in ascending order (every index when no tile is dense):
-//   satellite  kDenseSkipTileRuns or more runs and no diagonal holding
-//              kDenseSkipCoherentShare of the weight: dropped whole, and the DP crosses
-//              the hole as one colinear jump;
-//   coherent   dense, with such a diagonal: only that diagonal's runs are kept;
-//   sparse     everything else, kept whole.
-// If the kept set still exceeds `run_cap` (> 0), the run_cap heaviest runs are kept.
-// `skipped_tiles` and `coherent_tiles` receive the tile counts when non-null. The kept set
-// is a pure function of the pool.
-std::vector<int32_t>
-dense_skip_satellite_tiles(const std::vector<DenseRun>& runs, int64_t run_cap,
-                           int64_t* skipped_tiles, int64_t* coherent_tiles);
 
 struct DenseChainStats {
   int64_t runs = 0;
   int64_t anchors = 0;
   // The DP input had diag_min_runs or more runs, so the exact arm ran.
   bool used_exact_arm = false;
-  // Over the run cap with skip_satellites off: no DP ran and the result has no chains.
-  bool run_cap_refused = false;
   // DenseRunResult's exact-arm counters.
   int64_t exact_runs = 0;
   int64_t exact_nodes = 0;
   int64_t exact_steps = 0;
-  // The satellite skip, run instead of the refusal: tiles dropped, dense tiles kept at
-  // their dominant diagonal, runs handed to the DP and runs dropped. The counts are -1
-  // when the skip did not run; `runs` and `anchors` describe the full collapse.
-  bool pool_skipped = false;
-  int64_t skipped_tiles = -1;
-  int64_t skipped_runs = -1;
-  int64_t kept_runs = -1;
-  int64_t coherent_tiles = -1;
 };
 
 // Pool -> runs -> run DP -> anchor chains. The result owns the pool; every chain's anchor
