@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <tuple>
 #include <vector>
 
@@ -66,6 +67,67 @@ bool posting_supports_peak(
   return supported;
 }
 
+// First index of `view` whose global position is at least `global`; the
+// positions ascend.
+std::uint32_t posting_lower_bound(const KmerPostingView& view,
+                                  std::uint32_t from, std::uint64_t global) {
+  std::uint32_t low = from;
+  std::uint32_t high = view.count;
+  while (low < high) {
+    const std::uint32_t middle = low + (high - low) / 2;
+    if (static_cast<std::uint64_t>(view.positions[middle]) < global)
+      low = middle + 1;
+    else
+      high = middle;
+  }
+  return low;
+}
+
+// The postings of a seed at oriented position `read_pos` that
+// posting_supports_peak can accept form one run [first, last) of the list:
+// those on the peak's contig at a local position below both the contig's end
+// and its length minus the seed length, and at a diagonal bin within one of
+// the peak's, which is a local interval since the bin is non-decreasing in
+// the local position. False when the bin test's int cast of the local position
+// could wrap (a contig past INT_MAX): the whole list must then be walked.
+bool peak_posting_run(const DnaContext& context, const VotePeak& peak,
+                      int seed_length, int read_length, int read_pos,
+                      const KmerPostingView& view, std::uint32_t& first,
+                      std::uint32_t& last) {
+  first = 0;
+  last = 0;
+  if (context.ref.index == nullptr || peak.chr < 0 ||
+      peak.chr >= context.ref.contig_count() || read_pos < 0 ||
+      read_pos + seed_length > read_length)
+    return true;
+  const std::uint64_t* offsets = context.ref.index->chrom_offsets_data();
+  const std::uint64_t chromosome_begin =
+      offsets[static_cast<std::size_t>(peak.chr)];
+  const std::uint64_t chromosome_end =
+      offsets[static_cast<std::size_t>(peak.chr + 1)];
+  if (chromosome_end <= chromosome_begin) return true;
+  const std::int64_t local_end = std::min<std::int64_t>(
+      static_cast<std::int64_t>(chromosome_end - chromosome_begin),
+      context.ref.contig_length(peak.chr) - seed_length + 1);
+  if (local_end <= 0) return true;
+  if (local_end - 1 > std::numeric_limits<int>::max()) return false;
+  const int width = std::max(1, peak.anchor.ref_start_bin_width);
+  const int peak_bin =
+      peak.anchor.ref_start_bin_width > 0
+          ? peak.anchor.ref_start_bin
+          : vote_floor_div(static_cast<int>(peak.raw_ref_start), width);
+  const std::int64_t low = std::max<std::int64_t>(
+      0, (static_cast<std::int64_t>(peak_bin) - 1) * width + read_pos);
+  const std::int64_t high = std::min<std::int64_t>(
+      local_end, (static_cast<std::int64_t>(peak_bin) + 2) * width + read_pos);
+  if (low >= high) return true;
+  first = posting_lower_bound(
+      view, 0, chromosome_begin + static_cast<std::uint64_t>(low));
+  last = posting_lower_bound(
+      view, first, chromosome_begin + static_cast<std::uint64_t>(high));
+  return true;
+}
+
 QueryTileMask factual_forward_support(
     const DnaContext& context,
     const std::vector<std::uint8_t>& forward_query,
@@ -75,9 +137,18 @@ QueryTileMask factual_forward_support(
   const int read_length = static_cast<int>(forward_query.size());
   const int seed_length = std::max(1, context.opts.k);
   const auto test_view = [&](const DnaLongSeedView& view) {
+    // Only the run can hold a supporting posting. posting_tests counts what
+    // the walk from the list's start would have tested.
+    std::uint32_t posting = 0;
+    std::uint32_t last = view.view.count;
+    if (view.view.found() &&
+        !peak_posting_run(context, peak, seed_length, read_length,
+                          view.seed.read_pos, view.view, posting, last)) {
+      posting = 0;
+      last = view.view.count;
+    }
     bool contributed = false;
-    for (std::uint32_t posting = 0; posting < view.view.count; ++posting) {
-      ++posting_tests;
+    for (; posting < last; ++posting) {
       if (posting_supports_peak(
               context, forward_query, view, peak,
               view.view.positions[posting],
@@ -86,6 +157,7 @@ QueryTileMask factual_forward_support(
         break;
       }
     }
+    posting_tests += contributed ? posting + 1 : view.view.count;
     if (contributed) {
       support.set(dna_forward_query_tile(
           view.seed.read_pos, peak.is_rc, read_length, seed_length));
@@ -296,7 +368,12 @@ DnaPlacementFamily build_dna_placement_family(
     else
       ++family.forward_candidates;
   }
-  family.partition = ::fa::cpu::voting::solve_query_partition(problem);
+  // Placement solves the partition after its screening pass; nothing reads
+  // it before then.
+  if (family.candidates.empty())
+    family.partition = ::fa::cpu::voting::solve_query_partition(problem);
+  else
+    family.partition_deferred = true;
   family.valid = !family.candidates.empty();
   return family;
 }

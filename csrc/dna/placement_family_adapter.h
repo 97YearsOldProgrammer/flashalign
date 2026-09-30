@@ -38,6 +38,9 @@ struct DnaPlacementFamily {
   std::uint64_t exact_posting_tests = 0;
   std::vector<DnaPlacementCandidate> candidates;
   ::fa::cpu::voting::QueryPartitionResult partition;
+  // Set when build_dna_placement_family left `partition` unsolved for
+  // build_dna_placement_chains to solve.
+  bool partition_deferred = false;
   bool valid = false;
 
   const DnaPlacementCandidate* find(
@@ -49,8 +52,9 @@ struct DnaPlacementFamily {
 int dna_forward_query_tile(int oriented_seed_position, bool reverse,
                            int read_length, int seed_length) noexcept;
 
-// Builds the candidate catalogue from the whole-read vote peaks and solves the
-// query partition. A candidate's support is the set of forward query tiles
+// Builds the candidate catalogue from the whole-read vote peaks and, for a
+// non-empty catalogue, defers the query partition solve (see
+// partition_deferred). A candidate's support is the set of forward query tiles
 // holding a retained seed with a posting compatible with its geometry.
 DnaPlacementFamily build_dna_placement_family(
     const DnaContext& context, const std::vector<std::uint8_t>& forward_query,

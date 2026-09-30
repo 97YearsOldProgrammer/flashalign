@@ -105,6 +105,8 @@ struct SolverScratch {
   std::vector<CandidateId> tail_left;
   std::vector<CandidateId> tail_right;
   std::vector<CandidateId> assignment;
+  // The best assignment so far of the WinnerOnly finish.
+  std::vector<CandidateId> best_assignment;
   // candidate_at(state) for every state of the current solve.
   std::vector<CandidateId> state_candidate;
 };
@@ -140,6 +142,12 @@ public:
   QueryPartitionResult run();
 
 private:
+  // The WinnerOnly answer: the best final cell under compare_path. A cell's
+  // key is its path's additive key, which evaluate() recomputes, so only cells
+  // tied with the best on the key rebuild their assignments for the tail; the
+  // winner alone is evaluated.
+  QueryPartitionPath best_final_path();
+
   static constexpr int kNullOwnerState = 0;
   // "No preceding run", which is also what a preceding NULL run leaves behind:
   // neither can be resumed, so they need not be distinguished.
@@ -626,6 +634,17 @@ QueryPartitionResult Solver::run() {
     }
   }
 
+  QueryPartitionResult result;
+  result.dp_cells =
+      static_cast<std::uint64_t>(tiles_) * static_cast<std::uint64_t>(states_);
+  result.dp_transitions = transitions_;
+  result.tail_comparisons = tail_comparisons_;
+  result.tail_steps = tail_steps_;
+  if (p_.rival == QueryPartitionRival::WinnerOnly) {
+    result.selected = best_final_path();
+    return result;
+  }
+
   // A path may finish only in the null state or with a closable open block.
   std::vector<QueryPartitionPath> complete;
   std::vector<CandidateId>& assignment = scratch_.assignment;
@@ -647,13 +666,6 @@ QueryPartitionResult Solver::run() {
       [&](const QueryPartitionPath& left, const QueryPartitionPath& right) {
         return compare_path(p_, left, right) > 0;
       });
-
-  QueryPartitionResult result;
-  result.dp_cells =
-      static_cast<std::uint64_t>(tiles_) * static_cast<std::uint64_t>(states_);
-  result.dp_transitions = transitions_;
-  result.tail_comparisons = tail_comparisons_;
-  result.tail_steps = tail_steps_;
 
   if (!complete.empty()) {
     result.selected = complete.front();
@@ -692,6 +704,52 @@ QueryPartitionResult Solver::run() {
     }
   }
   return result;
+}
+
+QueryPartitionPath Solver::best_final_path() {
+  std::vector<CandidateId>& assignment = scratch_.assignment;
+  std::vector<CandidateId>& best_assignment = scratch_.best_assignment;
+  int best = -1;
+  bool best_built = false;
+  const auto consider = [&](int state) {
+    const Cell& cell = current_[cell_index(state, 0)];
+    if (!cell.present)
+      return;
+    if (best >= 0) {
+      const int order = compare_key(cell.key, current_[cell_index(best, 0)].key);
+      if (order < 0)
+        return;
+      if (order == 0) {
+        if (!best_built) {
+          reconstruct(tiles_, best, 0, best_assignment);
+          best_built = true;
+        }
+        reconstruct(tiles_, state, 0, assignment);
+        if (compare_tail(assignment, best_assignment) <= 0)
+          return;
+        best_assignment.swap(assignment);
+        best = state;
+        return;
+      }
+    }
+    best = state;
+    best_built = false;
+  };
+  // Distinct final cells hold distinct assignments, so the winner is unique
+  // and the visiting order does not matter.
+  for (int predecessor = 0; predecessor < predecessors_; ++predecessor)
+    consider(null_state(predecessor));
+  for (int index = 0; index < candidates_; ++index)
+    for (int predecessor = 0; predecessor < predecessors_; ++predecessor)
+      consider(state_of(index, kSupportStates - 1, predecessor));
+  if (best < 0) {
+    QueryPartitionPath path;
+    path.assignment.assign(static_cast<std::size_t>(tiles_), kNullCandidate);
+    return path;
+  }
+  if (!best_built)
+    reconstruct(tiles_, best, 0, best_assignment);
+  return evaluate(p_, best_assignment);
 }
 
 } // namespace

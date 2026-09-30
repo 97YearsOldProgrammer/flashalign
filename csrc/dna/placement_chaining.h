@@ -50,6 +50,7 @@ struct DnaPlacementCandidateChain {
   int rival_sibling = -1;
   DnaPlacementChainStatus status = DnaPlacementChainStatus::NotSelected;
   std::int64_t interval_hits = 0;
+  // Undercounts: the harvest gate skips slicing the seeds it drops.
   int filtered_hits = 0;
   int chain_score = 0;
   int rival_chain_score = 0;

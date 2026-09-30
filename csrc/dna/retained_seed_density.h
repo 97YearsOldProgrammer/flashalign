@@ -43,6 +43,15 @@ class RetainedSeedDensity {
     return fine_reverse_;
   }
 
+  // Entries, one per distinct key; every RetainedSeedRef::entry is below it.
+  std::size_t entry_count() const { return entries_.size(); }
+
+  // The genome-wide occurrence of an entry's key: the global_count of every
+  // interval slice() finds for it.
+  std::uint32_t occurrence(std::uint32_t entry_index) const {
+    return entries_[entry_index].view.occurrence;
+  }
+
   // Intervals resolved per lock-step round of slice_batch, which accepts any
   // n and chunks internally.
   static constexpr std::size_t kSliceBatch = 16;
