@@ -217,7 +217,12 @@ filtering off [200]. Unset, the cap is the larger of 200 and the occurrence of t
 top 1.81e\-4 fraction of the most frequent seeds in the index, at most 500 under
 .BR lr:hq ,
 and the DNA chaining gates take the same cap. The splice presets keep the fixed
-200.
+200. Under a DNA preset a vote tile whose seeds are all above the cap still votes
+with its rarest seed of at most 4095 occurrences
+.RB ( lr )
+or 1024
+.RB ( lr:hq ),
+and chaining keeps that seed.
 .TP
 .BI \-\-vote\-ratio \ FLOAT
 Keep every vote peak whose vote is at least
@@ -231,7 +236,7 @@ Drop a seed whose genome-wide reference occurrence is above
 from the pool handed to chaining; 0 disables the gate [200]. Unset, the gate is
 the voting cap
 .RB ( \-\-max\-vote\-occ ).
-DNA presets only.
+A seed an empty vote tile kept passes the gate. DNA presets only.
 .TP
 .BI \-\-dw \ INT
 Width in reference bases of the diagonal bin a seed votes into, greater than 0

@@ -115,6 +115,9 @@ inline void set_dna_long_platform_fields(
     mapping.long_occ_ceiling =
         hifi_row ? lr::kDnaHiFiOccCeiling : lr::kDnaOccCeiling;
     mapping.dna_pool_gate_occ = lr::kDnaPoolGateVoteCap;
+    // The vote's empty-tile rescue past N, up to M (seeding/syncmer.h).
+    mapping.dna_tile_rescue_occ =
+        hifi_row ? lr::kDnaHiFiTileRescueOcc : lr::kDnaTileRescueOcc;
     // HiFi only: the MAPQ's dp1/dp2 come from minibwa-style rescoring of the
     // CIGAR (dna/postdp_scoring.h) instead of the raw DP scores.
     mapping.postdp_rescoring = profile.kind == DnaPresetKind::HiFi;
@@ -236,6 +239,7 @@ inline void set_splice_fields(
     mapping.base.chain_mapq_hifi_margin = false;
     mapping.base.inversion_probe_local_gate = false;
     mapping.base.dna_pool_gate_occ = 0;
+    mapping.base.dna_tile_rescue_occ = 0;
     mapping.base.long_occ_ceiling = 0;
     // RNA's own support floor.
     common.min_support = 2;

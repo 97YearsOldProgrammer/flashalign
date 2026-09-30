@@ -74,6 +74,21 @@ inline constexpr int kDnaPoolGateVoteCap = -1;
 inline constexpr int kDnaOccCeiling = 0;
 inline constexpr int kDnaHiFiOccCeiling = 500;
 
+// The vote's empty-tile rescue, M. A vote tile (seeding/syncmer.h) whose found
+// seeds are all over N votes with the rarest of them at or under M, ranked as a
+// tile ranks its centred seed (occurrence, distance to the tile centre,
+// read_pos), and that seed is also an exact-refine view. Per read and strand,
+// in tile order, a rescue that would take the rescued occurrence past
+// kDnaTileRescueBudget is skipped; reads shorter than kDnaTileRescueMinLen bp
+// are not rescued (both constants in seeding/syncmer.h). Placement's screening
+// pass admits a rescued seed past its gate, and the whole-query pool admits
+// exactly the seeds the vote rescued (dna/retained_seed_density.h); stage 1,
+// the inversion probe and the clip nomination keep their gates. With no cap, or
+// N >= M, nothing is rescued. lr's M is minimap2's max_max_occ, a constant
+// there too; the RNA presets install 0.
+inline constexpr int kDnaTileRescueOcc = 4095;
+inline constexpr int kDnaHiFiTileRescueOcc = 1024;
+
 // minimap2's seed-repetitiveness discount (uniq_ratio from rep_len, hit.c) is
 // deliberately not applied: pen_s1 is the bare term (dna/chain_mapq.cpp).
 
@@ -195,6 +210,9 @@ struct DnaLongOptions {
   // Pool occurrence gate (--max-chain-occ); 0 is ungated. DNA presets
   // install kDnaPoolGateVoteCap.
   int dna_pool_gate_occ = kDnaPoolGateOcc;
+  // The vote's empty-tile rescue M (kDnaTileRescueOcc); 0 is none. DNA
+  // presets install it; not settable.
+  int dna_tile_rescue_occ = 0;
 };
 
 // N, the vote's occurrence cap for this run; 0 is no cap. Before an index is

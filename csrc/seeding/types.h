@@ -23,6 +23,9 @@ namespace lr {
 struct DnaLongSeedView {
   QuerySeed seed;
   KmerPostingView view;
+  // An empty vote tile's seed over the cap, which the vote admits
+  // (options/dna_profile.h kDnaTileRescueOcc).
+  bool rescued = false;
 };
 
 struct DnaLongSeedBundle {
@@ -154,6 +157,7 @@ struct ChainWindowRankedBucket {
 struct ChainWindowRetainedSeed {
   QuerySeed seed;
   KmerPostingView view;
+  bool rescued = false;  // DnaLongSeedView::rescued
 };
 
 // One posting captured in an accumulate pass: what vote_emit_peaks's re-walk would

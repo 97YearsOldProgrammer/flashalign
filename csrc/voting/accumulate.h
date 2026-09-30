@@ -28,8 +28,9 @@ vote_accumulate(const VoteWindowState &st, ChainWindowPeakScratch &scratch,
   auto &retained_seeds = scratch.retained_seeds;
   auto &buckets = scratch.buckets;
   uint32_t seed_epoch = 0; // per-window, ++ once per voting seed (stamp)
+  // A rescued seed (DnaLongSeedView::rescued) passes the occurrence cap.
   auto visit_seed_view_for_vote = [&](const QuerySeed &seed,
-                                      const KmerPostingView &v) {
+                                      const KmerPostingView &v, bool rescued) {
     if (!retain_used_views) {
       seed_views.push_back(v);
     }
@@ -39,7 +40,7 @@ vote_accumulate(const VoteWindowState &st, ChainWindowPeakScratch &scratch,
         seed_used.push_back(used);
       return;
     }
-    if (!vote_seed_occ_allowed(st, v)) {
+    if (!rescued && !vote_seed_occ_allowed(st, v)) {
       // Rejected by the occurrence cap.
       if (!retain_used_views)
         seed_used.push_back(used);
@@ -49,7 +50,7 @@ vote_accumulate(const VoteWindowState &st, ChainWindowPeakScratch &scratch,
     if (!retain_used_views) {
       seed_used.push_back(used);
     } else {
-      retained_seeds.push_back({seed, v});
+      retained_seeds.push_back({seed, v, rescued});
     }
     int chr_idx = chromosome_index_for_global_pos(st.chr_bounds, st.n_chr,
                                                   v.positions[0]);
@@ -95,14 +96,14 @@ vote_accumulate(const VoteWindowState &st, ChainWindowPeakScratch &scratch,
   if (seed_view_override) {
     // Views were resolved upstream, so this loop only accumulates.
     for (const auto &sv : *seed_view_override) {
-      visit_seed_view_for_vote(sv.seed, sv.view);
+      visit_seed_view_for_vote(sv.seed, sv.view, sv.rescued);
     }
   } else {
     for (const auto &seed : seeds) {
       const KmerPostingView v = lookup_cache
                                     ? lookup_cache->lookup(*ctx.index, seed.key)
                                     : ctx.index->lookup(seed.key);
-      visit_seed_view_for_vote(seed, v);
+      visit_seed_view_for_vote(seed, v, false);
     }
   }
 }

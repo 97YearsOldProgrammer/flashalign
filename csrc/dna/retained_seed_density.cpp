@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 namespace fa::cpu::lr {
 namespace {
@@ -160,15 +161,29 @@ bool RetainedSeedDensity::build(
         if (!compatible_views(entries_[entry_index].view, retained.view))
           valid = false;
       }
-      output.push_back(RetainedSeedRef{retained.seed, entry_index});
+      output.push_back(
+          RetainedSeedRef{retained.seed, entry_index, retained.rescued});
+      if (retained.rescued) entries_[entry_index].rescued = true;
     }
   };
   ingest(forward, forward_);
   ingest(reverse, reverse_);
   if (!valid) return false;
 
+  // Per strand, the rescued vote seeds by (read_pos, key).
+  std::vector<std::pair<int, std::uint64_t>> rescued[2];
+  const std::vector<ChainWindowRetainedSeed>* votes[2] = {forward, reverse};
+  for (int strand = 0; strand < 2; ++strand) {
+    if (votes[strand] == nullptr) continue;
+    for (const ChainWindowRetainedSeed& retained : *votes[strand])
+      if (retained.rescued)
+        rescued[strand].emplace_back(retained.seed.read_pos,
+                                     retained.seed.key);
+    std::sort(rescued[strand].begin(), rescued[strand].end());
+  }
+
   auto ingest_fine = [&](const std::vector<QuerySeed>* input,
-                         const std::vector<std::uint32_t>* slots,
+                         const std::vector<std::uint32_t>* slots, int strand,
                          std::vector<RetainedSeedRef>& output) {
     if (input == nullptr) return;
     if (lookup_cache == nullptr) {
@@ -205,11 +220,17 @@ bool RetainedSeedDensity::build(
       } else {
         entry_index = static_cast<std::uint32_t>(held);
       }
-      output.push_back(RetainedSeedRef{seed, entry_index});
+      const std::vector<std::pair<int, std::uint64_t>>& twins = rescued[strand];
+      const bool twin =
+          !twins.empty() &&
+          std::binary_search(twins.begin(), twins.end(),
+                             std::make_pair(seed.read_pos, seed.key));
+      output.push_back(RetainedSeedRef{seed, entry_index, twin});
+      if (twin) entries_[entry_index].rescued = true;
     }
   };
-  ingest_fine(fine_forward, fine_forward_slots, fine_forward_);
-  ingest_fine(fine_reverse, fine_reverse_slots, fine_reverse_);
+  ingest_fine(fine_forward, fine_forward_slots, 0, fine_forward_);
+  ingest_fine(fine_reverse, fine_reverse_slots, 1, fine_reverse_);
   if (!valid) return false;
 
   return true;

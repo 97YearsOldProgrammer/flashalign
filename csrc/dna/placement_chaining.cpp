@@ -417,7 +417,8 @@ bool chain_candidate(
   const int diagonal_band =
       std::max(1, context.opts.cigar_local_diag_band);
   // A seed whose key is over the gate is not sliced: nothing reads the
-  // postings the gate drops.
+  // postings the gate drops. A key a rescued seed shares, which the gate
+  // admits, is sliced.
   const bool skip_gated_seeds = gate_by_occurrence;
 
   std::vector<chaining::Anchor> sparse;
@@ -444,7 +445,8 @@ bool chain_candidate(
       const std::uint32_t entry = seeds[next].entry;
       std::uint32_t& stamp = slices.stamp[entry];
       if (stamp == slices.pass) continue;
-      if (skip_gated_seeds && seed_index.occurrence(entry) > pool_gate_cap) {
+      if (skip_gated_seeds && seed_index.occurrence(entry) > pool_gate_cap &&
+          !seed_index.holds_rescued(entry)) {
         stamp = slices.pass;
         slices.interval[entry] = {};
         continue;
@@ -462,8 +464,12 @@ bool chain_candidate(
     for (std::size_t at = first; at < next; ++at) {
       const RetainedSeedRef& seed = seeds[at];
       const KmerPostingIntervalView& interval = slices.interval[seed.entry];
-      const bool over_pool_gate =
-          gate_by_occurrence && interval.global_count > pool_gate_cap;
+      // A rescued seed passes the gate (RetainedSeedRef::rescued): the vote
+      // seed on the screening pass, its fine twin on the whole-query pass. Its
+      // key's interval is shared with the seeds that do not.
+      const bool over_pool_gate = gate_by_occurrence &&
+                                  interval.global_count > pool_gate_cap &&
+                                  !seed.rescued;
       if (!interval.found() || interval.count == 0 || over_pool_gate) {
         if (interval.found() && over_pool_gate)
           record.filtered_hits += static_cast<int>(interval.count);

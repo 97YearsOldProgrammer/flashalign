@@ -390,6 +390,7 @@ private:
                                         kCountAdmissionLaneBound);
     ctx.vote_batched_refine =
         !config.is_rna() && mapping.vote_admission_ratio > 0.0;
+    ctx.tile_rescue_occ = mapping.dna_tile_rescue_occ;
     ctx.chr_names = &chr_names_;
     return ctx;
   }

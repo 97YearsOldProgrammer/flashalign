@@ -151,6 +151,9 @@ struct LongReadSeedContext {
     // is paid per chunk of buckets rather than per bucket. Same output as the sequential
     // drain.
     bool vote_batched_refine = false;
+    // DNA: a vote tile that admits no seed votes with its rarest found seed at or under
+    // this occurrence (options/dna_profile.h kDnaTileRescueOcc); 0 = none, as on RNA.
+    int tile_rescue_occ = 0;
     const std::vector<std::string>* chr_names = nullptr;
 
     bool syncmer_occ_aware_active() const {

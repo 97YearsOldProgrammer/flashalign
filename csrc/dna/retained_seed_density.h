@@ -16,15 +16,23 @@ namespace fa::cpu::lr {
 struct RetainedSeedDensityEntry {
   std::uint64_t key = 0;
   KmerPostingView view;
+  // Some RetainedSeedRef of this key is rescued.
+  bool rescued = false;
 };
 
 struct RetainedSeedRef {
   QuerySeed seed;
   std::uint32_t entry = 0;
+  // A vote seed the empty-tile rescue admitted past the cap
+  // (options/dna_profile.h kDnaTileRescueOcc), or its fine twin, which
+  // placement's harvest gate admits too.
+  bool rescued = false;
 };
 
 class RetainedSeedDensity {
  public:
+  // A rescued vote seed's fine twin is the fine seed of its strand with its
+  // read_pos and key: both come from the strand's one seed stream.
   bool build(const SeedIndex& index,
              const std::vector<ChainWindowRetainedSeed>* forward,
              const std::vector<ChainWindowRetainedSeed>* reverse,
@@ -50,6 +58,11 @@ class RetainedSeedDensity {
   // interval slice() finds for it.
   std::uint32_t occurrence(std::uint32_t entry_index) const {
     return entries_[entry_index].view.occurrence;
+  }
+
+  // Whether a rescued seed refers to the entry.
+  bool holds_rescued(std::uint32_t entry_index) const {
+    return entries_[entry_index].rescued;
   }
 
   // Intervals resolved per lock-step round of slice_batch, which accepts any

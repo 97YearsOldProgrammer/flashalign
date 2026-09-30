@@ -79,6 +79,49 @@ inline bool vote_seed_minimum_is_representative(
     return static_cast<uint64_t>(near) * 2u >= admitted;
 }
 
+// The vote's empty-tile rescue (options/dna_profile.h kDnaTileRescueOcc): per read and
+// strand the rescued seeds' summed occurrence stays within kDnaTileRescueBudget, and reads
+// shorter than kDnaTileRescueMinLen bp are not rescued.
+inline constexpr uint64_t kDnaTileRescueBudget = 65536;
+inline constexpr int kDnaTileRescueMinLen = 1000;
+
+// One strand's rescue, walked in tile order: offer() every seed of the current tile, then
+// close() the tile. A tile that admitted no seed votes with its rarest offered seed over the
+// cap and at or under M, ranked as the tile's centred seed.
+class VoteTileRescue {
+public:
+    VoteTileRescue(const LongReadSeedContext& ctx, int span)
+        : max_occ_(span >= kDnaTileRescueMinLen
+                       ? static_cast<uint32_t>(std::max(0, ctx.tile_rescue_occ))
+                       : 0u) {}
+
+    void offer(const ChainSyncmerOccCandidate& cand, int tile_centre) {
+        // A seed with no postings keeps occurrence UINT32_MAX.
+        if (cand.valid || cand.occurrence > max_occ_) return;
+        ChainSyncmerOccCandidate over = cand;
+        over.valid = true;
+        if (chain_syncmer_occ_candidate_better_centred(over, best_, tile_centre))
+            best_ = over;
+    }
+
+    // The closing tile's rescued seed, when it admitted none and the budget allows.
+    bool close(uint32_t admitted, DnaLongSeedView& out) {
+        const ChainSyncmerOccCandidate best = best_;
+        best_ = ChainSyncmerOccCandidate{};
+        if (admitted != 0 || !best.valid ||
+            spent_ + best.occurrence > kDnaTileRescueBudget)
+            return false;
+        spent_ += best.occurrence;
+        out = DnaLongSeedView{best.seed, best.view, true};
+        return true;
+    }
+
+private:
+    uint32_t max_occ_;
+    uint64_t spent_ = 0;
+    ChainSyncmerOccCandidate best_;
+};
+
 inline void extract_chain_closed_syncmer_seeds_into_downsample(
     const LongReadSeedContext& ctx,
     const uint8_t* query_enc,
@@ -184,6 +227,17 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
       }
     };
 
+    // A tile that admits no seed may vote with a rescued one, also an exact-refine view.
+    VoteTileRescue rescue(ctx, span);
+    auto emit_rescue = [&](uint32_t admitted) {
+      DnaLongSeedView rescued;
+      if (!rescue.close(admitted, rescued))
+        return;
+      out.selected_views.push_back(rescued);
+      out.seeds.push_back(rescued.seed);
+      out.exact_refine_views.push_back(rescued);
+    };
+
     // Streaming per-tile scan: each tile keeps its first, rarest and centred admitted seeds,
     // from which emit_tile picks the vote representative and the exact-refinement views.
     const int64_t tiles64 = static_cast<int64_t>(n_tiles);
@@ -215,6 +269,7 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
         if (tile != prev_tile) {
           emit_tile(first_admitted, rarest_admitted, centred_admitted,
                     tile_strata, tile_admitted);
+          emit_rescue(tile_admitted);
           first_admitted = ChainSyncmerOccCandidate{};
           rarest_admitted = ChainSyncmerOccCandidate{};
           centred_admitted = ChainSyncmerOccCandidate{};
@@ -223,6 +278,7 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
           tile_centre = syncmer_tile_centre(tile, n_kmers, n_tiles);
         }
         const ChainSyncmerOccCandidate cand = make_candidate(seed, position);
+        rescue.offer(cand, tile_centre);
         if (cand.valid) {
           if (!first_admitted.valid)
             first_admitted = cand;
@@ -240,6 +296,7 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
     }
     emit_tile(first_admitted, rarest_admitted, centred_admitted, tile_strata,
               tile_admitted);
+    emit_rescue(tile_admitted);
     out.views_ready = true;
     return true;
 }

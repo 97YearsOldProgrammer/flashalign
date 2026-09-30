@@ -208,6 +208,8 @@ std::string resolved_config_text(const AlignOptions& opt,
     detail << " cap=" << occ_index.resolved_cap;
     row("seed_occ_quantile", detail.str(), "index");
   }
+  // The vote's empty-tile rescue M; 0 on the RNA presets.
+  row("tile_rescue_occ", i2s(mapping.dna_tile_rescue_occ), "preset");
 
   row("vote_diag_bin_width", i2s(mapping.vote_diag_bin_width),
       src(opt.vote_diag_bin_width.has_value(), "preset"));
