@@ -1,6 +1,8 @@
 // Groups RNA diagonal peaks into candidate locus envelopes. An RNA read spans several
 // exons, each on its own diagonal, so peaks are grouped rather than collapsed to one
-// placement. This stage reads no reference bases; its colinear recurrence only ranks.
+// placement. This stage reads no reference bases. Envelopes are ranked by their seed
+// evidence; the colinear score is computed for the kept loci only and is the coarse
+// confidence the RNA MAPQ reads.
 
 #include "coarse_chain.h"
 #include "coarse_transition.h"

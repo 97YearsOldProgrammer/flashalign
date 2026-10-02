@@ -147,7 +147,7 @@ inline constexpr int kRnaChimeraMinQueryBases = 100;
 bool rna_chimera_query_disjoint(RnaQuerySpan a, RnaQuerySpan b) noexcept;
 
 // A realized second family's quality bar: a segment-0 DP maximum of at least
-// `minimum_dp_maximum`, the floor the primary realization is held to, and a hull
+// `minimum_dp_maximum` (-S; a primary below it keeps its placement) and a hull
 // covering at least kRnaChimeraMinQueryBases.
 bool rna_chimera_family_admitted(std::optional<int> dp_segment0,
                                  RnaQuerySpan hull,
