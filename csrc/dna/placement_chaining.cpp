@@ -77,16 +77,9 @@ int selected_tiles(
   return ::fa::cpu::voting::solve_query_partition(problem);
 }
 
-// Per-thread scratch for the pool sorts below: the radix ping-pong buffer
-// and histograms for anchors, and for the slice-index sorts of the trim.
-struct PoolSortScratch {
-  ::fa::cpu::radix::Scratch<chaining::Anchor> anchors;
-  ::fa::cpu::radix::Scratch<std::int32_t> indices;
-  // Postings per trim tile, all zero between calls of pool_trim_needed.
-  std::vector<std::uint64_t> tile_mass;
-};
-PoolSortScratch& pool_sort_scratch() {
-  static thread_local PoolSortScratch scratch;
+// Per-thread radix ping-pong buffer and histograms for the pool sort below.
+::fa::cpu::radix::Scratch<chaining::Anchor>& pool_sort_scratch() {
+  static thread_local ::fa::cpu::radix::Scratch<chaining::Anchor> scratch;
   return scratch;
 }
 
@@ -116,8 +109,7 @@ PassSlices& pass_slices(std::size_t entries) {
 // is the same for every anchor would leave the order as it is and is skipped.
 void sort_pool_anchors(std::vector<chaining::Anchor>& anchors) {
   if (anchors.size() < 2) return;
-  ::fa::cpu::radix::Scratch<chaining::Anchor>& scratch =
-      pool_sort_scratch().anchors;
+  ::fa::cpu::radix::Scratch<chaining::Anchor>& scratch = pool_sort_scratch();
   const chaining::Anchor first = anchors.front();
   std::uint32_t flags_differ = 0;
   std::int32_t span_differ = 0;
@@ -138,34 +130,6 @@ void sort_pool_anchors(std::vector<chaining::Anchor>& anchors) {
       anchors, scratch, [](const chaining::Anchor& anchor) { return anchor.q; });
   ::fa::cpu::radix::stable_sort_u32(
       anchors, scratch, [](const chaining::Anchor& anchor) { return anchor.r; });
-}
-
-// Whether stage 1 (see kDnaSkipPoolBudget) trims any tile of these slices:
-// some tile's postings exceed the share. One bucket pass by tile.
-bool pool_trim_needed(const std::vector<DeferredSlice>& deferred) {
-  std::vector<std::uint64_t>& mass = pool_sort_scratch().tile_mass;
-  std::uint64_t occupied_tiles = 0;
-  for (const DeferredSlice& slice : deferred) {
-    const std::size_t at = static_cast<std::size_t>(
-        slice.seed.seed.read_pos / chaining::kDenseAdmitTileBp);
-    if (at >= mass.size()) mass.resize(at + 1, 0);
-    // A deferred slice holds at least one posting.
-    if (mass[at] == 0) ++occupied_tiles;
-    mass[at] += slice.interval.count;
-  }
-  const std::uint64_t share =
-      occupied_tiles == 0
-          ? kDnaSkipTileFloor
-          : std::max<std::uint64_t>(kDnaSkipTileFloor,
-                                    kDnaSkipPoolBudget / occupied_tiles);
-  bool over = false;
-  for (const DeferredSlice& slice : deferred) {
-    std::uint64_t& tile_mass = mass[static_cast<std::size_t>(
-        slice.seed.seed.read_pos / chaining::kDenseAdmitTileBp)];
-    if (tile_mass > share) over = true;
-    tile_mass = 0;
-  }
-  return over;
 }
 
 // Whether the key has another posting on this contig within `tandem_window`
@@ -323,9 +287,8 @@ bool chain_candidate(
     RetainedSeedDensity& seed_index,
     DnaPlacementCandidateChain& record,
     CandidateChainPass pass) {
-  // The whole-query pass defers every admissible slice and trims the harvest
-  // to its posting budget before building anchors. The screening pass defers
-  // nothing and uses chain_colinear.
+  // The whole-query pass defers every admissible slice and builds its anchors
+  // after the scan. The screening pass defers nothing and uses chain_colinear.
   const bool whole_query_exact = pass != CandidateChainPass::BoundedScreening;
   // The screening pass always gates postings by genome-wide occurrence. The
   // whole-query pass gates at dna_pool_gate_occ (by default the vote's cap,
@@ -349,11 +312,6 @@ bool chain_candidate(
   record.deferred_anchors = 0;
   record.rescued_anchors = 0;
   record.dense_runs = 0;
-  record.pool_trimmed = false;
-  record.trimmed_tiles = 0;
-  record.trimmed_postings = 0;
-  record.retained_slices = 0;
-  record.retained_anchors = 0;
   const bool reverse = candidate.peak.is_rc;
   const std::vector<RetainedSeedRef>& seeds =
       whole_query_exact
@@ -402,18 +360,12 @@ bool chain_candidate(
   }
   const std::uint64_t chromosome_base =
       offsets[static_cast<std::size_t>(candidate.peak.chr)];
-  // The screening pass's gate, and the stage 1 admissibility bar inside an
-  // over-share tile. Both compare interval.global_count, the key's genome-wide
-  // occurrence.
-  const std::uint32_t occurrence_cap = static_cast<std::uint32_t>(
-      std::max(1, context.opts.cigar_local_global_occ));
-  // The cap the harvest gate reads: occurrence_cap on the screening pass, the
-  // pool gate on the whole-query pass. Kept apart so --max-chain-occ cannot
-  // move occurrence_cap's other uses.
-  const std::uint32_t pool_gate_cap =
-      whole_query_exact
-          ? static_cast<std::uint32_t>(std::max(1, pool_gate_occ))
-          : occurrence_cap;
+  // The cap the harvest gate compares with interval.global_count, the key's
+  // genome-wide occurrence: the global cap on the screening pass, the pool
+  // gate on the whole-query pass.
+  const std::uint32_t pool_gate_cap = static_cast<std::uint32_t>(
+      std::max(1, whole_query_exact ? pool_gate_occ
+                                    : context.opts.cigar_local_global_occ));
   const int diagonal_band =
       std::max(1, context.opts.cigar_local_diag_band);
   // A seed whose key is over the gate is not sliced: nothing reads the
@@ -475,8 +427,8 @@ bool chain_candidate(
           record.filtered_hits += static_cast<int>(interval.count);
         continue;
       }
-      // The screening pass builds its anchors directly. The whole-query pass
-      // defers every slice so stage 1 can decide with every tile's mass known.
+      // The screening pass builds its anchors directly; the whole-query pass
+      // defers every slice and builds its anchors after the scan.
       if (whole_query_exact) {
         deferred.push_back({seed, interval});
         record.deferred_anchors += interval.count;
@@ -493,117 +445,15 @@ bool chain_candidate(
 
   std::vector<chaining::Anchor> anchors = std::move(sparse);
   if (whole_query_exact) {
-    // Restore the deferred slices. Stage 1 (see kDnaSkipPoolBudget) first
-    // gives each slice a role: 0, its tile is within its share and it is
-    // restored; 1, an admissible keeper of an over-share tile, restored; 2,
-    // never appended.
-    std::vector<std::uint8_t> slice_role;
-    {
-      // With no tile over its share every role is 0 and nothing is ranked.
-      if (pool_trim_needed(deferred)) {
-        slice_role.assign(deferred.size(), 0);
-        const auto tile_of = [&deferred](std::int32_t slot) {
-          return deferred[static_cast<std::size_t>(slot)].seed.seed.read_pos /
-                 chaining::kDenseAdmitTileBp;
-        };
-        // Sort slice indices by (tile, global_count, count, read_pos, slot):
-        // tiles become contiguous and each tile's slices come rarest first.
-        std::vector<std::int32_t> by_tile(deferred.size());
-        for (std::size_t slot = 0; slot < deferred.size(); ++slot)
-          by_tile[slot] = static_cast<std::int32_t>(slot);
-        // Stable passes, least significant key first; the input is in slot
-        // order.
-        {
-          ::fa::cpu::radix::Scratch<std::int32_t>& scratch =
-              pool_sort_scratch().indices;
-          ::fa::cpu::radix::stable_sort_u32(
-              by_tile, scratch, [&deferred](std::int32_t slot) {
-                return deferred[static_cast<std::size_t>(slot)].seed.seed.read_pos;
-              });
-          ::fa::cpu::radix::stable_sort_u32(
-              by_tile, scratch, [&deferred](std::int32_t slot) {
-                return deferred[static_cast<std::size_t>(slot)].interval.count;
-              });
-          ::fa::cpu::radix::stable_sort_u32(
-              by_tile, scratch, [&deferred](std::int32_t slot) {
-                return deferred[static_cast<std::size_t>(slot)]
-                    .interval.global_count;
-              });
-          ::fa::cpu::radix::stable_sort_u32(
-              by_tile, scratch,
-              [&tile_of](std::int32_t slot) { return tile_of(slot); });
-        }
-        // The budget is shared among the tiles that hold a slice.
-        std::uint64_t occupied_tiles = 0;
-        for (std::size_t at = 0; at < by_tile.size();) {
-          const int tile = tile_of(by_tile[at]);
-          ++occupied_tiles;
-          while (at < by_tile.size() && tile_of(by_tile[at]) == tile) ++at;
-        }
-        const std::uint64_t share =
-            occupied_tiles == 0
-                ? kDnaSkipTileFloor
-                : std::max<std::uint64_t>(kDnaSkipTileFloor,
-                                          kDnaSkipPoolBudget / occupied_tiles);
-        for (std::size_t at = 0; at < by_tile.size();) {
-          const int tile = tile_of(by_tile[at]);
-          std::size_t end = at;
-          std::uint64_t mass = 0;
-          while (end < by_tile.size() && tile_of(by_tile[end]) == tile) {
-            mass += deferred[static_cast<std::size_t>(by_tile[end])].interval.count;
-            ++end;
-          }
-          if (mass > share) {
-            ++record.trimmed_tiles;
-            // In an over-share tile only keys under occurrence_cap are
-            // admissible: keys with many genome-wide copies make the chain
-            // zigzag between repeat copies. global_count is the primary sort
-            // key, so the admissible slices form a prefix.
-            std::size_t admissible_end = at;
-            while (admissible_end < end &&
-                   deferred[static_cast<std::size_t>(by_tile[admissible_end])]
-                           .interval.global_count <= occurrence_cap)
-              ++admissible_end;
-            // Spend the share rarest first, stopping at the first slice that
-            // does not fit, so the kept set is a prefix of the ranking.
-            std::uint64_t retained = 0;
-            std::size_t keep = at;
-            while (keep < admissible_end) {
-              const std::uint64_t next =
-                  deferred[static_cast<std::size_t>(by_tile[keep])].interval.count;
-              // The rarest admissible slice is kept even when it alone exceeds
-              // the share. A tile with no admissible slice keeps nothing, and
-              // the DP crosses it as a gap.
-              if (keep > at && retained + next > share) break;
-              retained += next;
-              slice_role[static_cast<std::size_t>(by_tile[keep])] = 1;
-              ++keep;
-            }
-            for (std::size_t which = keep; which < end; ++which) {
-              slice_role[static_cast<std::size_t>(by_tile[which])] = 2;
-              record.trimmed_postings +=
-                  deferred[static_cast<std::size_t>(by_tile[which])].interval.count;
-            }
-            record.retained_slices += static_cast<int>(keep - at);
-          }
-          at = end;
-        }
-        record.pool_trimmed = record.trimmed_tiles > 0;
-      }
-    }
+    // Restore every deferred slice, in order.
     for (std::size_t slot = 0; slot < deferred.size(); ++slot) {
-      if (!slice_role.empty() && slice_role[slot] == 2) continue;
-      // Prefetch the next appended slice's first postings, which the binary
-      // search that bounded it never touched.
-      for (std::size_t ahead = slot + 1; ahead < deferred.size(); ++ahead) {
-        if (!slice_role.empty() && slice_role[ahead] == 2) continue;
-        const KmerPostingIntervalView& next = deferred[ahead].interval;
-        if (next.count != 0) {
-          __builtin_prefetch(next.positions.data(), 0, 1);
-          if (next.count > 8)
-            __builtin_prefetch(next.positions.data() + 8, 0, 1);
-        }
-        break;
+      // Prefetch the next slice's first postings, which the binary search
+      // that bounded it never touched.
+      if (slot + 1 < deferred.size()) {
+        const KmerPostingIntervalView& next = deferred[slot + 1].interval;
+        __builtin_prefetch(next.positions.data(), 0, 1);
+        if (next.count > 8)
+          __builtin_prefetch(next.positions.data() + 8, 0, 1);
       }
       const DeferredSlice& item = deferred[slot];
       const std::size_t before = anchors.size();
@@ -613,8 +463,6 @@ bool chain_candidate(
           context.opts.dna_tandem_window, reverse, family.read_length,
           anchors, record);
       record.rescued_anchors += anchors.size() - before;
-      if (!slice_role.empty() && slice_role[slot] == 1)
-        record.retained_anchors += anchors.size() - before;
     }
   }
   if (anchors.empty()) {
@@ -2163,14 +2011,6 @@ DnaPlacementChainingResult build_dna_placement_chains(
     const DnaPlacementCandidateChain* attempted =
         result.find(result.alternative.candidate);
     result.alternative_exact.candidate = result.alternative.candidate;
-    // A candidate whose trimmed whole-query pass already found no chain would
-    // find none again, so it is not re-chained and fails as
-    // ExactRestoreFailed.
-    const bool terminally_chainless =
-        attempted != nullptr &&
-        attempted->pool_trimmed &&
-        attempted->exact &&
-        attempted->status != DnaPlacementChainStatus::Accepted;
     // A candidate already holding an accepted whole-query chain would chain
     // to the same result again, so that chain is copied.
     const bool chained_before =
@@ -2180,7 +2020,7 @@ DnaPlacementChainingResult build_dna_placement_chains(
     if (chained_before)
       copy_chain_call(*attempted, true, result.alternative_exact);
     const bool restored = chained_before ||
-        (candidate != nullptr && !terminally_chainless &&
+        (candidate != nullptr &&
          chain_candidate(
              context, family, *candidate,
              candidate->peak.is_rc ? reverse_query : forward_query, seed_index,

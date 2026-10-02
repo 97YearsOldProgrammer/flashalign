@@ -66,10 +66,11 @@ const std::vector<OptionSpec>& specs_table() {
          "min vote-to-best-vote ratio to keep a peak [0.25]"},
         // Drops seeds with more than N reference occurrences from the dense
         // chain's anchor pool, except the seeds the vote rescued. Unset, N is
-        // the vote's cap; 0 is no gate. DNA presets only.
+        // the vote's cap; 0 is no gate. DNA presets only. Only this gate
+        // bounds the pool; at 0 nothing does.
         {OptionId::MaxChainOcc, '\0', "--max-chain-occ", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "max seed occurrences in chaining; 0 to disable [200]"},
+         "max seed occurrences in chaining; 0 to disable, leaving repeats unbounded [200]"},
         // The vote bin width is W = clamp(L / den, dw, dw-max) for a read of
         // length L. --dw fixes W; --dw-slope-den and --dw-max are DNA only.
         {OptionId::VoteDiagBinWidth, '\0', "--dw", kInt, kStable, A,

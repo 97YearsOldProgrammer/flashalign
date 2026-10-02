@@ -43,12 +43,6 @@ inline constexpr int32_t kDenseDiagMinRuns = 512;
 // 2^30; a pool outside that domain takes the portable arm. dense_chain.cpp is compiled with
 // -ffp-contract=off so the vector floats equal dense_step's.
 
-// Query-tile width, in oriented-query bp, of the pool's spatial cut. The DNA pool trim
-// shares its posting budget over these tiles, so a satellite stretch gets a share by the
-// query it covers rather than by how many postings it piles up. Far below max_dist_x, far
-// above a seed length.
-inline constexpr int32_t kDenseAdmitTileBp = 1024;
-
 // A maximal same-diagonal anchor run, cut on a diagonal change or an r-step above `span`.
 // `w` is its length, span plus the r-steps: the score the anchor-level DP gives it.
 struct DenseRun {

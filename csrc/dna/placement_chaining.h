@@ -82,17 +82,6 @@ struct DnaPlacementCandidateChain {
   std::uint64_t rescued_anchors = 0;
   // Runs produced by the whole-query pass's collapse; 0 on the screening pass.
   std::int64_t dense_runs = 0;
-  // The stage 1 trim (see kDnaSkipPoolBudget), run on the deferred slices'
-  // metadata before any is restored. pool_trimmed: some tile was over its
-  // share. trimmed_tiles: how many. trimmed_postings: postings never
-  // appended. retained_slices / retained_anchors: the admissible keepers in
-  // those tiles and their anchors, a subset of rescued_anchors. All 0 on the
-  // screening pass.
-  bool pool_trimmed = false;
-  int trimmed_tiles = 0;
-  std::uint64_t trimmed_postings = 0;
-  int retained_slices = 0;
-  std::uint64_t retained_anchors = 0;
 };
 
 // Residue recovery: query tiles the stable partition owns without support are
@@ -118,23 +107,6 @@ inline constexpr int kDnaMapqRivalChains = 2;
 // Only rivals with at least 1/kDnaMapqRivalVoteDenominator of the strongest
 // owner's vote are chained; the rest still enter the MAPQ through their vote.
 inline constexpr int kDnaMapqRivalVoteDenominator = 4;
-
-// Stage 1 of the pool admission: a posting budget per whole-query pass, spent
-// on the deferred slices' metadata before any anchor is built.
-// kDnaSkipPoolBudget postings are shared among the chaining::kDenseAdmitTileBp
-// oriented-query tiles that hold a slice, each getting max(kDnaSkipTileFloor,
-// budget / occupied tiles). A tile within its share is restored whole. A tile
-// over it keeps only slices whose key is under cigar_local_global_occ, rarest
-// first by (global_count, count, read_pos, slot), while their total stays
-// within the share (the rarest admissible slice always); a tile with no
-// admissible slice keeps nothing, and the DP crosses it as a gap. The floor
-// and the rarest admissible slice can take a long read's pool above the
-// budget, so the bound grows with read length. The budget spans the whole
-// query because a per-tile bar does not bound a sum of many ordinary tiles,
-// and rarity is genome-wide because a key rare in the genome localizes the
-// read while one merely rare in the window may not.
-inline constexpr std::uint64_t kDnaSkipPoolBudget = 65536;
-inline constexpr std::uint64_t kDnaSkipTileFloor = 128;
 
 // Top histogram clusters considered per strand.
 inline constexpr int kDnaResidueMaxClustersPerStrand = 2;

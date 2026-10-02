@@ -32,10 +32,9 @@ struct ResolvedDnaOptions {
   int cigar_local_interval_anchor_interval_pad = 512;
   int cigar_local_interval_anchor_chain_max_gap = 5000;
   int cigar_local_diag_band = 20000;
-  // Global occurrence cap: the screening pass's pool gate, the admissibility
-  // bar inside an over-share query tile, residue recovery and terminal-clip
-  // recovery. Set to the vote's resolved cap (INT_MAX when it has none); 200
-  // is the vote's cap on a human index.
+  // Global occurrence cap: the screening pass's pool gate, residue recovery
+  // and terminal-clip recovery. Set to the vote's resolved cap (INT_MAX when
+  // it has none); 200 is the vote's cap on a human index.
   int cigar_local_global_occ = 200;
   // Run count at or above which the dense chain uses the diagonal-keyed
   // predecessor search instead of the linear scan. Both are exact; 0 always

@@ -37,14 +37,6 @@ inline constexpr int kDnaTandemWindow = 1000;
 // it.
 inline constexpr int kDnaMinKswLen = 200;
 
-// Dense-chain pool admission. Postings are harvested under a per-pass budget
-// (dna/placement_chaining.h kDnaSkipPoolBudget) shared over the query tiles
-// that hold them; a tile over its share keeps only slices at or under the
-// global occurrence cap, rarest first, and the chain crosses a tile that keeps
-// none as a gap. The budget bounds work rather than evidence: any occurrence
-// threshold on runs low enough to shrink a satellite pool also cuts the unique
-// flanks a placement rests on.
-//
 // The pool occurrence gate (--max-chain-occ). At N > 0 the whole-query pass
 // drops every seed whose exact reference occurrence
 // (KmerPostingIntervalView::global_count) exceeds N, the same test the
@@ -52,7 +44,8 @@ inline constexpr int kDnaMinKswLen = 200;
 // on ONT, whose errors break exact runs so that an ungated pool is mostly
 // short, noisy runs. The gate and the run collapse are complementary: the
 // high-occurrence postings it removes are the ones that scatter across
-// diagonals and collapse poorly. 0 is the ungated pass.
+// diagonals and collapse poorly. 0 is the ungated pass. Nothing else bounds
+// the pool, so at 0 nothing does.
 inline constexpr int kDnaPoolGateOcc = 0;
 
 // Every DNA occurrence threshold is one number, N: the vote's seed occurrence
@@ -63,7 +56,7 @@ inline constexpr int kDnaPoolGateOcc = 0;
 // where 500 is minimap2's map-hifi max_mid_occ. dna_chain_occ_thresholds()
 // hands N to the pool gate (and through it the terminal clip nomination's
 // ceiling, min(4095, gate)) and to the global cap read by the screening pass,
-// pool admission, residue recovery and terminal-clip recovery.
+// residue recovery and terminal-clip recovery.
 // --max-vote-occ INT sets N for the vote and the chain alike, and 0 removes
 // every cap; --max-chain-occ INT replaces N on the pool gate only.
 //
@@ -82,8 +75,8 @@ inline constexpr int kDnaHiFiOccCeiling = 500;
 // kDnaTileRescueBudget is skipped; reads shorter than kDnaTileRescueMinLen bp
 // are not rescued (both constants in seeding/syncmer.h). Placement's screening
 // pass admits a rescued seed past its gate, and the whole-query pool admits
-// exactly the seeds the vote rescued (dna/retained_seed_density.h); stage 1,
-// the inversion probe and the clip nomination keep their gates. With no cap, or
+// exactly the seeds the vote rescued (dna/retained_seed_density.h); the
+// inversion probe and the clip nomination keep their gates. With no cap, or
 // N >= M, nothing is rescued. lr's M is minimap2's max_max_occ, a constant
 // there too; the RNA presets install 0.
 inline constexpr int kDnaTileRescueOcc = 4095;
