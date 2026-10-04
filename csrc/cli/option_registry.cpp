@@ -43,12 +43,12 @@ const std::vector<OptionSpec>& specs_table() {
         // it bounds base alignment only.
         {OptionId::DpMaxGap, 'g', "", kSize, kStable, A,
          "NUM", SEC_PLACEMENT,
-         "max gap in chaining and alignment [5000]"},
+         "stop alignment elongation if there are no seeds in NUM-bp [5000]"},
         // minimap2's -r. Base-level alignment only: NUM1 bands the read-end
         // extensions, NUM2 the gap fills.
         {OptionId::DpBw, 'r', "", kPair, kStable, A,
          "NUM[,NUM]", SEC_PLACEMENT,
-         "bandwidths of the read-end extension and of the gap fills [500,20000]"},
+         "alignment bandwidth and gap-fill bandwidth [500,20000]"},
         // minimap2's -m. DNA presets only; the splice presets keep their own
         // chain floors.
         {OptionId::MinChainScore, 'm', "", kInt, kStable, A,
@@ -62,7 +62,7 @@ const std::vector<OptionSpec>& specs_table() {
         // DNA presets default to 1.
         {OptionId::SpliceMaxLoci, 'N', "", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "retain at most INT secondary alignments [5]"},
+         "retain at most INT secondary alignments [1]"},
         {OptionId::MinSupport, '\0', "--min-support", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "minimal number of seeds on a vote peak [3]"},
@@ -144,10 +144,10 @@ const std::vector<OptionSpec>& specs_table() {
          "INT", SEC_ALIGN,
          "minimal peak DP alignment score [80]"},
         {OptionId::DpScoreN, '\0', "--score-N", kInt, kStable, A,
-         "INT", SEC_ALIGN, "score of a mismatch involving ambiguous bases [2]"},
+         "INT", SEC_ALIGN, "penalty of a mismatch involving ambiguous bases [2]"},
         {OptionId::DpEndBonus, '\0', "--end-bonus", kInt, kStable, A,
          "INT", SEC_ALIGN,
-         "score bonus when alignment extends to the end of the query [-1]"},
+         "score bonus when alignment extends to the end of the query sequence [-1]"},
 
         // RNA presets only.
         {OptionId::MinIntron, '\0', "--min-intron", kInt, kStable, A,
@@ -156,16 +156,16 @@ const std::vector<OptionSpec>& specs_table() {
         // Unlike minimap2's -G, this does not also change -r.
         {OptionId::MaxIntron, 'G', "", kSize, kStable, A,
          "NUM", SEC_SPLICE,
-         "max intron length [200k]"},
+         "max intron length (effective with -xsplice) [200k]"},
         {OptionId::SpliceStrand, 'u', "", kStr, kStable, A,
          "CHAR", SEC_SPLICE,
          "how to find GT-AG. f:transcript strand, b:both strands, r:reverse strand, n:don't match GT-AG [b]"},
         {OptionId::RnaJunctionBed, '\0', "--junc-bed", kStr,
          kStable, A, "FILE", SEC_SPLICE,
-         "junctions in BED6/BED12 to guide spliced alignment []"},
+         "junctions to prefer during base alignment []"},
         {OptionId::RnaJunctionBonus, '\0', "--junc-bonus", kInt,
          kStable, A, "INT", SEC_SPLICE,
-         "score bonus for a known junction [9]"},
+         "score bonus for a splice donor or acceptor found in annotation [9]"},
 
         {OptionId::Output,   'o', "--output", kStr, kStable, A,
          "FILE", SEC_IO, "output alignments to FILE [stdout]"},
@@ -179,8 +179,8 @@ const std::vector<OptionSpec>& specs_table() {
         // As in minimap2 the value can only be attached (--cs=long); a bare
         // --cs means short.
         {OptionId::Cs, '\0', "--cs", kNone, kStable, A,
-         "", SEC_IO,
-         "output the cs tag; --cs=long for the long form"},
+         "[=STR]", SEC_IO,
+         "output the cs tag; STR is 'short' (if absent) or 'long' [none]"},
         {OptionId::Md, '\0', "--MD", kNone, kStable, A,
          "", SEC_IO,
          "output the MD tag"},
@@ -196,24 +196,24 @@ const std::vector<OptionSpec>& specs_table() {
          "SAM read group line in a format like '@RG\\tID:foo\\tSM:bar' []"},
         {OptionId::SamHitOnly, '\0', "--sam-hit-only", kNone, kStable, A,
          "", SEC_IO,
-         "don't output unmapped reads in SAM"},
+         "in SAM, don't output unmapped reads"},
         {OptionId::PafNoHit, '\0', "--paf-no-hit", kNone, kStable, A,
          "", SEC_IO,
-         "output unmapped reads in PAF, with '*' for the strand and contig"},
-        // Also --secondary=yes, as minimap2 spells it. yes emits one record
-        // per mapped alternative (FLAG 0x100, tp:A:S, MAPQ 0, no SEQ); either
+         "in PAF, output unmapped queries; the strand and the reference name fields are set to '*'"},
+        // Also --secondary yes, the value as a separate word. yes emits one
+        // record per mapped alternative (FLAG 0x100, tp:A:S, MAPQ 0, no SEQ); either
         // way the alternatives appear on the primary's XA:Z, md:i and s2:i,
         // output-only DNA secondaries (-N >= 2) aside.
         {OptionId::Secondary, '\0', "--secondary", kStr, kStable, A,
-         "yes|no", SEC_IO,
-         "output secondary alignments [no]"},
+         "=yes|no", SEC_IO,
+         "whether to output secondary alignments [no]"},
         {OptionId::NoHeader, '\0', "--no-header", kNone, kStable, A,
          "", SEC_IO,
          "don't output the SAM header"},
         // PAF and SAM copy the comment verbatim, as minimap2 does.
         {OptionId::CopyComment, 'y', "", kNone, kStable, A,
          "", SEC_IO,
-         "copy FASTA/Q comments to output"},
+         "copy FASTA/Q comments to output SAM"},
         {OptionId::Threads, 't', "", kInt, kStable, A,
          // Unset, two cores are left for the reader and writer. Parallel
          // decoding shares the -t budget.
@@ -282,7 +282,7 @@ const std::vector<OptionSpec>& specs_table() {
          "INT", SEC_IOPT, "closed-syncmer s-mer size [9]"},
         {OptionId::IndexBatchBp, 'I', "", kSize, kStable, I,
          "NUM", SEC_IOPT,
-         "split index for every ~NUM reference bases [no split]"},
+         "split index for every ~NUM input bases [no split]"},
         {OptionId::Threads, 't', "", kInt, kStable, I,
          "INT", SEC_IOPT, "number of threads [all]"},
         {OptionId::Quiet, '\0', "--quiet", kNone, kStable, I,

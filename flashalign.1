@@ -70,12 +70,11 @@ flashalign align
 FlashAlign maps long reads to a reference genome: noisy Nanopore reads, accurate
 long reads such as PacBio HiFi, and long cDNA, direct-RNA and Iso-Seq reads,
 which it aligns across introns. It outputs in the PAF or SAM format, PAF by
-default, as minimap2 does; it writes no BAM, so BAM is made by piping SAM to
+default; it writes no BAM, so BAM is made by piping SAM to
 .BR samtools .
 .PP
 Seeds are closed syncmers, so an index is defined by the pair
-.RI ( k ,\  s )
-rather than by a minimizer window.
+.RI ( k ,\  s ).
 .B flashalign index
 writes a reusable
 .I .faix
@@ -130,7 +129,7 @@ See
 .BR "Preset options" .
 .TP
 .BI \-k \ INT
-Seed k-mer size, no larger than 23 [21]. A k-mer that is its own reverse
+Syncmer k-mer length [21], no larger than 23. A k-mer that is its own reverse
 complement, possible at an even value only, is never a seed.
 .TP
 .BI \-s \ INT
@@ -157,13 +156,13 @@ multi-part index.
 .B \-\-idx\-no\-seq
 Don't store target sequences in the index. It saves disk space and memory but
 the index generated with this option will not work with
-.B \-f
-.BR sam ,
-.BR \-c ,
-.B \-\-cs
+.B \-a
 or
-.BR \-\-MD ,
-nor with a splice preset. This option is not listed on the help screen.
+.BR \-c :
+it serves plain PAF output only, so SAM output,
+.BR \-\-cs ,
+.B \-\-MD
+and the splice presets refuse it. This option is not listed on the help screen.
 .TP
 .BI \-t \ INT
 Number of threads [all].
@@ -179,9 +178,10 @@ help message to stdout and exit.
 .SS Placement options
 .TP 10
 .BI \-g \ NUM
-Maximum gap [5000]. It bounds how far base alignment extends toward a read end,
-and under a DNA preset two pieces of a read join into one record only across
-gaps of at most
+Stop alignment elongation if there are no seeds within
+.IR NUM -bp
+[5000]. It bounds how far base alignment extends toward a read end, and under a
+DNA preset two pieces of a read join into one record only across gaps of at most
 .IR NUM .
 Under a DNA preset it is also the maximum gap of chaining, whose reach is never
 below 20000 or a quarter of the read length (up to 131072), so values under
@@ -192,22 +192,18 @@ bounds introns.
 .B lr
 uses 5000,
 .B lr:hq
-10000 and the splice presets 2000, minimap2's values for map-ont, map-hifi and
-splice.
+10000 and the splice presets 2000.
 .I NUM
 may be ending with k/K/m/M/g/G.
 .TP
 .B \-r \fINUM1\fR[,\fINUM2\fR]
-Bandwidths of the read-end extension and of the gap fills [500,20000].
+Bandwidth for base alignment [500,20000].
 .I NUM1
-is the band of the read-end extensions (and of inverted middles),
+is used for alignment extension toward the read ends and for inverted middles;
 .I NUM2
-the band of the gap fills between anchors. They act only when base-level
-alignment runs
+for closing gaps between anchors. They act only when base-level alignment runs
 .RB ( \-c ,
-SAM), never on placement or plain PAF output: unlike minimap2's
-.BR \-r ,
-they do not band chaining. A single value sets
+SAM), never on placement or plain PAF output. A single value sets
 .I NUM1
 only. Each value may be ending with k/K/m/M/g/G, and
 .I NUM1
@@ -216,42 +212,45 @@ may not exceed
 DNA presets only.
 .TP
 .BI \-m \ INT
-Minimal chaining score (matching bases minus log gap penalty) [40]. A record
-with fewer matching bases, or in plain PAF output a lower chain score, is not
-output; a rival chain scoring under
+Discard alignments with chaining score
+.RI < INT
+[40]. Chaining score equals the approximate number of matching bases minus a
+concave gap penalty. With a CIGAR the test counts the alignment's matching
+bases; in plain PAF output it reads the chain score. A rival chain scoring under
 .I INT
 is weighed as scoring
 .I INT
 in the mapping quality; an inverted middle is aligned only when both its spans
 reach
 .IR INT ;
-and base alignment trims a bad read end as minimap2 does, until
+and base alignment trims a bad read end until
 .RI 2* INT
 matching bases. At least 1. The long form is
 .BR \-\-min\-chain\-score .
 DNA presets only.
 .TP
 .BI \-p \ FLOAT
-Minimal secondary-to-primary chain score ratio [0.8]. Under a splice preset it
+Minimal secondary-to-primary score ratio to output secondary mappings [0.8].
+Under a splice preset it
 retains a rival: a retained rival is weighed in the mapping quality, is what
 .BR s2 ,
 .B md
 and
 .B XA
 report, and is a record of its own under
-.BR "\-\-secondary yes" .
+.BR \-\-secondary=yes .
 Under a DNA preset it decides which alternative loci are aligned beside the
 primary, and which rival a piece of a split read is weighed against in the
 mapping quality: one whose chain scores at least
 .I FLOAT
-times the primary's, or within 2\fIk\fR of it, as minimap2 retains a secondary.
+times the primary's, or within 2\fIk\fR of it.
 .TP
 .BI \-N \ INT
-Retain at most
+Output at most
 .I INT
-secondary alignments per read [5; DNA presets 1], printed as secondary records
+secondary alignments [5; DNA presets 1]. They are printed as secondary records
 under
-.BR "\-\-secondary yes" .
+.BR \-\-secondary=yes .
 On the splice presets the best locus and at most
 .I INT
 rivals are kept, which
@@ -266,7 +265,7 @@ On the DNA presets the best alternative is weighed in the mapping quality and
 may become primary; the others are printed with mapping quality 0.
 .B \-N0
 turns secondary output off, as
-.BR "\-\-secondary no" .
+.BR \-\-secondary=no .
 .TP
 .BI \-\-rival\-min\-diff \ INT
 Absolute chain-score band that retains a rival beside
@@ -417,8 +416,7 @@ be given, and a repeated key keeps its last value. DNA presets only.
 .SS Alignment options
 Under a DNA preset,
 .BR \-A ", " \-B ", " \-O ", " \-E ", " \-z " and " \-\-score\-N
-set the scoring of the gap fills between anchors, and that row is checked as
-minimap2 checks its own:
+set the scoring of the gap fills between anchors, and that row is checked:
 .B \-O
 and
 .B \-E
@@ -490,7 +488,7 @@ alignment also needs at least
 count. Plain PAF output, which has no DP, is not filtered by this score; under a
 DNA preset it prints no record whose chaining score is below
 .BR \-m .
-The long form is minimap2's
+The long form is
 .BR \-\-min\-dp\-score .
 .TP
 .BI \-\-score\-N \ INT
@@ -511,10 +509,10 @@ and
 Splice presets only.
 .TP
 .BI \-G \ NUM
-Maximum gap on the reference, that is the maximum intron length [200k].
+Maximum gap on the reference (effective with a splice preset), that is the
+maximum intron length [200k].
 .I NUM
-may be ending with k/K/m/M/g/G. This option does not change the chaining and
-alignment band width. The long form is
+may be ending with k/K/m/M/g/G. The long form is
 .BR \-\-max\-intron\-len .
 Splice presets only.
 .TP
@@ -594,20 +592,19 @@ Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag. Plain
 is placement-only: it runs no base-level dynamic programming, so its
 coordinates and its
 .B AS:i
-differ from those of a base-level alignment rather than merely lacking
-.BR cg:Z .
+differ from those of a base-level alignment.
 .BR \-c ,
 .B \-\-cs
 and
 .B \-\-MD
 turn base-level alignment on in PAF; SAM output always has it.
 .TP
-.B \-\-cs
+.BR \-\-cs [= short | long ]
 Output the
 .B cs
-tag, in the short form;
-.B \-\-cs=long
-selects the long form. Implies
+tag. If no argument is given,
+.RB ` short '
+is set [none]. Implies
 .BR \-c .
 .TP
 .B \-\-MD
@@ -643,13 +640,13 @@ as the first tag of every SAM record.
 In SAM, don't output unmapped reads.
 .TP
 .B \-\-paf\-no\-hit
-In PAF, output unmapped reads. The strand and the reference name fields are set
-to `*', and every count to 0. Without this option PAF carries no unmapped read.
+In PAF, output unmapped queries; the strand and the reference name fields are
+set to `*', and every count to 0.
 .TP
 .B \-\-no\-header
 Don't output the SAM header.
 .TP
-.B \-\-secondary yes|no
+.BR \-\-secondary = yes | no
 Whether to output secondary alignments [no]. With
 .BR yes ,
 each alternative alignment of a read is written after the primary and its
@@ -675,9 +672,9 @@ half of that piece's span is a secondary, not a supplementary; it is listed on
 the primary's
 .B XA
 either way.
-The value may be attached
-.RB ( \-\-secondary=yes )
-or separated; typed twice, the last one wins.
+The value may also be given as a separate word
+.RB ( "\-\-secondary yes" );
+typed twice, the last one wins.
 .TP
 .B \-y
 Copy input FASTA/Q comments to output, verbatim, as the last field of every
@@ -714,7 +711,8 @@ Suppress non-error logging, including the three lines a run ends with on stderr:
 the version, the command line, and the real time, CPU time and peak memory.
 .TP
 .B \-a
-Output alignments in the SAM format (PAF by default). Like
+Generate CIGAR and output alignments in the SAM format. FlashAlign outputs in
+PAF by default. Like
 .BR \-f ,
 this option outranks the format inferred from the
 .B \-o
@@ -759,12 +757,9 @@ reference genome
 .B \-s5 \-\-min\-support 3 \-A3 \-B12 \-O18,78 \-E6,1
 .B \-z1200,600 \-\-score\-N 3 \-r500,20000 \-g10000 \-m40 \-p0.8
 .BR \-S200 ).
-Its alignments are scored as minimap2's map-hifi scores them
+Its alignments are scored with minimap2's map-hifi scoring
 .RB ( \-A1 " " \-B4 " " \-O6,26 " " \-E2,1 ,
-.BR \-S200 ),
-not as minimap2's own
-.BR lr:hq ,
-which keeps map-ont's scoring for Q20 Nanopore reads.
+.BR \-S200 ).
 .TP
 .B splice
 Long-read spliced alignment
@@ -808,7 +803,7 @@ or
 option.
 .SH OUTPUT FORMAT
 .PP
-FlashAlign outputs in the PAF format by default, as minimap2 does; without
+FlashAlign outputs in the PAF format by default; without
 .BR \-c ,
 PAF output is approximate mapping, with no base-level alignment.
 .B \-a
@@ -862,6 +857,7 @@ s1	i	Chaining score
 s2	i	Chaining score of the best secondary chain
 de	f	Gap-compressed per-base sequence divergence
 ts	A	Transcript strand (splice mode only)
+RG	Z	Read group ID from \-R (SAM only)
 SA	Z	List of other supplementary alignments (SAM only)
 XA	Z	Secondary hits in (ctg,strandPos,CIGAR,NM;)+ (SAM only)
 cg	Z	CIGAR (PAF only)
@@ -914,9 +910,9 @@ path, which prints to stdout.
 .B 1
 Runtime failure: a missing or unreadable input, a write failure, CRAM or SAM
 text handed in as reads, a closed output, or an option the resolved preset
-cannot honour, such as a scoring row or a
+cannot honour, such as a scoring row that fails its check or a
 .B \-r
-pair minimap2 would refuse. One error line on stderr, no hint.
+pair whose first value exceeds the second. One error line on stderr, no hint.
 .TP
 .B 2
 Usage error: an unknown command, an unknown option, a bad value or a missing

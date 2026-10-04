@@ -34,8 +34,9 @@ std::string left_column(const OptionSpec& s, std::size_t indent) {
         left += std::string(s.long_name);
         have_tok = true;
     }
+    // A metavar starting with '=' or '[' is an attached value (--cs[=STR]).
     if (!s.metavar.empty()) {
-        left += ' ';
+        if (s.metavar.front() != '=' && s.metavar.front() != '[') left += ' ';
         left += std::string(s.metavar);
     }
     return left;

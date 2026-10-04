@@ -119,8 +119,8 @@ flashalign align -ax lr:hq ref.fa hifi.fq.gz > aln.sam   # PacBio HiFi reads
 ```
 
 `lr` is for noisy long reads of ~10% error rate. `lr:hq` is for accurate long reads with an
-error rate below 1%; PacBio HiFi reads belong there, and there is no separate HiFi preset. The
-two differ in seeding (`-s9` and `-s5`) and in scoring.
+error rate below 1%, such as PacBio HiFi reads. The two differ in seeding (`-s9` and `-s5`)
+and in scoring.
 
 #### Map long mRNA/cDNA reads
 
@@ -140,7 +140,9 @@ paftools.js gff2bed anno.gtf > anno.bed
 flashalign align -ax splice --junc-bed anno.bed ref.fa cdna.fq.gz > aln.sam
 ```
 
-`--junc-bed` works as in minimap2.
+`--junc-bed` takes gene annotations in the 12-column BED format, which `paftools.js gff2bed`
+converts from GTF or GFF3, or intron positions in 6-column BED with the strand column. A splice
+donor or acceptor found in the annotation gets a score bonus, `--junc-bonus` (9 by default).
 
 ### Output
 
@@ -152,7 +154,7 @@ flashalign align -a -x lr:hq ref.fa hifi.fq.gz | samtools sort -o aln.bam
 ```
 
 Unmapped reads are written to SAM unless `--sam-hit-only` is given, and to PAF only with
-`--paf-no-hit`. Secondary alignments are written only with `--secondary yes`. `--cs`, `--MD` and
+`--paf-no-hit`. Secondary alignments are written only with `--secondary=yes`. `--cs`, `--MD` and
 `--eqx` add the `cs` tag, the `MD` tag and `=`/`X` CIGAR operators. The PAF columns, the tags and
 the `cs` operations are listed under OUTPUT FORMAT in the manual.
 
