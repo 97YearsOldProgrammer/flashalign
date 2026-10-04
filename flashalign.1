@@ -25,6 +25,7 @@ flashalign index
 * Long-read alignment with CIGAR:
 .RS 4
 flashalign align
+.B \-a
 .RB [ \-x
 .IR preset ]
 .I ref.faix
@@ -33,7 +34,7 @@ flashalign align
 .I output.sam
 .br
 flashalign align
-.B \-f paf \-c
+.B \-c
 .RB [ \-x
 .IR preset ]
 .I ref.fa
@@ -45,7 +46,6 @@ flashalign align
 * Long-read mapping without CIGAR:
 .RS 4
 flashalign align
-.B \-f paf
 .RB [ \-x
 .IR preset ]
 .RB [ \-t
@@ -59,7 +59,7 @@ flashalign align
 * Spliced alignment of long RNA reads:
 .RS 4
 flashalign align
-.B \-x splice
+.B \-ax splice
 .I ref.fa
 .I reads.fq
 >
@@ -69,8 +69,9 @@ flashalign align
 .PP
 FlashAlign maps long reads to a reference genome: noisy Nanopore reads, accurate
 long reads such as PacBio HiFi, and long cDNA, direct-RNA and Iso-Seq reads,
-which it aligns across introns. It outputs in the SAM, BAM or PAF format, SAM by
-default.
+which it aligns across introns. It outputs in the PAF or SAM format, PAF by
+default, as minimap2 does; it writes no BAM, so BAM is made by piping SAM to
+.BR samtools .
 .PP
 Seeds are closed syncmers, so an index is defined by the pair
 .RI ( k ,\  s )
@@ -158,8 +159,6 @@ Don't store target sequences in the index. It saves disk space and memory but
 the index generated with this option will not work with
 .B \-f
 .BR sam ,
-.B \-f
-.BR bam ,
 .BR \-c ,
 .B \-\-cs
 or
@@ -371,7 +370,10 @@ no attempt to match GT-AG [b]. Under
 .B n
 no
 .B ts
-tag is stamped. Splice presets only.
+tag is stamped. Use
+.B f
+for reads already on the transcript strand, such as direct RNA and Iso-Seq.
+Splice presets only.
 .TP
 .BI \-\-junc\-bed \ FILE
 Junctions to prefer during base alignment [].
@@ -403,22 +405,31 @@ is stdout too.
 .TP
 .B \-f, \-\-format \fISTR\fR
 Output format:
-.BR sam ,
-.B bam
+.B sam
 or
 .B paf
-[sam]. When
+[paf]. When
 .B \-f
-is absent, a
-.IR .sam ,
-.I .bam
+and
+.B \-a
+are absent, a
+.I .sam
 or
 .I .paf
 extension on the
 .B \-o
 path selects the format instead; an explicit
 .B \-f
-wins over it. BAM is written natively.
+or
+.B \-a
+wins over it. No BAM is written:
+.B \-f bam
+and an
+.B \-o
+path ending in
+.I .bam
+are refused. Pipe SAM to samtools instead, as in
+.BR "flashalign align \-a ref.fa reads.fq | samtools sort \-o out.bam" .
 .TP
 .B \-c
 Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag. Plain
@@ -433,7 +444,7 @@ differ from those of a base-level alignment rather than merely lacking
 .B \-\-cs
 and
 .B \-\-MD
-turn base-level alignment on in PAF; SAM and BAM output always has it.
+turn base-level alignment on in PAF; SAM output always has it.
 .TP
 .B \-\-cs
 Output the
@@ -449,7 +460,7 @@ Output the MD tag (see the SAM spec). Implies
 .TP
 .B \-\-eqx
 Output =/X CIGAR operators for sequence match/mismatch. It rewrites every CIGAR
-the run realizes \- the SAM and BAM CIGAR,
+the run realizes \- the SAM CIGAR,
 .B SA:Z
 and PAF's
 .B cg:Z
@@ -470,10 +481,14 @@ and carry an
 .B ID
 field, and it adds
 .B RG:Z
-as the first tag of every SAM and BAM record.
+as the first tag of every SAM record.
 .TP
 .B \-\-sam\-hit\-only
-In SAM and BAM, don't output unmapped reads. PAF never carries them.
+In SAM, don't output unmapped reads.
+.TP
+.B \-\-paf\-no\-hit
+In PAF, output unmapped reads. The strand and the reference name fields are set
+to `*', and every count to 0. Without this option PAF carries no unmapped read.
 .TP
 .B \-\-no\-header
 Don't output the SAM header.
@@ -505,9 +520,8 @@ The value may be attached
 or separated; typed twice, the last one wins.
 .TP
 .B \-y
-Copy input FASTA/Q comments to output, as the last field of every record the
-read produces. In BAM the comment must already be SAM tag text, or the run
-stops.
+Copy input FASTA/Q comments to output, verbatim, as the last field of every
+record the read produces.
 .TP
 .BI \-t \ INT
 Number of threads [all\-2]: mapping runs on the machine's hardware threads less
@@ -540,7 +554,7 @@ Suppress non-error logging, including the three lines a run ends with on stderr:
 the version, the command line, and the real time, CPU time and peak memory.
 .TP
 .B \-a
-Output alignments in the SAM format. SAM is already the default; like
+Output alignments in the SAM format (PAF by default). Like
 .BR \-f ,
 this option outranks the format inferred from the
 .B \-o
@@ -626,11 +640,15 @@ or
 option.
 .SH OUTPUT FORMAT
 .PP
-FlashAlign outputs alignments in the SAM format by default.
-.B \-f bam
-selects the BAM format and
-.B \-f paf
-the PAF format. PAF is a TAB-delimited text format with each line consisting of
+FlashAlign outputs in the PAF format by default, as minimap2 does; without
+.BR \-c ,
+PAF output is approximate mapping, with no base-level alignment.
+.B \-a
+(or
+.BR "\-f sam" )
+selects the SAM format. FlashAlign writes no BAM; pipe its SAM to
+.B samtools sort
+for one. PAF is a TAB-delimited text format with each line consisting of
 at least 12 fields as are described in the following table:
 .TS
 center box;
@@ -656,7 +674,7 @@ _
 When alignment is available, column 11 gives the total number of sequence
 matches, mismatches and gaps in the alignment; column 10 divided by column 11
 gives the BLAST-like alignment identity. When alignment is unavailable, these
-two columns are approximate. SAM, BAM and PAF may optionally have additional
+two columns are approximate. SAM and PAF may optionally have additional
 fields in the SAM-like typed key-value format. FlashAlign may output the
 following tags:
 .TS
@@ -674,8 +692,8 @@ tp	A	Type of aln: P/primary, S/secondary, I/inversion
 s2	i	Chaining score of the best secondary chain
 de	f	Gap-compressed per-base sequence divergence
 ts	A	Transcript strand (splice mode only)
-SA	Z	List of other supplementary alignments (SAM/BAM only)
-XA	Z	Secondary hits in (ctg,strandPos,CIGAR,NM;)+ (SAM/BAM only)
+SA	Z	List of other supplementary alignments (SAM only)
+XA	Z	Secondary hits in (ctg,strandPos,CIGAR,NM;)+ (SAM only)
 cg	Z	CIGAR (PAF only)
 cs	Z	Difference string
 MD	Z	Difference string in the SAM spec

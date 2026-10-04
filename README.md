@@ -16,16 +16,16 @@ cd flashalign
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target flashalign -j
 # long reads against a reference genome
-./build/flashalign align ref.fa reads.fq > aln.sam
+./build/flashalign align -a ref.fa reads.fq > aln.sam
 # create an index first and then map
 ./build/flashalign index -x lr:hq ref.fa              # writes ref.fa.faix
-./build/flashalign align ref.fa.faix hifi.fq.gz > aln.sam
+./build/flashalign align -a ref.fa.faix hifi.fq.gz > aln.sam
 # use presets
-./build/flashalign align -x lr ref.fa ont.fq.gz > aln.sam                 # Oxford Nanopore genomic reads
-./build/flashalign align -x lr:hq ref.fa hifi.fq.gz > aln.sam             # PacBio HiFi genomic reads
-./build/flashalign align -x splice ref.fa cdna.fq.gz > aln.sam            # spliced long reads (strand unknown)
-./build/flashalign align -x splice:hq -u f ref.fa isoseq.fq.gz > aln.sam  # PacBio Iso-Seq (transcript strand)
-./build/flashalign align -x splice --junc-bed anno.bed ref.fa cdna.fq.gz > aln.sam  # use annotated junctions
+./build/flashalign align -ax lr ref.fa ont.fq.gz > aln.sam                 # Oxford Nanopore genomic reads
+./build/flashalign align -ax lr:hq ref.fa hifi.fq.gz > aln.sam             # PacBio HiFi genomic reads
+./build/flashalign align -ax splice ref.fa cdna.fq.gz > aln.sam            # spliced long reads (strand unknown)
+./build/flashalign align -ax splice:hq -u f ref.fa isoseq.fq.gz > aln.sam  # PacBio Iso-Seq (transcript strand)
+./build/flashalign align -ax splice --junc-bed anno.bed ref.fa cdna.fq.gz > aln.sam  # use annotated junctions
 # man page for detailed command line options
 man ./flashalign.1
 ```
@@ -72,23 +72,23 @@ alignment kernels use SSE4.1, and on ARM, where they go through the bundled sse2
 ### General usage
 
 Without options, `flashalign align` takes a reference and a read file, maps under the `lr`
-preset and writes base-level alignments in the SAM format:
+preset and writes approximate mappings in the PAF format. No base-level alignment is done, so
+there is no CIGAR and the coordinates are approximate:
 
 ```sh
-flashalign align ref.fa reads.fq > aln.sam
+flashalign align ref.fa reads.fq > approx-mapping.paf
 ```
 
-You can ask for PAF with the CIGAR in the `cg` tag:
+You can ask for the CIGAR in the `cg` tag of PAF:
 
 ```sh
-flashalign align -f paf -c ref.fa reads.fq > aln.paf
+flashalign align -c ref.fa reads.fq > aln.paf
 ```
 
-Without `-c`, PAF output is placement only: no base-level alignment is done, so there is no
-CIGAR and the coordinates differ from those of the base-level alignment:
+or for base-level alignments in the SAM format:
 
 ```sh
-flashalign align -f paf ref.fa reads.fq > approx-mapping.paf
+flashalign align -a ref.fa reads.fq > aln.sam
 ```
 
 Reads may be FASTA or FASTQ, plain or gzip'd, and several read files may follow the reference.
@@ -97,8 +97,8 @@ A FASTA reference is indexed in memory on every run. To index it once, write the
 `flashalign index` and give the index in place of the reference:
 
 ```sh
-flashalign index -x lr:hq ref.fa                  # indexing; writes ref.fa.faix
-flashalign align ref.fa.faix reads.fq > aln.sam   # alignment
+flashalign index -x lr:hq ref.fa                     # indexing; writes ref.fa.faix
+flashalign align -a ref.fa.faix reads.fq > aln.sam   # alignment
 ```
 
 The index records the preset it was built with, and `align` maps under that preset unless `-x`
@@ -114,8 +114,8 @@ same time. The default is `lr`.
 #### Map long genomic reads
 
 ```sh
-flashalign align -x lr ref.fa ont.fq.gz > aln.sam       # Oxford Nanopore reads
-flashalign align -x lr:hq ref.fa hifi.fq.gz > aln.sam   # PacBio HiFi reads
+flashalign align -ax lr ref.fa ont.fq.gz > aln.sam       # Oxford Nanopore reads
+flashalign align -ax lr:hq ref.fa hifi.fq.gz > aln.sam   # PacBio HiFi reads
 ```
 
 `lr` is for noisy long reads of ~10% error rate. `lr:hq` is for accurate long reads with an
@@ -125,32 +125,36 @@ two differ in seeding (`-s9` and `-s5`) and in scoring.
 #### Map long mRNA/cDNA reads
 
 ```sh
-flashalign align -x splice ref.fa cdna.fq.gz > aln.sam            # Nanopore cDNA or direct RNA
-flashalign align -x splice:hq -u f ref.fa isoseq.fq.gz > aln.sam  # PacBio Iso-Seq
+flashalign align -ax splice ref.fa cdna.fq.gz > aln.sam            # Nanopore cDNA
+flashalign align -ax splice -u f ref.fa drna.fq.gz > aln.sam       # Nanopore direct RNA
+flashalign align -ax splice:hq -u f ref.fa isoseq.fq.gz > aln.sam  # PacBio Iso-Seq
 ```
+
+`-u b`, the default, looks for splice sites on both strands; `-u f` looks on the transcript
+strand only, for reads already on that strand, such as direct RNA and Iso-Seq.
 
 FlashAlign can take annotated junctions and prefer them during base alignment:
 
 ```sh
 paftools.js gff2bed anno.gtf > anno.bed
-flashalign align -x splice --junc-bed anno.bed ref.fa cdna.fq.gz > aln.sam
+flashalign align -ax splice --junc-bed anno.bed ref.fa cdna.fq.gz > aln.sam
 ```
 
 `--junc-bed` works as in minimap2.
 
 ### Output
 
-SAM is the default; `-f bam` writes BAM and `-f paf` writes PAF. Without `-f`, a `.sam`, `.bam`
-or `.paf` extension on `-o` selects the format:
+PAF is the default; `-a` (or `-f sam`) writes SAM. Without `-f` or `-a`, a `.sam` or `.paf`
+extension on `-o` selects the format. For sorted BAM, pipe SAM to samtools:
 
 ```sh
-flashalign align -x lr:hq ref.fa hifi.fq.gz -o aln.bam
+flashalign align -a -x lr:hq ref.fa hifi.fq.gz | samtools sort -o aln.bam
 ```
 
-Unmapped reads are written to SAM and BAM unless `--sam-hit-only` is given; PAF never carries
-them. Secondary alignments are written only with `--secondary yes`. `--cs`, `--MD` and `--eqx`
-add the `cs` tag, the `MD` tag and `=`/`X` CIGAR operators. The PAF columns, the tags and the
-`cs` operations are listed under OUTPUT FORMAT in the manual.
+Unmapped reads are written to SAM unless `--sam-hit-only` is given, and to PAF only with
+`--paf-no-hit`. Secondary alignments are written only with `--secondary yes`. `--cs`, `--MD` and
+`--eqx` add the `cs` tag, the `MD` tag and `=`/`X` CIGAR operators. The PAF columns, the tags and
+the `cs` operations are listed under OUTPUT FORMAT in the manual.
 
 ### Advanced features
 
@@ -172,7 +176,7 @@ reading them once per part:
 
 ```sh
 flashalign index -I 4G ref.fa
-flashalign align ref.fa.faix reads.fq > aln.sam
+flashalign align -a ref.fa.faix reads.fq > aln.sam
 ```
 
 Mapping quality is incorrect given a multi-part index.

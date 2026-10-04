@@ -20,7 +20,7 @@ struct RunSummary {
   int64_t reads = 0;
   int64_t bases = 0;
   int64_t mapped_reads = 0;
-  int64_t records = 0; // every record written, unmapped SAM/BAM rows included
+  int64_t records = 0; // every record written, unmapped SAM rows included
   int64_t supplementary_records = 0;
   int64_t secondary_records = 0; // written only with --secondary yes
   // RNA: reads whose primary alignment has an intron, and the introns (N

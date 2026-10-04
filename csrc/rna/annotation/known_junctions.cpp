@@ -106,7 +106,7 @@ KnownJunctionStore KnownJunctionStore::load_bed(
     const auto f = fields(line);
     if (f.size() != 6 && f.size() != 12)
       throw std::invalid_argument(path + ":" + std::to_string(line_number) +
-                                  ": expected BED6 or BED12");
+                                  ": expected BED6 (strand in column 6) or BED12");
     const auto found = ids.find(std::string(f[0]));
     if (found == ids.end())
       throw std::invalid_argument(path + ":" + std::to_string(line_number) +

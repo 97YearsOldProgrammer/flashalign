@@ -42,7 +42,7 @@ void write_paf_record(
 ) {
     if (!result.mapped()) return;
     const int qlen = static_cast<int>(read.seq.size());
-    // Shared with SAM and BAM (io/block_divergence.h), so NM:i and de:f agree.
+    // Shared with SAM (io/block_divergence.h), so NM:i and de:f agree.
     const BlockAccounting acc = block_accounting(result, qlen);
     const char strand = result.is_reverse ? '-' : '+';
     const auto found = ref_lengths.find(result.chromosome);
@@ -96,6 +96,12 @@ void write_paf_record(
     // -y: the FASTA/Q comment, verbatim and last, as minimap2 writes it.
     if (copy_comment && !read.comment.empty()) out << '\t' << read.comment;
     out << '\n';
+}
+
+void write_paf_no_hit_record(
+    std::ostream& out, const ::fa::cpu::io::FastxRecord& read) {
+    out << read.name << '\t' << read.seq.size()
+        << "\t0\t0\t*\t*\t0\t0\t0\t0\t0\t0\n";
 }
 
 }}}  // namespace fa::cpu::output

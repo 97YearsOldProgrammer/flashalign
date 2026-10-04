@@ -14,6 +14,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -208,6 +209,90 @@ bool looks_like_negative_number(const std::string& token) {
     return true;
 }
 
+// minimap2 spellings this tool does not take, and what to use instead. The
+// refusal stands; the hint only names the way here.
+struct Minimap2Hint {
+    std::string_view spelling;
+    std::string_view hint;
+};
+
+constexpr std::string_view kSyncmerHint =
+    "seeds are closed syncmers, set when the index is built: flashalign "
+    "index -k -s";
+constexpr std::string_view kSpliceModelHint =
+    "FlashAlign always runs minimap2's default splice model (-J1), where it "
+    "has no effect";
+constexpr std::string_view kSpliceScoreHint =
+    "--junc-bed gives annotated junctions a bonus";
+constexpr std::string_view kEndFilterHint =
+    "the terminal-exon filter is always on, at minimap2's default";
+constexpr std::string_view kMemoryCapHint =
+    "drop it: there is no such memory cap";
+constexpr std::string_view kAltHint = "map to a reference without ALT contigs";
+
+constexpr Minimap2Hint kAlignHints[] = {
+    {"-s", "minimap2's -s, the minimal peak DP score, is -S here"},
+    {"-k", "k is set when the index is built: flashalign index -k"},
+    {"-w", kSyncmerHint},
+    {"-U", "--max-vote-occ sets the seed occurrence cap"},
+    {"-I", "-I is an index option: flashalign index -I"},
+    {"-d", "build the index with flashalign index ref.fa out.faix"},
+    {"--split-prefix",
+     "map against a one-part index (flashalign index without -I)"},
+    {"-L", "samtools moves a CIGAR of over 65535 operations to CG:B,I "
+           "when it writes BAM"},
+    {"-2", "drop it: input and output already run on their own threads"},
+    {"--cap-kalloc", kMemoryCapHint},
+    {"--cap-sw-mem", kMemoryCapHint},
+    {"--alt", kAltHint},
+    {"--alt-drop", kAltHint},
+    {"-J", "FlashAlign always runs minimap2's default splice model, -J1"},
+    {"-C", kSpliceModelHint},
+    {"--splice-flank", kSpliceModelHint},
+    {"--end-seed-pen", kEndFilterHint},
+    {"--no-end-flt", kEndFilterHint},
+    {"--spsc", kSpliceScoreHint},
+    {"--spsc0", kSpliceScoreHint},
+    {"--junc-pen", kSpliceScoreHint},
+    {"--spsc-scale", kSpliceScoreHint},
+    {"--write-junc",
+     "paftools.js splice2bed writes the junctions of SAM or PAF -c output"},
+};
+
+constexpr Minimap2Hint kIndexHints[] = {
+    {"-w", "seeds are closed syncmers: -k and -s set their density"},
+    {"-d", "the output is the second operand: flashalign index ref.fa out.faix"},
+};
+
+// "; <hint>" when minimap2 has the spelling, else "". A long spelling may
+// carry its value (--splice-flank=no).
+std::string minimap2_hint(std::string_view token, unsigned mode) {
+    const std::string_view spelling = token.substr(0, token.find('='));
+    if (mode == ModeAlign) {
+        for (const Minimap2Hint& h : kAlignHints)
+            if (h.spelling == spelling) return "; " + std::string(h.hint);
+    } else {
+        for (const Minimap2Hint& h : kIndexHints)
+            if (h.spelling == spelling) return "; " + std::string(h.hint);
+    }
+    return {};
+}
+
+// The refusal of an unknown -x, naming the preset here when minimap2's name
+// has one.
+std::string preset_refusal(const std::string& preset) {
+    std::string message =
+        "-x preset must be one of: " + fa::cpu::api::accepted_preset_names();
+    std::string_view here;
+    if (preset == "map-ont") here = "lr";
+    else if (preset == "map-hifi" || preset == "map-ccs") here = "lr:hq";
+    else if (preset == "cdna") here = "splice";
+    if (!here.empty())
+        message += "; minimap2's " + preset + " is -x " + std::string(here) +
+                   " here";
+    return message;
+}
+
 // getopt-style short-option bundling (`-ax lr:hq`, `-ct8`). A bundle is a
 // single-dash token longer than two characters that is not a registered
 // spelling or a negative number. The first value-taking letter ends it; the
@@ -233,7 +318,7 @@ TokenStream expand_short_bundles(
             if (spec == nullptr) {
                 throw UsageError(
                     "unknown " + verb + " option: " + letter + " (in " + arg +
-                    ")");
+                    ")" + minimap2_hint(letter, mode));
             }
             out.push(letter, false);
             if (spec->kind == ValueKind::None) continue;
@@ -302,7 +387,8 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                              ModeAlign);
         if (spec == nullptr) {
             if (arg.size() > 1 && arg[0] == '-') {
-                throw UsageError("unknown align option: " + arg);
+                throw UsageError("unknown align option: " + arg +
+                                 minimap2_hint(arg, ModeAlign));
             }
             // A bare "-" is the stdin marker, not an option -> positional.
             positional.push_back(arg);
@@ -353,8 +439,8 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
               break;
             case OptionId::NoHeader:   opt.no_header = true; break;
             case OptionId::SamHitOnly: opt.sam_hit_only = true; break;
+            case OptionId::PafNoHit:   opt.paf_no_hit = true; break;
             case OptionId::SoftClipSupp: opt.soft_clip_supp = true; break;
-            // -y: BAM's tag-text check is in the writer, which knows the read.
             case OptionId::CopyComment: opt.copy_comment = true; break;
             case OptionId::ReadGroup: {
                 const ReadGroup group = parse_read_group(val);
@@ -526,25 +612,38 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         opt.target_path = positional[0];
         opt.reads_paths.assign(positional.begin() + 1, positional.end());
     }
-    // Without -f, infer the format from the -o extension.
-    if (!format_given && opt.output_path != "-") {
+    // No BAM is written, as in minimap2; a .bam path is refused rather than
+    // given SAM or PAF text.
+    const std::string no_bam =
+        "BAM output is not written; pipe SAM to samtools: "
+        "flashalign align -a ... | samtools sort -o out.bam";
+    if (opt.format == "bam") throw UsageError(no_bam);
+    if (opt.output_path != "-") {
         const std::string& o = opt.output_path;
         const auto ends_with = [&](const char* suffix) {
             const std::string s(suffix);
             return o.size() >= s.size() &&
                    o.compare(o.size() - s.size(), s.size(), s) == 0;
         };
-        if (ends_with(".bam")) opt.format = "bam";
-        else if (ends_with(".paf")) opt.format = "paf";
-        else if (ends_with(".sam")) opt.format = "sam";
+        if (ends_with(".bam")) throw UsageError(no_bam);
+        // Without -f or -a, the -o extension picks the format.
+        if (!format_given) {
+            if (ends_with(".paf")) opt.format = "paf";
+            else if (ends_with(".sam")) opt.format = "sam";
+        }
     }
-    if (opt.format != "sam" && opt.format != "paf" && opt.format != "bam") {
-        throw UsageError("--format must be 'sam', 'bam', or 'paf'");
+    if (opt.format != "sam" && opt.format != "paf") {
+        std::string message = "--format must be 'sam' or 'paf'";
+        // minimap2's -f FLOAT, the repetitive-seed fraction.
+        if (!opt.format.empty() &&
+            (std::isdigit(static_cast<unsigned char>(opt.format[0])) ||
+             opt.format[0] == '.'))
+            message += "; minimap2's -f FLOAT is --max-vote-occ INT here, "
+                       "a seed occurrence cap";
+        throw UsageError(message);
     }
     if (!fa::cpu::api::preset_is_valid(opt.preset)) {
-        throw UsageError(
-            "-x preset must be one of: " +
-            fa::cpu::api::accepted_preset_names());
+        throw UsageError(preset_refusal(opt.preset));
     }
     // Options valid for only one mode, checked after the full parse so
     // argument order does not matter. options/resolve.cpp repeats most of
@@ -638,7 +737,8 @@ IndexOptions parse_index_args(int argc, char** argv, int start) {
         if (spec == nullptr) {
             // A bare "-" is stdin.
             if (arg.size() > 1 && arg[0] == '-') {
-                throw UsageError("unknown index option: " + arg);
+                throw UsageError("unknown index option: " + arg +
+                                 minimap2_hint(arg, ModeIndex));
             }
             positional.push_back(arg);
             continue;
@@ -685,9 +785,7 @@ IndexOptions parse_index_args(int argc, char** argv, int start) {
             "FASTA once per part, which stdin cannot repeat");
     }
     if (!fa::cpu::api::preset_is_valid(opt.preset)) {
-        throw UsageError(
-            "-x preset must be one of: " +
-            fa::cpu::api::accepted_preset_names());
+        throw UsageError(preset_refusal(opt.preset));
     }
     return opt;
 }

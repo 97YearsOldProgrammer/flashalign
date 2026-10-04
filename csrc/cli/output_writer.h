@@ -12,16 +12,10 @@
 #include <string>
 #include <unordered_map>
 
-namespace fa::cpu::io {
-class BgzfWriter;
-}
-
 namespace fa::cpu::cli {
 
 struct AlignmentOutputContext {
     std::ostream& text;
-    io::BgzfWriter* bam_writer = nullptr;
-    const std::unordered_map<std::string, int>* bam_reference_ids = nullptr;
     const std::unordered_map<std::string, int64_t>* reference_lengths = nullptr;
     std::string format;
     bool include_unmapped = false;
@@ -69,8 +63,6 @@ class AlignmentOutputWriter {
     std::ostream* text_ = nullptr;
     std::vector<output::SamReference> references_;
     std::unordered_map<std::string, int64_t> reference_lengths_;
-    std::unordered_map<std::string, int> bam_reference_ids_;
-    std::unique_ptr<io::BgzfWriter> bam_writer_;
 };
 
 // Writes one read's records in the requested format. Returns the number of

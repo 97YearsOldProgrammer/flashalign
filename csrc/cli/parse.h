@@ -19,10 +19,12 @@ struct AlignOptions {
     std::string target_path;
     std::vector<std::string> reads_paths;
     std::string output_path = "-";
-    std::string format = "sam";
+    std::string format = "paf";
     bool no_header = false;
-    // --sam-hit-only: omit unmapped reads from SAM/BAM. PAF never has them.
+    // --sam-hit-only: omit unmapped reads from SAM. PAF has them only
+    // with --paf-no-hit.
     bool sam_hit_only = false;
+    bool paf_no_hit = false;
     bool paf_cigar = false;
     // --cs[=short|long] / --MD: minimap2 difference strings, DNA presets only.
     // Both imply CIGAR realization, so PAF gets cg:Z too. cs is "" when not
@@ -34,9 +36,8 @@ struct AlignOptions {
     // -Y/--soft-clip-supp: soft-clip supplementary records, keeping the full
     // SEQ. The default is hard clipping, as in minimap2.
     bool soft_clip_supp = false;
-    // -y: copy the FASTA/Q comment onto the output records (minimap2 -y). PAF
-    // and SAM take it verbatim; BAM requires SAM tag text, since aux fields are
-    // typed. uBAM input has no comment.
+    // -y: copy the FASTA/Q comment onto the output records (minimap2 -y),
+    // verbatim. uBAM input has no comment.
     bool copy_comment = false;
     // --secondary yes|no: emit one record per mapped alternative (FLAG 0x100,
     // tp:A:S) in every format. The primary's XA:Z lists them either way.

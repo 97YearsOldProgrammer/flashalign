@@ -146,9 +146,9 @@ fa::cpu::io::IoPlan build_io_plan(const AlignOptions& opt, int num_threads,
   return plan;
 }
 
-// SAM and BAM always carry a CIGAR; PAF only with -c (or --cs/--MD).
+// SAM always carries a CIGAR; PAF only with -c (or --cs/--MD).
 bool run_needs_cigar(const AlignOptions& opt) {
-  return opt.format == "sam" || opt.format == "bam" || opt.paf_cigar;
+  return opt.format == "sam" || opt.paf_cigar;
 }
 
 // DNA map-only reads no reference bases, so its index load skips unpacking
@@ -743,9 +743,10 @@ int run_align(const AlignOptions& cli_options) {
       decode_loan = 0;
     if (part == 0) {
       output.write_header(reader.source_header_text(), opt.no_header);
-      // The BAM writer exists only after the header is written.
       output_context.emplace(output.context(
-          /*include_unmapped=*/!opt.sam_hit_only, opt.paf_cigar,
+          /*include_unmapped=*/opt.format == "paf" ? opt.paf_no_hit
+                                                   : !opt.sam_hit_only,
+          opt.paf_cigar,
           opt.copy_comment, emit_opts));
     }
     batch_reader = std::make_unique<fa::cpu::io::BatchReader>(reader, batch_bp);
@@ -786,7 +787,7 @@ int run_align(const AlignOptions& cli_options) {
     session.reset();
     batch_reader.reset();
   }
-  output.close(); // flushes, and ends BAM with the BGZF EOF block
+  output.close();
   // Zero reads usually means an unrecognized input format.
   if (seen == 0) {
     std::cerr << "flashalign: warning: 0 reads read from input"

@@ -133,7 +133,10 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::Output,   'o', "--output", kStr, kStable, A,
          "FILE", SEC_IO, "output alignments to FILE [stdout]"},
         {OptionId::Format,   'f', "--format", kStr, kStable, A,
-         "STR", SEC_IO, "output format: sam, bam or paf [sam]"},
+         "STR", SEC_IO, "output format: sam or paf [paf]"},
+        // minimap2's -a: the same as -f sam.
+        {OptionId::OutputSam, 'a', "", kNone, kStable, A,
+         "", SEC_IO, "output in the SAM format (PAF by default)"},
         {OptionId::PafCigar, 'c', "", kNone, kStable, A,
          "", SEC_IO, "output CIGAR in PAF"},
         // As in minimap2 the value can only be attached (--cs=long); a bare
@@ -144,7 +147,7 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::Md, '\0', "--MD", kNone, kStable, A,
          "", SEC_IO,
          "output the MD tag"},
-        // Applies to every realized CIGAR (SAM, BAM, SA:Z, cg:Z); plain PAF
+        // Applies to every realized CIGAR (SAM, SA:Z, cg:Z); plain PAF
         // has none.
         {OptionId::Eqx, '\0', "--eqx", kNone, kStable, A,
          "", SEC_IO,
@@ -156,7 +159,10 @@ const std::vector<OptionSpec>& specs_table() {
          "SAM read group line in a format like '@RG\\tID:foo\\tSM:bar' []"},
         {OptionId::SamHitOnly, '\0', "--sam-hit-only", kNone, kStable, A,
          "", SEC_IO,
-         "don't output unmapped reads in SAM/BAM"},
+         "don't output unmapped reads in SAM"},
+        {OptionId::PafNoHit, '\0', "--paf-no-hit", kNone, kStable, A,
+         "", SEC_IO,
+         "output unmapped reads in PAF, with '*' for the strand and contig"},
         // Also --secondary=yes, as minimap2 spells it. yes emits one record
         // per mapped alternative (FLAG 0x100, tp:A:S, MAPQ 0, no SEQ); either
         // way the alternatives appear on the primary's XA:Z, md:i and s2:i.
@@ -166,7 +172,7 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::NoHeader, '\0', "--no-header", kNone, kStable, A,
          "", SEC_IO,
          "don't output the SAM header"},
-        // PAF and SAM copy the comment verbatim; BAM requires SAM tag text.
+        // PAF and SAM copy the comment verbatim, as minimap2 does.
         {OptionId::CopyComment, 'y', "", kNone, kStable, A,
          "", SEC_IO,
          "copy FASTA/Q comments to output"},
@@ -195,11 +201,6 @@ const std::vector<OptionSpec>& specs_table() {
          "preset: lr, lr:hq, splice or splice:hq (see 'flashalign index') [lr]"},
 
         // align, not on the help screen; the manual page lists these.
-        //
-        // -a: minimap2's "output SAM". SAM is already the default; the row
-        // lets minimap2 command lines parse.
-        {OptionId::OutputSam, 'a', "", kNone, kDev, A,
-         "", HIDDEN, "", STUDY_CLI_MANUAL},
         // --batch-window INT [3]: batches in flight in the compute stage.
         // Output is identical for every value.
         {OptionId::BatchWindow, '\0', "--batch-window", kInt, kDev, A,

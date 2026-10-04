@@ -1,4 +1,4 @@
-// Auxiliary tag values shared by the PAF, SAM and BAM writers.
+// Auxiliary tag values shared by the PAF and SAM writers.
 #pragma once
 
 #include "../core/types.h"

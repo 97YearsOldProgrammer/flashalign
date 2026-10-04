@@ -1,10 +1,7 @@
 #include "output_writer.h"
 
-#include "../io/bam.h"
 #include "../io/bam_reader.h"
-#include "../io/bgzf.h"
 #include "../io/paf.h"
-#include "../io/sam_tags.h"
 #include "read_group.h"
 #include "fa_version.h"
 
@@ -146,17 +143,6 @@ bool sam_tags_declare_read_group(const std::string& tags) {
            tags.find("\tRG:Z:") != std::string::npos;
 }
 
-// -y for BAM output. SAM and PAF copy the comment verbatim, as minimap2 does,
-// but BAM aux fields are typed, so a comment that is not SAM tag text has no
-// encoding and stops the run.
-void require_sam_tag_text(const io::FastxRecord& read) {
-    std::string offending;
-    if (io::sam_tag_text_valid(read.comment, &offending)) return;
-    throw std::runtime_error("-y: the FASTA/Q comment of read " + read.name +
-                             " is not SAM tag text (" + offending +
-                             "); BAM aux fields are typed");
-}
-
 }  // namespace
 
 AlignmentOutputWriter::AlignmentOutputWriter(
@@ -201,19 +187,6 @@ void AlignmentOutputWriter::write_header(
         for (const auto& line : header_lines) *text_ << line << '\n';
         require_output(*text_, "write");
     }
-    if (format_ != "bam") return;
-
-    std::string header_text;
-    for (const auto& line : header_lines) {
-        header_text += line;
-        header_text.push_back('\n');
-    }
-    bam_writer_ = std::make_unique<io::BgzfWriter>(*text_);
-    bam_writer_->write(output::encode_bam_header(references_, header_text));
-    for (std::size_t index = 0; index < references_.size(); ++index) {
-        bam_reference_ids_.emplace(
-            references_[index].name, static_cast<int>(index));
-    }
 }
 
 AlignmentOutputContext AlignmentOutputWriter::context(
@@ -226,8 +199,6 @@ AlignmentOutputContext AlignmentOutputWriter::context(
     // emit_secondary is already set by the caller from --secondary.
     return {
         *text_,
-        bam_writer_.get(),
-        &bam_reference_ids_,
         &reference_lengths_,
         format_,
         include_unmapped,
@@ -238,7 +209,6 @@ AlignmentOutputContext AlignmentOutputWriter::context(
 }
 
 void AlignmentOutputWriter::close() {
-    if (bam_writer_) bam_writer_->close();
     text_->flush();
     require_output(*text_, "close");
 }
@@ -280,33 +250,6 @@ int64_t write_alignment_records(
             context.text << line;
             written += std::count(line.begin(), line.end(), '\n');
         }
-    } else if (context.format == "bam") {
-        if (result.mapped() || context.include_unmapped) {
-            output::SamEmitOptions emit_options = context.sam;
-            // -y: the comment encoded as aux bytes on every record of the read.
-            std::string record_extra_tags;
-            bool comment_declares_read_group = false;
-            if (context.copy_comment && !read.comment.empty()) {
-                require_sam_tag_text(read);
-                record_extra_tags = io::sam_tag_text_to_bam(read.comment);
-                comment_declares_read_group =
-                    sam_tags_declare_read_group(read.comment);
-            }
-            if (!emit_options.read_group_id.empty() &&
-                (comment_declares_read_group ||
-                 sam_tags_declare_read_group(
-                     io::bam_tags_to_sam_text(read.tag_bytes))))
-                emit_options.read_group_id.clear();
-            const std::vector<std::string> bam_records =
-                output::encode_bam_records(
-                    read.name, result, read.seq, read.qual,
-                    *context.bam_reference_ids, read.tag_bytes, emit_options,
-                    record_extra_tags);
-            for (const std::string& record : bam_records) {
-                context.bam_writer->write(record);
-                ++written;
-            }
-        }
     } else {
         if (result.mapped()) {
             output::write_paf_record(
@@ -324,7 +267,7 @@ int64_t write_alignment_records(
                 ++written;
             }
             // With --secondary yes: each secondary, then its supplementaries,
-            // in the same order as the SAM and BAM writers.
+            // in the same order as the SAM writer.
             if (context.sam.emit_secondary) {
                 for (const auto& secondary : result.secondary) {
                     if (!secondary.mapped()) continue;
@@ -345,9 +288,12 @@ int64_t write_alignment_records(
                     }
                 }
             }
+        } else if (context.include_unmapped) {
+            output::write_paf_no_hit_record(context.text, read);
+            ++written;
         }
     }
-    if (context.format != "bam") require_output(context.text, "write");
+    require_output(context.text, "write");
     return written;
 }
 

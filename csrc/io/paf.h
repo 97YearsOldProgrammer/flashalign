@@ -33,4 +33,8 @@ void write_paf_record(
     bool copy_comment = false
 );
 
+// minimap2's --paf-no-hit row for a read with no alignment.
+void write_paf_no_hit_record(
+    std::ostream& out, const ::fa::cpu::io::FastxRecord& read);
+
 }}}  // namespace fa::cpu::output

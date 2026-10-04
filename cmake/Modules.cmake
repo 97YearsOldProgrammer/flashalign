@@ -113,13 +113,11 @@ target_link_libraries(flashalign_engine INTERFACE
     flashalign_threading)
 
 add_library(flashalign_io STATIC
-    csrc/io/bam.cpp
     csrc/io/byte_source.cpp
     csrc/io/deflate_split.cpp
     csrc/io/gz_member_source.cpp
     csrc/io/paf.cpp
-    csrc/io/sam.cpp
-    csrc/io/sam_tags.cpp)
+    csrc/io/sam.cpp)
 flashalign_configure_internal_target(flashalign_io)
 # Threads for gz_member_source.cpp's decompression threads.
 target_link_libraries(flashalign_io PRIVATE

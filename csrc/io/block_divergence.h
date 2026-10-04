@@ -1,4 +1,4 @@
-// Aligned-block accounting shared by the PAF, SAM and BAM writers: the query
+// Aligned-block accounting shared by the PAF and SAM writers: the query
 // interval, block length, matches, edit distance and gap counts behind PAF
 // columns 3, 4, 10 and 11 and the NM:i and de:f tags.
 #pragma once

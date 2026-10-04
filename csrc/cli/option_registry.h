@@ -19,7 +19,7 @@ enum class OptionId {
   // clang-format off: the ids are grouped by CLI section.
     Help,
     // align: input/output
-    Output, Format, PafCigar, NoHeader, SamHitOnly, SoftClipSupp,
+    Output, Format, PafCigar, NoHeader, SamHitOnly, PafNoHit, SoftClipSupp,
     CopyComment,
     Secondary, ReadGroup,
     // -a, minimap2's "output SAM": the same as -f sam.
