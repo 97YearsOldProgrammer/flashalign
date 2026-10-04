@@ -554,41 +554,11 @@ ranges from 0 to 127. Splice presets only.
 Output alignments to
 .I FILE
 [stdout].
-.RB ` \- '
-is stdout too.
-.TP
-.B \-f, \-\-format \fISTR\fR
-Output format:
-.B sam
-or
-.B paf
-[paf]. When
-.B \-f
-and
-.B \-a
-are absent, a
-.I .sam
-or
-.I .paf
-extension on the
-.B \-o
-path selects the format instead; an explicit
-.B \-f
-or
-.B \-a
-wins over it. No BAM is written:
-.B \-f bam
-and an
-.B \-o
-path ending in
-.I .bam
-are refused. Pipe SAM to samtools instead, as in
-.BR "flashalign align \-a ref.fa reads.fq | samtools sort \-o out.bam" .
 .TP
 .B \-c
-Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag. Plain
-.B \-f
-.B paf
+Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag. PAF
+without
+.B \-c
 is placement-only: it runs no base-level dynamic programming, so its
 coordinates and its
 .B AS:i
@@ -712,11 +682,7 @@ the version, the command line, and the real time, CPU time and peak memory.
 .TP
 .B \-a
 Generate CIGAR and output alignments in the SAM format. FlashAlign outputs in
-PAF by default. Like
-.BR \-f ,
-this option outranks the format inferred from the
-.B \-o
-extension.
+PAF by default.
 .TP
 .BI \-\-batch\-window \ INT
 Number of batches in flight in the compute stage [3]. With 1, all threads finish
@@ -807,11 +773,11 @@ FlashAlign outputs in the PAF format by default; without
 .BR \-c ,
 PAF output is approximate mapping, with no base-level alignment.
 .B \-a
-(or
-.BR "\-f sam" )
 selects the SAM format. FlashAlign writes no BAM; pipe its SAM to
 .B samtools sort
-for one. PAF is a TAB-delimited text format with each line consisting of
+for one, as in
+.BR "flashalign align \-a ref.fa reads.fq | samtools sort \-o out.bam" .
+PAF is a TAB-delimited text format with each line consisting of
 at least 12 fields as are described in the following table:
 .TS
 center box;

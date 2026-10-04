@@ -61,7 +61,7 @@ class Config:
 
     @property
     def full_read_cigar(self) -> bool:
-        """Realize base-level CIGARs; False maps only (the CLI's plain -f paf)."""
+        """Realize base-level CIGARs; False maps only (the CLI's plain PAF)."""
 
     @full_read_cigar.setter
     def full_read_cigar(self, arg: bool, /) -> None: ...
@@ -649,8 +649,8 @@ class Aligner:
         Complete PAF lines, newline-terminated, with the query name and
         length; cigar=True adds the cg:Z tag (the CLI's -c). Under the
         default configuration, cigar=True gives what
-        `flashalign align -f paf -c` writes for the read. The CLI's plain
-        `-f paf` maps without base-level alignment;
+        `flashalign align -c` writes for the read. The CLI's plain
+        PAF maps without base-level alignment;
         Config(full_read_cigar=False) with cigar=False gives that output.
         No secondary rows are written, as under the CLI's default. An
         unmapped read gives ''.

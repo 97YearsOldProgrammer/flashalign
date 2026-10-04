@@ -169,9 +169,6 @@ const std::vector<OptionSpec>& specs_table() {
 
         {OptionId::Output,   'o', "--output", kStr, kStable, A,
          "FILE", SEC_IO, "output alignments to FILE [stdout]"},
-        {OptionId::Format,   'f', "--format", kStr, kStable, A,
-         "STR", SEC_IO, "output format: sam or paf [paf]"},
-        // minimap2's -a: the same as -f sam.
         {OptionId::OutputSam, 'a', "", kNone, kStable, A,
          "", SEC_IO, "output in the SAM format (PAF by default)"},
         {OptionId::PafCigar, 'c', "", kNone, kStable, A,

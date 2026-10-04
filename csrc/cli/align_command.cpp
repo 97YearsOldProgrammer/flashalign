@@ -305,8 +305,8 @@ ResolvedInputs resolve_inputs(const AlignOptions& opt) {
     throw std::runtime_error(
         opt.target_path +
         ": this .faix does not embed its reference (built with --idx-no-seq), "
-        "so it cannot realize a CIGAR; map to plain PAF (-f paf, without "
-        "-c/--cs/--MD), or rebuild it with 'flashalign index'");
+        "so it cannot realize a CIGAR; map to plain PAF (without "
+        "-a/-c/--cs/--MD), or rebuild it with 'flashalign index'");
   }
   in.index_path = opt.target_path;
   in.use_index = true;

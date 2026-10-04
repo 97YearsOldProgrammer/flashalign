@@ -82,7 +82,7 @@ void append(std::ostringstream& out, const char* name,
   X(max_query_seeds,                                                           \
     "Vote seeds per strand [--vote-seeds]; 0 = all. -1 = preset-owned.")       \
   X(full_read_cigar,                                                           \
-    "Realize base-level CIGARs; False maps only (the CLI's plain -f paf).")    \
+    "Realize base-level CIGARs; False maps only (the CLI's plain PAF).")       \
   X(syncmer_s, "Closed-syncmer s [-s]; mapping always uses the index's.")      \
   X(syncmer_downsample, "Query seed downsampling stride; 1 = none.")           \
   X(vote_diag_bin_width, "Vote diagonal bin width [--dw]. -1 = preset-owned.") \

@@ -241,6 +241,8 @@ constexpr std::string_view kAltHint = "map to a reference without ALT contigs";
 
 constexpr Minimap2Hint kAlignHints[] = {
     {"-s", "minimap2's -s, the minimal peak DP score, is -S here"},
+    {"-f", "minimap2's -f FLOAT is --max-vote-occ INT here, a seed "
+           "occurrence cap"},
     {"-k", "k is set when the index is built: flashalign index -k"},
     {"-w", kSyncmerHint},
     {"-U", "the occurrence cap's floor (200) and lr:hq's ceiling (500) are "
@@ -367,7 +369,6 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         opt.command_line.push_back(' ');
         opt.command_line += argv[i];
     }
-    bool format_given = false;
     bool secondary_off_by_n = false;
     std::vector<std::string> positional;
     // Everything after "--" is an operand.
@@ -426,13 +427,8 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 print_align_help(std::cout);
                 std::exit(0);
             case OptionId::Output:     opt.output_path = val; break;
-            case OptionId::Format:     opt.format = val; format_given = true; break;
             case OptionId::PafCigar:   opt.paf_cigar = true; break;
-            // minimap2 -a: the same as -f sam, so `-a -o out.paf` writes SAM.
-            case OptionId::OutputSam:
-                opt.format = "sam";
-                format_given = true;
-                break;
+            case OptionId::OutputSam:  opt.format = "sam"; break;
             case OptionId::Cs: {
               const std::string form =
                   cs_attached ? arg.substr(kCsPrefix.size()) : "short";
@@ -657,36 +653,6 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
     if (!positional.empty()) {
         opt.target_path = positional[0];
         opt.reads_paths.assign(positional.begin() + 1, positional.end());
-    }
-    // No BAM is written, as in minimap2; a .bam path is refused rather than
-    // given SAM or PAF text.
-    const std::string no_bam =
-        "BAM output is not written; pipe SAM to samtools: "
-        "flashalign align -a ... | samtools sort -o out.bam";
-    if (opt.format == "bam") throw UsageError(no_bam);
-    if (opt.output_path != "-") {
-        const std::string& o = opt.output_path;
-        const auto ends_with = [&](const char* suffix) {
-            const std::string s(suffix);
-            return o.size() >= s.size() &&
-                   o.compare(o.size() - s.size(), s.size(), s) == 0;
-        };
-        if (ends_with(".bam")) throw UsageError(no_bam);
-        // Without -f or -a, the -o extension picks the format.
-        if (!format_given) {
-            if (ends_with(".paf")) opt.format = "paf";
-            else if (ends_with(".sam")) opt.format = "sam";
-        }
-    }
-    if (opt.format != "sam" && opt.format != "paf") {
-        std::string message = "--format must be 'sam' or 'paf'";
-        // minimap2's -f FLOAT, the repetitive-seed fraction.
-        if (!opt.format.empty() &&
-            (std::isdigit(static_cast<unsigned char>(opt.format[0])) ||
-             opt.format[0] == '.'))
-            message += "; minimap2's -f FLOAT is --max-vote-occ INT here, "
-                       "a seed occurrence cap";
-        throw UsageError(message);
     }
     if (!fa::cpu::api::preset_is_valid(opt.preset)) {
         throw UsageError(preset_refusal(opt.preset));

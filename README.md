@@ -146,8 +146,8 @@ donor or acceptor found in the annotation gets a score bonus, `--junc-bonus` (9 
 
 ### Output
 
-PAF is the default; `-a` (or `-f sam`) writes SAM. Without `-f` or `-a`, a `.sam` or `.paf`
-extension on `-o` selects the format. For sorted BAM, pipe SAM to samtools:
+PAF is the default and `-a` writes SAM. `-o FILE` outputs alignments to `FILE` [stdout],
+whatever its name. For sorted BAM, pipe SAM to samtools:
 
 ```sh
 flashalign align -a -x lr:hq ref.fa hifi.fq.gz | samtools sort -o aln.bam
