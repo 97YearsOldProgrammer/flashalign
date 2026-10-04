@@ -849,10 +849,13 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
               read_len, reference_count, *rctx.ref.names, out)) {
         continue;
       }
-      // s2:i: the best competing chain score the formula weighed, seeded with the
-      // committed window's sibling (0 means neither).
-      if (chain_evidence.f1 > 0)
+      // cm:i and s1:i: the committed chain; s2:i: the best competing chain score the
+      // formula weighed, seeded with the committed window's sibling (0 means neither).
+      if (chain_evidence.f1 > 0) {
+        out.chain_anchors = chain_evidence.cnt;
+        out.chain_score = chain_evidence.f1;
         out.secondary_chain_score = plain_breakdown.f2;
+      }
       return finish(std::move(out));
     }
     // CIGAR output: this placement is the primary and Stage 5 runs on it.
@@ -2026,9 +2029,13 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
           rna::RnaChimericFamily family;
           family.result = &chimeric_results.back();
           family.mapq = family_mapq;
-          // s2:i from this family's own rival set, never the primary's.
-          if (family_evidence.f1 > 0)
-            family.secondary_chain_score = family_breakdown.f2;
+          // cm:i and s1:i from this family's own chain, s2:i from its own rival set,
+          // never the primary's.
+          if (family_evidence.f1 > 0) {
+            family.chain_tags.chain_anchors = family_evidence.cnt;
+            family.chain_tags.chain_score = family_evidence.f1;
+            family.chain_tags.secondary_chain_score = family_breakdown.f2;
+          }
           chimeric_families.push_back(family);
           accepted_hulls.push_back(hull);
           accepted_dp0.push_back(*chimeric_dp0);
@@ -2045,13 +2052,17 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
     }
   }
 
-  // s2:i for the committed family, stamped on the same records as its MAPQ. Without
-  // committed-frame evidence (f1 == 0) the record carries no s2.
-  const int primary_secondary_chain_score =
-      chain_evidence.f1 > 0 ? primary_breakdown.f2 : -1;
+  // cm:i, s1:i and s2:i for the committed family, stamped on the same records as its
+  // MAPQ. Without committed-frame evidence (f1 == 0) the record carries none.
+  rna::RnaChainTags primary_chain_tags;
+  if (chain_evidence.f1 > 0) {
+    primary_chain_tags.chain_anchors = chain_evidence.cnt;
+    primary_chain_tags.chain_score = chain_evidence.f1;
+    primary_chain_tags.secondary_chain_score = primary_breakdown.f2;
+  }
   const bool commit_ok = rna::commit_realized_alignment(
-      realized, read_len, chain_mapq_ptr, primary_secondary_chain_score,
-      chimeric_families, out);
+      realized, read_len, chain_mapq_ptr, primary_chain_tags, chimeric_families,
+      out);
   if (!commit_ok) {
     return finish(std::move(out));
   }
@@ -2067,6 +2078,8 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
       rna::RnaSegmentGeometry place;
       int dp_maximum;
       int catalogue_index;
+      // cm:i and s1:i from the hypothesis's own chain, as a chimeric family's.
+      rna::RnaChainTags chain_tags;
     };
     std::vector<RunnerUp> runner_ups;
     const auto on_wire = [&](std::size_t j) {
@@ -2095,7 +2108,13 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
             s == 0 ? begin : std::min(place.reference_begin, begin);
         place.reference_end = s == 0 ? end : std::max(place.reference_end, end);
       }
-      runner_ups.push_back({&result, place, *h.dp_maximum, h.catalogue_index});
+      rna::RnaChainTags chain_tags;
+      if (h.chain_score > 0) {
+        chain_tags.chain_anchors = h.chain_anchors;
+        chain_tags.chain_score = h.chain_score;
+      }
+      runner_ups.push_back(
+          {&result, place, *h.dp_maximum, h.catalogue_index, chain_tags});
     };
     // Whether hypothesis i is an alternative placement of the bases the committed
     // record explains: not a shadow, and competing with the committed chain's span at
@@ -2158,7 +2177,8 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
         if (duplicate)
           continue;
         kept.push_back(i);
-        rna::attach_runner_up_family(*runner_ups[i].result, out);
+        rna::attach_runner_up_family(*runner_ups[i].result,
+                                     runner_ups[i].chain_tags, out);
       }
     }
   }

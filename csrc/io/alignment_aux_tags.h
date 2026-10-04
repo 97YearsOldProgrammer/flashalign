@@ -16,6 +16,8 @@ struct AlignmentAuxiliaryTags {
   // Absent when the engine did not compute the value; no tag is written.
   std::optional<int> max_segment_score;     // ms:i
   std::optional<int> max_score_margin;      // md:i
+  std::optional<int> chain_anchors;         // cm:i
+  std::optional<int> chain_score;           // s1:i
   std::optional<int> secondary_chain_score; // s2:i
 };
 
@@ -41,6 +43,10 @@ inline AlignmentAuxiliaryTags alignment_auxiliary_tags(
     }
     tags.max_score_margin = result.dp_max_segment - best_alternative;
   }
+  if (result.chain_anchors >= 0)
+    tags.chain_anchors = result.chain_anchors;
+  if (result.chain_score >= 0)
+    tags.chain_score = result.chain_score;
   if (result.secondary_chain_score >= 0)
     tags.secondary_chain_score = result.secondary_chain_score;
   return tags;

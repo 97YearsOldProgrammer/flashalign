@@ -73,6 +73,11 @@ void write_paf_record(
     if (result.alignment_accounting_valid)
         out << "\tnn:i:" << result.ambiguities;
     out << "\ttp:A:" << emitted_role_paf_type(role, result);
+    // cm:i and s1:i, the record's own chain, on any record that holds one.
+    if (auxiliary.chain_anchors)
+        out << "\tcm:i:" << *auxiliary.chain_anchors;
+    if (auxiliary.chain_score)
+        out << "\ts1:i:" << *auxiliary.chain_score;
     if (auxiliary.secondary_chain_score && !emitted_role_is_secondary(role))
         out << "\ts2:i:" << *auxiliary.secondary_chain_score;
     double divergence = 0.0;

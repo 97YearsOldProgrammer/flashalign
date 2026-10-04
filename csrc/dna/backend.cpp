@@ -233,8 +233,8 @@ bool clears_dna_emission_floor(const AlignResult& record, int min_dp_max);
 // (remove_mapq_stand_in). The demoted records become secondaries with MAPQ 0.
 
 // Swaps the alignment fields of two records (locus, CIGAR, spans, score,
-// accounting), leaving the per-read fields (family vectors, MAPQ, s2, median
-// occurrence, read length) in place.
+// accounting), leaving the per-read fields (family vectors, MAPQ, cm, s1, s2,
+// median occurrence, read length) in place.
 void exchange_alignment_fields(AlignResult& left, AlignResult& right) {
   using std::swap;
   swap(left.score, right.score);
@@ -257,6 +257,30 @@ void exchange_alignment_fields(AlignResult& left, AlignResult& right) {
   swap(left.alignment_accounting_valid, right.alignment_accounting_valid);
   swap(left.cs, right.cs);
   swap(left.md, right.md);
+}
+
+// cm:i and s1:i on a secondary hypothesis's records, each from its own chain,
+// as a primary family's records carry them: the head from `head_chain`,
+// supplementary i from the chain of `owners[i]` in `placement` (none past the
+// end of `owners`). s2:i stays off.
+void stamp_secondary_chain_tags(
+    AlignResult& head, const DnaPlacementCandidateChain* head_chain,
+    const std::vector<::fa::cpu::voting::CandidateId>& owners,
+    const DnaPlacementChainingResult* placement) {
+  const auto stamp = [](AlignResult& record,
+                        const DnaPlacementCandidateChain* chain) {
+    if (chain == nullptr || chain->chain_score <= 0)
+      return;
+    record.chain_anchors = chain->chain_anchors;
+    record.chain_score = chain->chain_score;
+  };
+  stamp(head, head_chain);
+  if (placement == nullptr)
+    return;
+  for (std::size_t index = 0;
+       index < head.supplementary.size() && index < owners.size(); ++index)
+    if (owners[index] != ::fa::cpu::voting::kNullCandidate)
+      stamp(head.supplementary[index], placement->find(owners[index]));
 }
 
 // The demoted block records with their owners and former slots, and the
@@ -1352,11 +1376,17 @@ DnaMapOnlyCommit commit_map_only_hypothesis(
           alternative_chaining.find(0);
       if (alternative_chain != nullptr &&
           alternative_chain->chain_score > incumbent_score) {
+        const std::vector<::fa::cpu::voting::CandidateId> incumbent_owners =
+            incumbent.supplementary_candidates;
         DnaAlternativeCommit committed = commit_dna_alternative_hypothesis(
             std::move(incumbent), incumbent_candidate, incumbent_score,
             std::move(alternative),
             *alternative_chaining.family.original_candidate_id,
             alternative_chain->chain_score);
+        if (committed.promoted && !committed.primary.secondary.empty())
+          stamp_secondary_chain_tags(committed.primary.secondary.back(),
+                                     incumbent_chain, incumbent_owners,
+                                     &placement);
         out.primary = std::move(committed.primary);
         out.primary_candidate = committed.primary_candidate;
         out.promoted = committed.promoted;
@@ -1364,6 +1394,7 @@ DnaMapOnlyCommit commit_map_only_hypothesis(
         return out;
       }
       zero_hypothesis_mapq(alternative);
+      stamp_secondary_chain_tags(alternative, alternative_chain, {}, nullptr);
       incumbent.secondary.push_back(
           static_cast<AlignResult&&>(std::move(alternative)));
     }
@@ -1676,6 +1707,10 @@ AlignResult map_read(const DnaContext& base_dctx,
     if (alternative_outcome.accepted()) {
       // Promotion is decided on the raw decision score; post-DP prices feed
       // only the MAPQ.
+      const ::fa::cpu::voting::CandidateId incumbent_candidate =
+          primary_candidate;
+      const std::vector<::fa::cpu::voting::CandidateId> incumbent_owners =
+          realized.supplementary_candidates;
       DnaAlternativeCommit committed = commit_dna_alternative_hypothesis(
           std::move(realized), primary_candidate, family_outcome.decision_score,
           std::move(alternative_outcome.output),
@@ -1684,6 +1719,25 @@ AlignResult map_read(const DnaContext& base_dctx,
       alternative_promoted = committed.promoted;
       realized = std::move(committed.primary);
       primary_candidate = committed.primary_candidate;
+      // The losing hypothesis carries its own chain, the one it would be
+      // scored on as the primary.
+      if (committed.retained && !realized.secondary.empty()) {
+        const DnaPlacementChainingResult* stable =
+            placement_chaining_ran ? &placement_chaining : nullptr;
+        if (alternative_promoted)
+          stamp_secondary_chain_tags(
+              realized.secondary.back(),
+              dna_committed_winner_chain(stable, nullptr, incumbent_candidate,
+                                         false),
+              incumbent_owners, stable);
+        else
+          stamp_secondary_chain_tags(
+              realized.secondary.back(),
+              dna_committed_winner_chain(
+                  stable, &alternative_chaining,
+                  *alternative_chaining.family.original_candidate_id, true),
+              {}, nullptr);
+      }
     }
     // A family that demoted has more than one block, so it never retains an
     // alternative; the guard only states that a promoted alternative's family
@@ -1919,11 +1973,15 @@ AlignResult map_read(const DnaContext& base_dctx,
       DnaChainMapqBreakdown breakdown;
       std::vector<DnaChainMapqRivalVerdict> verdicts;
       int mapq = dna_chain_mapq(evidence, &breakdown, &verdicts);
-      // s2:i: the competing chain this record's MAPQ weighed. With f1 <= 0
-      // the breakdown is default-constructed and "no evidence" is not "no
-      // rival", so the record keeps -1 and writes no tag.
-      if (evidence.f1 > 0)
+      // cm:i and s1:i: the committed chain; s2:i: the competing chain this
+      // record's MAPQ weighed. With f1 <= 0 there is no chain, the breakdown
+      // is default-constructed and "no evidence" is not "no rival", so the
+      // record keeps -1 and writes none of the three.
+      if (evidence.f1 > 0) {
+        realized.chain_anchors = evidence.cnt;
+        realized.chain_score = evidence.f1;
         realized.secondary_chain_score = breakdown.f2;
+      }
       // Keep the retained alternative only if the MAPQ weighed it as an
       // admissible, non-shadow rival. A twin candidate of the committed locus
       // is a shadow; the writers derive md:i and XA:Z from `secondary` and
@@ -1996,11 +2054,14 @@ AlignResult map_read(const DnaContext& base_dctx,
         std::vector<DnaChainMapqRivalVerdict> block_verdicts;
         supplementary_mapq[index] =
             dna_chain_mapq(block_evidence, &block_breakdown, &block_verdicts);
-        // s2:i for this block's record, as for the primary. Written through
-        // the vector because `record` is a const reference.
-        if (block_evidence.f1 > 0)
-          realized.supplementary[index].secondary_chain_score =
-              block_breakdown.f2;
+        // cm:i, s1:i and s2:i for this block's record, as for the primary.
+        // Written through the vector because `record` is a const reference.
+        if (block_evidence.f1 > 0) {
+          AlignResult& stamped = realized.supplementary[index];
+          stamped.chain_anchors = block_evidence.cnt;
+          stamped.chain_score = block_evidence.f1;
+          stamped.secondary_chain_score = block_breakdown.f2;
+        }
       }
       // Divergence contrast cap (chain_mapq.h): a record whose event
       // divergence sits far above the family's minimum is the wrong copy,
@@ -2021,9 +2082,17 @@ AlignResult map_read(const DnaContext& base_dctx,
       // The demoted block records become secondaries before routing, which
       // gives every secondary 0. Their copies stay in their slots and the
       // primary stays pre-extension until routing is done, so the
-      // inversion-middle rule sees that family too.
-      for (AlignResult& record : demoted.records)
+      // inversion-middle rule sees that family too. Each takes its owner's
+      // chain tags, as its stand-in copy carried them.
+      for (std::size_t k = 0; k < demoted.records.size(); ++k) {
+        AlignResult& record = demoted.records[k];
+        if (placement_chaining_ran && k < demoted.candidates.size() &&
+            demoted.candidates[k] != ::fa::cpu::voting::kNullCandidate)
+          stamp_secondary_chain_tags(
+              record, placement_chaining.find(demoted.candidates[k]), {},
+              nullptr);
         realized.secondary.push_back(std::move(record));
+      }
       demoted.records.clear();
       route_dna_mapq(placement_family, primary_candidate, mapq,
                      supplementary_mapq, realized);

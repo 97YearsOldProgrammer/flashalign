@@ -57,6 +57,10 @@ struct Alignment {
   /// True for a secondary hypothesis and for its supplementary segments; false for the
   /// primary and the primary's supplementary segments. Set by Aligner.
   bool is_secondary = false;
+  /// cm:i, the number of anchors on the record's chain; -1 when the record has none.
+  int chain_anchors = -1;
+  /// s1:i, the score of the record's chain; -1 when the record has none.
+  int chain_score = -1;
   /// s2:i, the chain score of the best competing chain; -1 when not computed.
   int secondary_chain_score = -1;
   /// ms:i, the score of the maximum-scoring segment of the CIGAR; -1 without a CIGAR.

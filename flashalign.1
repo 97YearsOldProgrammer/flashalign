@@ -503,6 +503,10 @@ in PAF, mapping quality 0, and
 .RB ` * '
 for SEQ and QUAL. A secondary record carries
 .B ms
+and its own chain's
+.B cm
+and
+.BR s1 ,
 but no
 .BR md ,
 .BR s2 ,
@@ -689,6 +693,8 @@ md	i	Max score minus secondary max score
 NM	i	Edit distance
 nn	i	Number of ambiguous bases in the alignment
 tp	A	Type of aln: P/primary, S/secondary, I/inversion
+cm	i	Number of anchors on the chain; FlashAlign's anchors are syncmers
+s1	i	Chaining score
 s2	i	Chaining score of the best secondary chain
 de	f	Gap-compressed per-base sequence divergence
 ts	A	Transcript strand (splice mode only)
@@ -706,6 +712,14 @@ Tags
 and
 .B XA
 are not written on a secondary alignment.
+.B cm
+and
+.B s1
+describe the chain a record comes from, the chain
+.B s2
+is compared against; a secondary alignment carries its own chain's. A record
+without a chain, such as the inverted middle of a DNA alignment or a piece
+recovered at a read end, carries none of the three.
 .PP
 The
 .B cs

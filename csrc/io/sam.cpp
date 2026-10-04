@@ -229,7 +229,16 @@ void append_sam_record_line(
     if (mapped) {
         out += "\ttp:A:";
         out.push_back(emitted_role_paf_type(role, result));
-        // s2:i between tp:A and de:f, as in minimap2; not on secondaries.
+        // cm:i, s1:i and s2:i between tp:A and de:f, as in minimap2; s2 not
+        // on secondaries.
+        if (auxiliary.chain_anchors) {
+            out += "\tcm:i:";
+            append_sam_int(out, *auxiliary.chain_anchors);
+        }
+        if (auxiliary.chain_score) {
+            out += "\ts1:i:";
+            append_sam_int(out, *auxiliary.chain_score);
+        }
         if (auxiliary.secondary_chain_score &&
             !emitted_role_is_secondary(role)) {
             out += "\ts2:i:";
