@@ -1683,9 +1683,10 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
 
     // The second families: the partition's nominees, realized and emitted. Everything
     // here is downstream of the primary's price and writes nothing back onto
-    // `hypotheses`. A family is emitted iff its realized hull explains at least
+    // `hypotheses`. A family is emitted when its realized hull explains at least
     // kRnaChimeraMinQueryBases query bases no accepted segment explains, at the
-    // alignment quality the primary must meet.
+    // alignment quality the primary must meet. When no window survives, a contender
+    // (chained before the solve) is emitted only if it won a partition block.
     if (lifecycle_ran && !explain_nominees.empty()) {
       const std::optional<rna::RnaQuerySpan> primary_hull =
           rna::rna_realized_query_span(realized);
@@ -1735,6 +1736,17 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
           const std::size_t index = explain_nominees[q].hypothesis;
           const rna::RnaRealizedHypothesis& candidate = hypotheses[index];
           if (!candidate.admitted || candidate.bundle == nullptr)
+            continue;
+          // With no window left, a contender the solve gave no block was not chosen by
+          // the partition: it stays a hypothesis, a rival and runner-up of any other
+          // family. One that won a block stays eligible though the window filters
+          // dropped its window.
+          if (explain_nominees[q].contender && explain.windows.empty() &&
+              std::none_of(explain.candidates.begin(), explain.candidates.end(),
+                           [index](const rna::RnaSegmentCandidate& c) {
+                             return c.owns_block &&
+                                    c.hypothesis_index == static_cast<int>(index);
+                           }))
             continue;
           const rna::RnaQuerySpan candidate_span = rna::rna_forward_query_span(
               candidate.q_begin, candidate.q_end, candidate.reverse, read_len);

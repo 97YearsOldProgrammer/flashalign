@@ -23,7 +23,8 @@
 //   E5  windows: per owner and unexplained piece, the hull of the owner's blocks
 //       clipped to the piece; continuing owners merge; a window continuing the primary
 //       is refused; one narrower than kRnaChimeraMinQueryBases is not harvested
-//   E6  emission (backend.cpp): every nominee, strongest chain first
+//   E6  emission (backend.cpp): every nominee, strongest chain first; when no window
+//       survives, a contender that won no block is not emitted
 #pragma once
 
 #include "placement/coarse_chain.h" // CoarseLocusOptions (the staircase DP recipe)
@@ -113,6 +114,7 @@ struct RnaSegmentCandidate {
   // Chained: the hypothesis's locus, copied into any window it owns.
   const placement::CoarseLocus* locus = nullptr;
   bool offered = false;    // reached the solver (after pruning)
+  bool owns_block = false; // won a selected block, before any window filter
   int catalogue_slot = -1; // solver slot when offered
 };
 

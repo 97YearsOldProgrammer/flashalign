@@ -1017,6 +1017,7 @@ void rna_explain_solve(const placement::CoarseLocusOptions& options,
   std::vector<RnaSegmentCandidate>& candidates = result.candidates;
   for (RnaSegmentCandidate& candidate : candidates) {
     candidate.offered = false;
+    candidate.owns_block = false;
     candidate.catalogue_slot = -1;
   }
 
@@ -1110,7 +1111,10 @@ void rna_explain_solve(const placement::CoarseLocusOptions& options,
       continue; // a null block, or the primary's own
     const std::size_t index =
         scratch.offered_index[static_cast<std::size_t>(slot)];
-    if (index == 0 || block.supporting_tiles < kRnaPartitionMinBlockTiles)
+    if (index == 0)
+      continue;
+    candidates[index].owns_block = true;
+    if (block.supporting_tiles < kRnaPartitionMinBlockTiles)
       continue;
     const RnaQuerySpan raw = block_forward_span(
         block.query_tile_begin, block.query_tile_end, read_len, seed_len);
