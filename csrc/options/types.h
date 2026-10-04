@@ -29,6 +29,8 @@ struct UserOverrides {
   std::optional<int> syncmer_downsample;
 
   std::optional<int> min_support;
+  // -m, minimap2's min_chain_score, >= 1. DNA presets only.
+  std::optional<int> min_chain_score;
   std::optional<int> max_query_seeds_per_strand;
   std::optional<int> query_tile_supported_reward;
   std::optional<int> query_tile_block_open_cost;
@@ -49,10 +51,7 @@ struct UserOverrides {
   std::optional<int> vote_diag_width_max;
   std::optional<int> primary_occ_cap;
   std::optional<int> long_occ_cap;
-  std::optional<float> cigar_band_frac;
   std::optional<std::string> occ_policy;
-  std::optional<int> interval_pad;
-  std::optional<int> chain_max_gap;
 
   // DP scoring (-A, -B, --score-N, -O, -E, -z, --end-bonus).
   std::optional<int> dp_match;
@@ -66,7 +65,8 @@ struct UserOverrides {
   std::optional<int> dp_inversion_zdrop; // -z's second value
   std::optional<int> dp_tail_end_bonus;
   std::optional<int> dp_min_dp_max; // -S (minimap2 -s)
-  // DP bandwidths (-r INT[,INT]) and maximum gap.
+  // DP bandwidths (-r INT[,INT]) and maximum gap (-g), which on a DNA preset
+  // is also the dense chain's.
   std::optional<int> dp_bw;
   std::optional<int> dp_bw_long;
   std::optional<int> dp_max_gap;
@@ -77,12 +77,15 @@ struct UserOverrides {
   std::optional<int> rna_strand;
   std::optional<std::string> rna_junction_bed;
   std::optional<int> rna_junction_bonus;
-  // RNA rival retention (-p, --rival-min-diff), realization budget
-  // (--realize-max) and catalogue depth (-N).
-  std::optional<double> rna_pri_ratio;
+  // -p: on a DNA preset the credibility ratio of the alternative and of a
+  // block's rival, on a splice preset the rival retention ratio.
+  std::optional<double> pri_ratio;
+  // RNA rival retention band (--rival-min-diff) and catalogue depth (-N + 1),
+  // which also sets the realization budget to one fewer.
   std::optional<int> rna_rival_min_diff;
-  std::optional<int> rna_realize_max; // >= 0
-  std::optional<int> rna_max_loci;    // >= 1
+  std::optional<int> rna_max_loci; // >= 1
+  // -N on a DNA preset: alternatives realized per read, >= 1.
+  std::optional<int> dna_alternative_realize_max;
   // --vote-ratio: admit vote peaks by ratio to the read's best vote, in
   // [0,1]; 0 admits by count. DNA presets only.
   std::optional<double> dna_vote_admission_ratio;

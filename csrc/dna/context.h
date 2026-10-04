@@ -20,7 +20,8 @@ namespace lr {
 // absolute anchor and span floors; stable partition blocks need two.
 inline constexpr int kDnaPostCommitRecordMinBlockTiles = 1;
 
-// minimap2's opt->min_chain_score (-m); map-ont and map-hifi keep the default.
+// minimap2's default opt->min_chain_score (-m), which map-ont and map-hifi
+// keep.
 inline constexpr int kDnaMinChainScore = 40;
 
 class RetainedSeedDensity;
@@ -62,10 +63,14 @@ struct ResolvedDnaOptions {
   // minimap2 -s: the DP half of the per-record emission floor and the
   // local-inversion segment gate. 0 disables both.
   int cigar_dp_min_dp_max = 80;
-  // minimap2 opt->zdrop_inv and opt->min_chain_score, for the local-inversion
-  // probe (mm_test_zdrop) and the minimum size of an inversion middle.
+  // minimap2 opt->zdrop_inv, for the local-inversion probe (mm_test_zdrop).
   int cigar_dp_inversion_zdrop = 200;
-  int cigar_dp_inversion_min_chain_score = kDnaMinChainScore;
+  // minimap2 opt->pri_ratio (-p): the credibility ratio of the alternative
+  // and of a block's rival (alternative_hypothesis.h).
+  double pri_ratio = 0.8;
+  // minimap2 opt->min_chain_score (-m): the emission floor, the MAPQ's subsc
+  // floor and the minimum size of an inversion middle.
+  int min_chain_score = kDnaMinChainScore;
   int cigar_dp_split_min_anchors = 3;  // minimap2 opt->min_cnt
   // minimap2 opt->min_ksw_len: a stretch piece ends once both spans reach it.
   int cigar_dp_min_ksw_len = 200;
@@ -85,7 +90,6 @@ struct ResolvedDnaOptions {
   int fill_dp_tail_zdrop = 800;
   int fill_dp_inversion_zdrop = 200;
   int fill_dp_min_dp_max = 160;
-  float cigar_band_frac = 0.10f;
   bool enable_full_read_cigar = true;
   // Optional cs:Z / MD:Z output (minimap2 --cs / --MD); empty by default.
   ::fa::cpu::output::CigarReplayRequest cigar_replay_request;
@@ -106,6 +110,9 @@ struct ResolvedDnaOptions {
   // Off by default: nominate a second locus from the read's unclaimed
   // terminal query.
   bool clip_nominate = false;
+  // -N n: alternatives realized per read. Rank 1 is the retained alternative;
+  // ranks 2..n are output-only secondaries.
+  int alternative_realize_max = 1;
   // Chain MAPQ own-locus rules, both on: a chained shadow's vote counts for
   // the winner, and the chained shadow window grows with read length. No
   // option sets them.

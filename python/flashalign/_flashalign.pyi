@@ -112,13 +112,6 @@ class Config:
     def threads(self, arg: int, /) -> None: ...
 
     @property
-    def cigar_band_frac(self) -> float:
-        """CIGAR band as a fraction of the block. -1 = preset-owned."""
-
-    @cigar_band_frac.setter
-    def cigar_band_frac(self, arg: float, /) -> None: ...
-
-    @property
     def dp_match(self) -> int:
         """DP matching score [-A]. -1 = preset-owned."""
 
@@ -267,7 +260,10 @@ class Config:
 
     @property
     def rna_max_loci(self) -> int:
-        """Candidate loci retained per read [-N]. -1 = preset-owned."""
+        """
+        Candidate loci retained per read [-N + 1]; at most one fewer are
+        realized. -1 = preset-owned.
+        """
 
     @rna_max_loci.setter
     def rna_max_loci(self, arg: int, /) -> None: ...

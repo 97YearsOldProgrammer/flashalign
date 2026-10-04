@@ -5,6 +5,7 @@
 #include "../seeding/context.h"            // LongOccPolicy
 #include "../voting/query_partition.h"
 
+#include <algorithm>
 #include <limits>
 
 namespace fa {
@@ -92,7 +93,6 @@ struct DnaLongOptions {
   double vote_admission_ratio = 0.0;
   // Objective of the 128-tile query partition (--tile-score).
   ::fa::cpu::voting::QueryPartitionParameters query_partition;
-  float cigar_band_frac = 0.10f;
   int vote_diag_bin_width = 64;
   // DNA presets widen the vote with read length; --dw turns this off.
   bool vote_diag_bin_width_adaptive = false;
@@ -148,8 +148,12 @@ struct DnaLongOptions {
   int fill_dp_tail_zdrop = 800;
   int fill_dp_inversion_zdrop = 200;
   int fill_dp_min_dp_max = 160;
-  // minimap2's min_chain_score default; not settable.
-  int cigar_dp_inversion_min_chain_score = 40;
+  // minimap2's -p (pri_ratio): the alternative and a block's rival are
+  // credible at p times the owner's chain score, or within 2k of it.
+  double pri_ratio = 0.8;
+  // minimap2's -m (min_chain_score): the DNA emission floor, the MAPQ's subsc
+  // floor and the minimum size of an inversion middle. DNA presets only.
+  int min_chain_score = 40;
   // As minimap2, a Z-dropped region is split and continues while at least
   // this many anchors remain.
   int cigar_dp_split_min_anchors = 3;  // minimap2 opt->min_cnt
@@ -206,7 +210,19 @@ struct DnaLongOptions {
   // The vote's empty-tile rescue M (kDnaTileRescueOcc); 0 is none. DNA
   // presets install it; not settable.
   int dna_tile_rescue_occ = 0;
+  // -N: alternatives realized per read, the first the MAPQ's retained
+  // alternative and the rest output-only secondaries (dna/backend.cpp).
+  int alternative_realize_max = 1;
 };
+
+// The catalogue's candidates per vote window: kCatalogueLaneBound under
+// ratio admission, kCountAdmissionLaneBound under count admission.
+inline int dna_chain_max_candidates(const DnaLongOptions& mapping) noexcept {
+  return std::max(mapping.chain_max_candidates_per_window,
+                  mapping.vote_admission_ratio > 0.0
+                      ? ::fa::cpu::voting::kCatalogueLaneBound
+                      : ::fa::cpu::voting::kCountAdmissionLaneBound);
+}
 
 // N, the vote's occurrence cap for this run; 0 is no cap. Before an index is
 // attached, the Platform rule gives the preset floor.

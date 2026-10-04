@@ -211,6 +211,9 @@ std::string resolved_config_text(const AlignOptions& opt,
   // The vote's empty-tile rescue M; 0 on the RNA presets.
   row("tile_rescue_occ", i2s(mapping.dna_tile_rescue_occ), "preset");
 
+  if (!is_rna)
+    row("vote_ratio", f2s(mapping.vote_admission_ratio),
+        src(opt.dna_vote_admission_ratio.has_value(), "preset"));
   row("vote_diag_bin_width", i2s(mapping.vote_diag_bin_width),
       src(opt.vote_diag_bin_width.has_value(), "preset"));
   // --dw turns the adaptive model off.
@@ -235,13 +238,17 @@ std::string resolved_config_text(const AlignOptions& opt,
   row("mapq.output_range", "0..60", "fixed");
 
   row("chain_max_gap", i2s(mapping.cigar_local_interval_anchor_chain_max_gap),
-      "preset");
+      src(!is_rna && opt.dp_max_gap.has_value(), "preset"));
   row("interval_pad", i2s(mapping.cigar_local_interval_anchor_interval_pad),
       "builtin");
-  row("chain_max_cands", i2s(mapping.chain_max_candidates_per_window),
-      "builtin");
+  // The bound the vote catalogue runs with.
+  if (is_rna)
+    row("chain_max_cands", i2s(mapping.chain_max_candidates_per_window),
+        "builtin");
+  else
+    row("chain_max_cands", i2s(fa::cpu::lr::dna_chain_max_candidates(mapping)),
+        "derived");
   row("local_diag_band", i2s(mapping.cigar_local_diag_band), "builtin");
-  row("cigar_band_frac", f2s(mapping.cigar_band_frac), "builtin");
 
   // DNA: -A -B -O -E -z --score-N are the gap-fill row; the end row, which
   // prices every path, is the preset's (dp_end_row).
@@ -272,15 +279,15 @@ std::string resolved_config_text(const AlignOptions& opt,
       dp_src(opt.dp_end_bonus));
   row("dp_bw", i2s(mapping.cigar_dp_bw), dp_src(opt.dp_bw));
   row("dp_bw_long", i2s(mapping.cigar_dp_bw_long), dp_src(opt.dp_bw_long));
-  row("dp_max_gap", i2s(mapping.cigar_dp_max_gap), "preset");
+  row("dp_max_gap", i2s(mapping.cigar_dp_max_gap), dp_src(opt.dp_max_gap));
   row("dp_min_score", i2s(mapping.cigar_dp_min_dp_max),
       dp_src(opt.dp_min_score));
   row("dp_split_min_anchors", i2s(mapping.cigar_dp_split_min_anchors),
       "builtin");
-  row("dp_inversion_zdrop",
-      i2s(fill ? mapping.fill_dp_inversion_zdrop
-               : mapping.cigar_dp_inversion_zdrop),
-      dp_src(opt.dp_zdrop));
+  // A splice preset's inversion Z-drop is splice_inv_zdrop.
+  if (fill)
+    row("dp_inversion_zdrop", i2s(mapping.fill_dp_inversion_zdrop),
+        dp_src(opt.dp_zdrop));
   if (fill)
     row("dp_end_row",
         "A" + i2s(mapping.cigar_dp_match) + " B" +
@@ -293,8 +300,9 @@ std::string resolved_config_text(const AlignOptions& opt,
             i2s(mapping.cigar_dp_tail_zdrop) + "," +
             i2s(mapping.cigar_dp_inversion_zdrop),
         "preset");
-  row("dp_inv_min_chain", i2s(mapping.cigar_dp_inversion_min_chain_score),
-      "builtin");
+  if (fill)
+    row("min_chain_score", i2s(mapping.min_chain_score),
+        src(opt.min_chain_score.has_value(), "builtin"));
 
   if (!is_rna) {
     row("residue_anchor_floor", i2s(mapping.residue_recovery_anchor_floor),
@@ -369,9 +377,16 @@ std::string resolved_config_text(const AlignOptions& opt,
     // (dna/inv_local_chain.h).
     row("dna_inv_probe.local_gate", b2s(mapping.inversion_probe_local_gate),
         "builtin");
+    row("dna_rival.pri_ratio", f2s(mapping.pri_ratio),
+        src(opt.pri_ratio.has_value(), "builtin"));
+    // -N: alternatives realized per read; ranks 2..n are output only. Only
+    // an installed count prints, so the default text and config_digest stay.
+    if (opt.dna_alternative_realize_max)
+      row("dna_alternative.realize_max", i2s(mapping.alternative_realize_max),
+          "explicit");
   } else if (rna != nullptr) {
     row("rna_rival.pri_ratio", f2s(rna->rival_pri_ratio),
-        src(opt.rna_pri_ratio.has_value(), "builtin"));
+        src(opt.pri_ratio.has_value(), "builtin"));
     row("rna_rival.min_diff", i2s(rna->rival_min_diff),
         src(opt.rna_rival_min_diff.has_value(), "builtin"));
     // Fixed thresholds are printed too, tagged [fixed]. First the
@@ -391,7 +406,7 @@ std::string resolved_config_text(const AlignOptions& opt,
     row("rna_rival.chimera_min_qbp",
         i2s(fa::cpu::lr::rna::kRnaChimeraMinQueryBases), "fixed");
     row("rna_rival.realize_max", i2s(rna->rival_realize_max),
-        src(opt.rna_realize_max.has_value(), "builtin"));
+        src(opt.rna_max_loci.has_value(), "builtin"));
     row("rna_mapq.qcov_tau", f2s(rna->rna_mapq_qcov_tau), "preset");
     row("rna_mapq.vote_damp", f2s(rna->rna_mapq_disjoint_vote_damp), "preset");
   }

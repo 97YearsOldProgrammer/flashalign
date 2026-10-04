@@ -308,7 +308,7 @@ std::string build_xa_tag(const AlignResult& result) {
     std::string xa = "XA:Z:";
     bool any = false;
     for (const AlignResult& alternative : result.secondary) {
-        if (!alternative.mapped()) continue;
+        if (!alternative.mapped() || alternative.output_only) continue;
         const std::string& cigar = alternative.cigar;
         if (cigar.empty() || cigar == "*") continue;
         // An alternative without exact accounting has no NM and is skipped.

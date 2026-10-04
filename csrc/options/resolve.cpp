@@ -5,7 +5,6 @@
 #include "../seeding/context.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -68,12 +67,30 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
   if (!rna_mode && user.rna_junction_bonus)
     throw std::invalid_argument(
         "--junc-bonus is valid only with an RNA preset");
-  if (!rna_mode &&
-      (user.rna_pri_ratio || user.rna_rival_min_diff || user.rna_realize_max ||
-       user.rna_max_loci))
+  if (!rna_mode && user.rna_rival_min_diff)
     throw std::invalid_argument(
-        "-p, -N, --realize-max and --rival-min-diff "
-        "are valid only with an RNA preset");
+        "--rival-min-diff is valid only with an RNA preset");
+  // -p, minimap2's pri_ratio. Validated here as well as in the CLI, for the
+  // Python binding.
+  if (user.pri_ratio) {
+    if (!(*user.pri_ratio >= 0.0) || *user.pri_ratio > 1.0)
+      throw std::invalid_argument("-p must be within [0,1]");
+    if (rna_mode)
+      rna->rival_pri_ratio = *user.pri_ratio;
+    else
+      mapping.pri_ratio = *user.pri_ratio;
+  }
+  if (!rna_mode && user.rna_max_loci)
+    throw std::invalid_argument(
+        "rna_max_loci is valid only with an RNA preset");
+  if (rna_mode && user.dna_alternative_realize_max)
+    throw std::invalid_argument(
+        "dna_alternative_realize_max is valid only with a DNA preset");
+  if (user.dna_alternative_realize_max) {
+    if (*user.dna_alternative_realize_max < 1)
+      throw std::invalid_argument("-N must be >= 1");
+    mapping.alternative_realize_max = *user.dna_alternative_realize_max;
+  }
   if (rna_mode) {
     if (user.rna_junction_bed)
       rna->junction_bed = *user.rna_junction_bed;
@@ -83,28 +100,18 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
             "--junc-bonus must be within [0,127]");
       rna->splice_junction_bonus = *user.rna_junction_bonus;
     }
-    // Validated here as well as in the CLI, for the Python binding.
-    if (user.rna_pri_ratio) {
-      if (!(*user.rna_pri_ratio >= 0.0) || *user.rna_pri_ratio > 1.0)
-        throw std::invalid_argument("-p must be within [0,1]");
-      rna->rival_pri_ratio = *user.rna_pri_ratio;
-    }
     if (user.rna_rival_min_diff) {
       if (*user.rna_rival_min_diff < 0)
         throw std::invalid_argument(
             "--rival-min-diff must be >= 0");
       rna->rival_min_diff = *user.rna_rival_min_diff;
     }
-    if (user.rna_realize_max) {
-      if (*user.rna_realize_max < 0)
-        throw std::invalid_argument(
-            "--realize-max must be >= 0");
-      rna->rival_realize_max = *user.rna_realize_max;
-    }
+    // -N n keeps n+1 loci and realizes up to n of them.
     if (user.rna_max_loci) {
       if (*user.rna_max_loci < 1)
         throw std::invalid_argument("-N must be >= 1");
       rna->max_locus_chains = *user.rna_max_loci;
+      rna->rival_realize_max = *user.rna_max_loci - 1;
     }
   }
 
@@ -201,14 +208,6 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
         "-r is not supported under the splice presets");
   }
 
-  if (user.chain_max_gap) {
-    mapping.cigar_local_interval_anchor_chain_max_gap =
-        std::max(1, *user.chain_max_gap);
-  }
-  if (user.interval_pad) {
-    mapping.cigar_local_interval_anchor_interval_pad =
-        std::max(0, *user.interval_pad);
-  }
   if (user.num_threads)
     common.num_threads = *user.num_threads;
   if (user.enable_full_read_cigar) {
@@ -256,6 +255,13 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
   if (user.min_support) {
     common.min_support = std::max(0, *user.min_support);
   }
+  if (rna_mode && user.min_chain_score)
+    throw std::invalid_argument("-m is valid only with lr or lr:hq");
+  if (user.min_chain_score) {
+    if (*user.min_chain_score < 1)
+      throw std::invalid_argument("-m must be at least 1");
+    mapping.min_chain_score = *user.min_chain_score;
+  }
   if (user.occ_policy) {
     if (!::fa::cpu::lr::long_occ_policy_string_valid(*user.occ_policy)) {
       throw std::invalid_argument(
@@ -281,14 +287,6 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
     // Under the default policy this is the floor, which the index quantile
     // can still raise; the fixed policy pins it.
     mapping.long_occ_cap = *user.long_occ_cap;
-  }
-  if (user.cigar_band_frac) {
-    if (!std::isfinite(*user.cigar_band_frac) ||
-        *user.cigar_band_frac <= 0.0f) {
-      throw std::invalid_argument(
-          "CIGAR band fraction must be finite and > 0");
-    }
-    mapping.cigar_band_frac = *user.cigar_band_frac;
   }
   if (user.vote_diag_bin_width) {
     if (*user.vote_diag_bin_width <= 0) {
@@ -341,20 +339,25 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
       fill_row ? mapping.fill_dp_tail_zdrop : mapping.cigar_dp_tail_zdrop;
   int& dp_inversion_zdrop = fill_row ? mapping.fill_dp_inversion_zdrop
                                      : mapping.cigar_dp_inversion_zdrop;
+  // A splice preset clamps a typed value; a DNA preset takes it as typed and
+  // checks the row below.
+  const auto typed = [rna_mode](int value, int floor) {
+    return rna_mode ? std::max(floor, value) : value;
+  };
   if (user.dp_match)
-    dp_match = std::max(1, *user.dp_match);
+    dp_match = typed(*user.dp_match, 1);
   if (user.dp_mismatch)
-    dp_mismatch = std::max(0, *user.dp_mismatch);
+    dp_mismatch = typed(*user.dp_mismatch, 0);
   if (user.dp_ambi)
-    dp_ambi = std::max(0, *user.dp_ambi);
+    dp_ambi = typed(*user.dp_ambi, 0);
   if (user.dp_gap_open1)
-    dp_gap_open1 = std::max(1, *user.dp_gap_open1);
+    dp_gap_open1 = typed(*user.dp_gap_open1, 1);
   if (user.dp_gap_open2)
-    dp_gap_open2 = std::max(0, *user.dp_gap_open2);
+    dp_gap_open2 = typed(*user.dp_gap_open2, 0);
   if (user.dp_gap_extend1)
-    dp_gap_extend1 = std::max(1, *user.dp_gap_extend1);
+    dp_gap_extend1 = typed(*user.dp_gap_extend1, 1);
   if (user.dp_gap_extend2)
-    dp_gap_extend2 = std::max(0, *user.dp_gap_extend2);
+    dp_gap_extend2 = typed(*user.dp_gap_extend2, 0);
   if (user.dp_tail_zdrop) {
     dp_tail_zdrop = *user.dp_tail_zdrop;
     // As in minimap2, a scalar -z also sets the inversion Z-drop.
@@ -379,8 +382,20 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
     mapping.cigar_dp_bw = std::max(1, *user.dp_bw);
   if (user.dp_bw_long)
     mapping.cigar_dp_bw_long = std::max(1, *user.dp_bw_long);
-  if (user.dp_max_gap)
+  // minimap2's mm_check_opt; the splice presets refuse -r.
+  if (!rna_mode && mapping.cigar_dp_bw > mapping.cigar_dp_bw_long)
+    throw std::invalid_argument(
+        "with '-rNUM1,NUM2', NUM1 (" + std::to_string(mapping.cigar_dp_bw) +
+        ") can't be larger than NUM2 (" +
+        std::to_string(mapping.cigar_dp_bw_long) + ")");
+  // -g, minimap2's max_gap. The splice presets keep their fine harvest chain
+  // gap.
+  if (user.dp_max_gap) {
     mapping.cigar_dp_max_gap = std::max(1, *user.dp_max_gap);
+    if (!rna_mode)
+      mapping.cigar_local_interval_anchor_chain_max_gap =
+          mapping.cigar_dp_max_gap;
+  }
 
   if (rna_mode) {
     if (user.rna_min_intron && *user.rna_min_intron <= 0) {
@@ -464,7 +479,32 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
           "RNA --end-bonus must be >= -1");
     }
   }
-  // minimap2's mm_check_opt; the splice presets check it above.
+  // minimap2's mm_check_opt on the row -A -B -O -E --score-N set; the splice
+  // presets check theirs above.
+  if (!rna_mode) {
+    if (dp_match < 1 || dp_match > 127)
+      throw std::invalid_argument("-A must be within [1,127]");
+    if (dp_mismatch < 1 || dp_mismatch > 127)
+      throw std::invalid_argument("-B must be within [1,127]");
+    if (dp_gap_open1 <= 0 || dp_gap_extend1 <= 0 || dp_gap_open2 < 0 ||
+        dp_gap_extend2 < 0)
+      throw std::invalid_argument("-O and -E must be positive");
+    const std::int64_t q1e1 =
+        static_cast<std::int64_t>(dp_gap_open1) + dp_gap_extend1;
+    const std::int64_t q2e2 =
+        static_cast<std::int64_t>(dp_gap_open2) + dp_gap_extend2;
+    if ((dp_gap_open1 != dp_gap_open2 || dp_gap_extend1 != dp_gap_extend2) &&
+        !(dp_gap_extend1 > dp_gap_extend2 && q1e1 < q2e2))
+      throw std::invalid_argument(
+          "dual gap penalties violating E1>E2 and O1+E1<O2+E2");
+    if (q1e1 + q2e2 > 127)
+      throw std::invalid_argument(
+          "scoring system violating ({-O}+{-E})+({-O2}+{-E2}) <= 127");
+    if (dp_ambi < 0 || dp_ambi >= dp_mismatch)
+      throw std::invalid_argument("--score-N should be within [0,{-B})");
+    if (mapping.cigar_dp_tail_end_bonus < -1)
+      throw std::invalid_argument("--end-bonus must be >= -1");
+  }
   if (!rna_mode &&
       mapping.fill_dp_tail_zdrop < mapping.fill_dp_inversion_zdrop) {
     throw std::invalid_argument(

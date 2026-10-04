@@ -4,8 +4,10 @@
 #include "placement_family_adapter.h"
 #include "result.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 namespace fa::cpu::lr {
 
@@ -41,11 +43,17 @@ struct DnaAlternativeSelection {
 // the screening chains. A candidate qualifies when it is neither selected nor
 // residue-admitted, is not a shadow of a selected locus (same contig and strand,
 // vote start within max(2 kb, read length / 10)), overlaps the block by at
-// least half the shorter query span, and scores at least 4/5 of the owner or
-// within 2k of it. Best by (score, anchors, overlap, lowest id).
+// least half the shorter query span, and scores at least -p (0.8) times the
+// owner or within 2k of it. Best by (score, anchors, overlap, lowest id).
 DnaAlternativeSelection select_dna_alternative_hypothesis(
     const DnaContext& context, const DnaPlacementFamily& family,
     const DnaPlacementChainingResult& stable);
+
+// Every candidate select_dna_alternative_hypothesis would qualify, best first
+// in its order, at most `limit`: the first is its choice.
+std::vector<::fa::cpu::voting::CandidateId> rank_dna_alternative_hypotheses(
+    const DnaContext& context, const DnaPlacementFamily& family,
+    const DnaPlacementChainingResult& stable, std::size_t limit);
 
 // The best rival of one block of a family, by the same rules applied to
 // whole-query chains: the candidate owns no selected block and is not

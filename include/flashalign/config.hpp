@@ -27,7 +27,6 @@ struct Config {
   int long_occ_cap = -1;        ///< seed occurrence cap [--max-vote-occ]
   int long_primary_occ_cap = -1;  ///< primary-pass occurrence cap
   int threads = 0;              ///< worker threads [-t]; 0 = one per available core
-  float cigar_band_frac = -1.0f;  ///< CIGAR band as a fraction of the block
   int dp_match = -1;            ///< match score [-A]
   int dp_mismatch = -1;         ///< mismatch penalty [-B]
   int dp_score_n = -1;          ///< score against an N [--score-N]

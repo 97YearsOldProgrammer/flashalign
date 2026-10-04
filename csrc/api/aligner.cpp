@@ -76,9 +76,6 @@ bool preset_is_valid(std::string_view preset) {
 std::string accepted_preset_names() {
   return ::fa::cpu::options::accepted_preset_names();
 }
-int preset_cli_chain_max_gap(std::string_view preset) {
-  return ::fa::cpu::options::preset_cli_chain_max_gap(preset);
-}
 LongReadAligner::LongReadAligner() = default;
 LongReadAligner::LongReadAligner(LongReadAligner &&) noexcept = default;
 LongReadAligner &LongReadAligner::operator=(LongReadAligner &&) noexcept = default;

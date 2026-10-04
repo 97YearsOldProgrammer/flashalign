@@ -3,9 +3,9 @@
 // The CLI option registry: one table drives both the parser (parse.cpp) and
 // the help screens (help.cpp).
 //
-// Single letters keep minimap2's meanings, with two exceptions: -s is the
-// closed-syncmer size, so minimap2's minimum DP score is -S here, and there is
-// no -g. Flash-specific tuning is preset-owned and reported by --show-config.
+// Single letters keep minimap2's meanings, with one exception: -s is the
+// closed-syncmer size, so minimap2's minimum DP score is -S here.
+// Flash-specific tuning is preset-owned and reported by --show-config.
 
 #include <cstddef>
 #include <string_view>
@@ -37,6 +37,8 @@ enum class OptionId {
     Threads, BatchBp, BatchWindow, IoStaging, Progress, Quiet,
     // align: seed occurrence caps for the vote and the dense chain
     MaxVoteOcc, MaxChainOcc,
+    // align: minimal chain score (minimap2 -m)
+    MinChainScore,
     // align: vote peak admission
     VoteRatio,
     VoteDiagBinWidth,
@@ -46,15 +48,15 @@ enum class OptionId {
     // DpMinScore is minimap2's -s, spelled -S here.
     DpMatch, DpMismatch, DpGapOpen, DpGapExtend, DpZdrop, DpScoreN, DpEndBonus,
     DpMinScore,
-    // align: band geometry (minimap2 -r).
-    DpBw,
+    // align: band geometry (minimap2 -r) and maximum gap (minimap2 -g).
+    DpBw, DpMaxGap,
     // DNA tile objective, key=value list
     TileScore,
     // RNA intron bounds, strand and junction annotation
     MinIntron, MaxIntron, SpliceStrand, RnaJunctionBed, RnaJunctionBonus,
-    // RNA secondary retention (-p, --rival-min-diff), realization budget
-    // (--realize-max) and catalogue depth (-N)
-    SplicePriRatio, SpliceRivalMinDiff, SpliceRealizeMax, SpliceMaxLoci,
+    // Secondary retention ratio (-p), the RNA retention band
+    // (--rival-min-diff) and the catalogue depth and realization budget (-N)
+    PriRatio, SpliceRivalMinDiff, SpliceMaxLoci,
     // align: reporting
     Stats, ShowConfig,
   // clang-format on

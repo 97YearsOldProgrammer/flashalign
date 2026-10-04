@@ -24,7 +24,7 @@ int truncate_to_int(double value) noexcept {
 // minimap2's subsc.
 double chain_ratio(const DnaChainMapqEvidence& evidence,
                    const DnaChainMapqRival& rival) noexcept {
-  return static_cast<double>(std::max(rival.chain_score, kDnaMinChainScore)) /
+  return static_cast<double>(std::max(rival.chain_score, evidence.min_chain_score)) /
          static_cast<double>(evidence.f1);
 }
 
@@ -358,7 +358,7 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     candidate.strength =
         candidate.tie ? 1.0
                       : static_cast<double>(
-                            std::max(evidence.sib_f2, kDnaMinChainScore)) /
+                            std::max(evidence.sib_f2, evidence.min_chain_score)) /
                             f1;
     consider(candidate);
   }
@@ -388,7 +388,7 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     // is inadmissible or a shadow, the realized chain's ratio.
     candidate.strength =
         static_cast<double>(
-            std::max(evidence.block_rival.chain_score, kDnaMinChainScore)) /
+            std::max(evidence.block_rival.chain_score, evidence.min_chain_score)) /
         f1;
     bool slot_shadow = false;
     for (std::size_t index = 0; index < evidence.rivals.size(); ++index) {
@@ -430,7 +430,7 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   // The winner's sibling path seeds x with its chain ratio, unless it was
   // realized and so is judged as a realized rival instead.
   const double sibling_floor =
-      static_cast<double>(std::max(evidence.sib_f2, kDnaMinChainScore)) / f1;
+      static_cast<double>(std::max(evidence.sib_f2, evidence.min_chain_score)) / f1;
   double x = sibling_realized ? 0.0 : sibling_floor;
   // x over the competing rivals other than the seat.
   double x_other = x;
@@ -482,7 +482,7 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
                              : seat.strength * seat.pair_dp2 / seat.pair_dp1);
 
   // minimap2's own x (chain ratio alone), for the breakdown.
-  const int subsc = std::max(f2, kDnaMinChainScore);
+  const int subsc = std::max(f2, evidence.min_chain_score);
   const double x_chain = static_cast<double>(subsc) / f1;
 
   // minimap2's pen_s1, without its uniq_ratio factor.

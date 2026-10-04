@@ -15,7 +15,7 @@ struct RnaRivalLifecycleConfig {
   // either band of the primary's (inclusive).
   double pri_ratio = 0.8;
   int min_diff = 30;
-  // --realize-max: bound on rival realizations per read (minimap2's best_n). The scan
+  // -N: bound on rival realizations per read (minimap2's best_n). The scan
   // itself covers the whole catalogue.
   int realize_max = 5;
 };

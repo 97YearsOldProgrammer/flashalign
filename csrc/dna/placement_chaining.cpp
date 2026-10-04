@@ -1477,6 +1477,37 @@ void chain_mapq_rivals(
   }
 }
 
+// Restores an alternative's exact whole-query chain into `exact`. A candidate
+// already holding an accepted whole-query chain would chain to the same
+// result again, so that chain is copied. False unless the restore is
+// accepted with a primary path.
+bool restore_alternative_exact(const DnaContext& context,
+                               const DnaPlacementFamily& family,
+                               const DnaPlacementChainingResult& result,
+                               RetainedSeedDensity& seed_index,
+                               const std::vector<std::uint8_t>& forward_query,
+                               const std::vector<std::uint8_t>& reverse_query,
+                               ::fa::cpu::voting::CandidateId id,
+                               DnaPlacementCandidateChain& exact) {
+  const DnaPlacementCandidate* candidate = family.find(id);
+  const DnaPlacementCandidateChain* attempted = result.find(id);
+  exact.candidate = id;
+  const bool chained_before =
+      candidate != nullptr && !candidate->residue_admitted &&
+      attempted != nullptr && attempted->exact &&
+      attempted->status == DnaPlacementChainStatus::Accepted;
+  if (chained_before)
+    copy_chain_call(*attempted, true, exact);
+  const bool restored = chained_before ||
+      (candidate != nullptr &&
+       chain_candidate(
+           context, family, *candidate,
+           candidate->peak.is_rc ? reverse_query : forward_query, seed_index,
+           exact, CandidateChainPass::WholeQueryExact));
+  return restored && exact.status == DnaPlacementChainStatus::Accepted &&
+         !exact.primary.empty();
+}
+
 }  // namespace
 
 int dna_residue_cached_supply(
@@ -2005,38 +2036,35 @@ DnaPlacementChainingResult build_dna_placement_chains(
   }
   result.alternative =
       select_dna_alternative_hypothesis(context, family, result);
-  if (result.alternative.refusal == DnaAlternativeRefusal::None) {
-    const DnaPlacementCandidate* candidate =
-        family.find(result.alternative.candidate);
-    const DnaPlacementCandidateChain* attempted =
-        result.find(result.alternative.candidate);
-    result.alternative_exact.candidate = result.alternative.candidate;
-    // A candidate already holding an accepted whole-query chain would chain
-    // to the same result again, so that chain is copied.
-    const bool chained_before =
-        candidate != nullptr && !candidate->residue_admitted &&
-        attempted != nullptr && attempted->exact &&
-        attempted->status == DnaPlacementChainStatus::Accepted;
-    if (chained_before)
-      copy_chain_call(*attempted, true, result.alternative_exact);
-    const bool restored = chained_before ||
-        (candidate != nullptr &&
-         chain_candidate(
-             context, family, *candidate,
-             candidate->peak.is_rc ? reverse_query : forward_query, seed_index,
-             result.alternative_exact, CandidateChainPass::WholeQueryExact));
-    if (!restored || result.alternative_exact.status !=
-                         DnaPlacementChainStatus::Accepted ||
-        result.alternative_exact.primary.empty()) {
-      result.alternative.refusal = DnaAlternativeRefusal::ExactRestoreFailed;
-      result.alternative.candidate = ::fa::cpu::voting::kNullCandidate;
-      result.alternative_exact = {};
-    }
+  if (result.alternative.refusal == DnaAlternativeRefusal::None &&
+      !restore_alternative_exact(context, family, result, seed_index,
+                                 forward_query, reverse_query,
+                                 result.alternative.candidate,
+                                 result.alternative_exact)) {
+    result.alternative.refusal = DnaAlternativeRefusal::ExactRestoreFailed;
+    result.alternative.candidate = ::fa::cpu::voting::kNullCandidate;
+    result.alternative_exact = {};
   }
   // After the alternative restore: the family is final, seed_index is alive
   // and the alternative's chain can be reused.
   chain_mapq_rivals(context, family, result, seed_index, forward_query,
                     reverse_query);
+  // Ranks 2..n, after everything that decides the read, so that they
+  // change none of it.
+  if (context.opts.alternative_realize_max >= 2) {
+    const std::vector<::fa::cpu::voting::CandidateId> ranked =
+        rank_dna_alternative_hypotheses(
+            context, family, result,
+            static_cast<std::size_t>(context.opts.alternative_realize_max));
+    for (std::size_t rank = 1; rank < ranked.size(); ++rank) {
+      DnaRankedAlternative alternative;
+      alternative.candidate = ranked[rank];
+      if (restore_alternative_exact(context, family, result, seed_index,
+                                    forward_query, reverse_query,
+                                    alternative.candidate, alternative.exact))
+        result.ranked_alternatives.push_back(std::move(alternative));
+    }
+  }
   result.selection_changed =
       initial_assignment != family.partition.selected.assignment;
   result.family = std::move(family);

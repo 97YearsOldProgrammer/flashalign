@@ -382,12 +382,7 @@ private:
     ctx.min_support = config.common.min_support;
     ctx.chain_max_candidates_per_window =
         config.is_rna() ? mapping.chain_max_candidates_per_window
-                        : std::max(
-                              mapping.chain_max_candidates_per_window,
-                              mapping.vote_admission_ratio > 0.0
-                                  ? ::fa::cpu::voting::kCatalogueLaneBound
-                                  : ::fa::cpu::voting::
-                                        kCountAdmissionLaneBound);
+                        : ::fa::cpu::lr::dna_chain_max_candidates(mapping);
     ctx.vote_batched_refine =
         !config.is_rna() && mapping.vote_admission_ratio > 0.0;
     ctx.tile_rescue_occ = mapping.dna_tile_rescue_occ;
@@ -683,7 +678,6 @@ private:
     dctx.opts.dna_tandem_window = mapping.dna_tandem_window;
     dctx.opts.dna_pool_gate_occ = chain_occ.pool_gate_occ;
     dctx.opts.cigar_local_global_occ = chain_occ.global_occ;
-    dctx.opts.cigar_band_frac = mapping.cigar_band_frac;
     dctx.opts.k = cfg_.index.k;
     dctx.opts.cigar_dp_ambi = mapping.cigar_dp_ambi;
     dctx.opts.cigar_dp_bw = mapping.cigar_dp_bw;
@@ -696,8 +690,8 @@ private:
     dctx.opts.cigar_dp_max_gap = mapping.cigar_dp_max_gap;
     dctx.opts.cigar_dp_min_dp_max = mapping.cigar_dp_min_dp_max;
     dctx.opts.cigar_dp_inversion_zdrop = mapping.cigar_dp_inversion_zdrop;
-    dctx.opts.cigar_dp_inversion_min_chain_score =
-        mapping.cigar_dp_inversion_min_chain_score;
+    dctx.opts.min_chain_score = mapping.min_chain_score;
+    dctx.opts.pri_ratio = mapping.pri_ratio;
     dctx.opts.cigar_dp_split_min_anchors =
         mapping.cigar_dp_split_min_anchors;
     dctx.opts.cigar_dp_min_ksw_len = mapping.cigar_dp_min_ksw_len;
@@ -726,6 +720,7 @@ private:
     dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
     dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
     dctx.opts.clip_nominate = mapping.dna_clip_nominate;
+    dctx.opts.alternative_realize_max = mapping.alternative_realize_max;
     dctx.opts.chain_syncmer_s = cfg_.index.syncmer_s;
     dctx.opts.chain_syncmer_downsample = cfg_.index.syncmer_downsample;
     dctx.opts.vote_admission_ratio = mapping.vote_admission_ratio;

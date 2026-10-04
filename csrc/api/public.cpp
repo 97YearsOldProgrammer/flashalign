@@ -85,8 +85,6 @@ fa::cpu::options::ResolvedOptions resolve_config(
     request.user.primary_occ_cap = source.long_primary_occ_cap;
   if (source.long_occ_cap >= 0)
     request.user.long_occ_cap = source.long_occ_cap;
-  if (source.cigar_band_frac >= 0)
-    request.user.cigar_band_frac = source.cigar_band_frac;
   request.user.num_threads =
       source.threads > 0
           ? source.threads
@@ -143,7 +141,7 @@ fa::cpu::options::ResolvedOptions resolve_config(
     if (source.rna_junction_bonus >= 0)
       request.user.rna_junction_bonus = source.rna_junction_bonus;
     if (source.rna_rival_pri_ratio >= 0.0)
-      request.user.rna_pri_ratio = source.rna_rival_pri_ratio;
+      request.user.pri_ratio = source.rna_rival_pri_ratio;
     if (source.rna_max_loci >= 0)
       request.user.rna_max_loci = source.rna_max_loci;
   }
@@ -179,7 +177,6 @@ Config to_public_config(const fa::cpu::options::ResolvedOptions& source,
   config.long_occ_cap = mapping.long_occ_cap;
   config.long_primary_occ_cap = mapping.long_primary_occ_cap;
   config.threads = source.common.num_threads;
-  config.cigar_band_frac = mapping.cigar_band_frac;
   // DNA: the gap-fill row, which these set; the end row is the preset's.
   config.dp_match = rna ? mapping.cigar_dp_match : mapping.fill_dp_match;
   config.dp_mismatch =

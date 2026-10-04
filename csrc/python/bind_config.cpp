@@ -51,9 +51,6 @@ namespace {
 void append(std::ostringstream& out, const char* name, int value) {
   out << name << '=' << value;
 }
-void append(std::ostringstream& out, const char* name, float value) {
-  out << name << '=' << value;
-}
 void append(std::ostringstream& out, const char* name, double value) {
   out << name << '=' << value;
 }
@@ -94,8 +91,6 @@ void append(std::ostringstream& out, const char* name,
     "Cap of the fixed occurrence policy that --max-vote-occ selects;\n"        \
     "unused under the presets' policy. -1 = preset-owned.")                    \
   X(threads, "Worker threads [-t]; 0 = one per available CPU.")                \
-  X(cigar_band_frac,                                                           \
-    "CIGAR band as a fraction of the block. -1 = preset-owned.")               \
   X(dp_match, "DP matching score [-A]. -1 = preset-owned.")                    \
   X(dp_mismatch, "DP mismatch penalty [-B]. -1 = preset-owned.")               \
   X(dp_score_n, "DP ambiguous-base score [--score-N]. -1 = preset-owned.")     \
@@ -127,7 +122,9 @@ void append(std::ostringstream& out, const char* name,
     "Known-junction endpoint bonus [--junc-bonus]. -1 = preset-owned.")        \
   X(rna_rival_pri_ratio,                                                       \
     "Rival-to-primary chain score ratio [-p]. -1 = preset-owned.")             \
-  X(rna_max_loci, "Candidate loci retained per read [-N]. -1 = preset-owned.") \
+  X(rna_max_loci,                                                              \
+    "Candidate loci retained per read [-N + 1]; at most one fewer are\n"       \
+    "realized. -1 = preset-owned.")                                            \
   X(dp_min_score, "Minimum DP alignment score [-S]. -1 = preset-owned.")       \
   X(dp_bw,                                                                     \
     "Chaining and alignment bandwidth [-r]. -1 = preset-owned; a splice\n"     \

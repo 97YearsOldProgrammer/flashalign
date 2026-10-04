@@ -83,7 +83,8 @@ std::string build_sa_tag(const std::vector<const AlignResult*>& segs, size_t sel
 
 // XA:Z from the read's alternatives, as bwa and minibwa write it:
 // "chr,{+|-}pos,CIGAR,NM;" per mapped secondary head, POS 1-based. Entries
-// without a CIGAR or exact accounting are skipped. Empty when there are none.
+// without a CIGAR or exact accounting, and output-only ones, are skipped.
+// Empty when there are none.
 std::string build_xa_tag(const AlignResult& result);
 
 // A supplementary segment hard-clipped as minimap2 does.

@@ -23,7 +23,8 @@ struct RnaLongOptions {
   // or within rival_min_diff of it absolutely (default 30 = 2k).
   double rival_pri_ratio = 0.8;
   int rival_min_diff = 30;
-  // --realize-max: at most this many rival realizations per read.
+  // At most this many rival realizations per read; -N sets it to the loci
+  // kept minus one.
   int rival_realize_max = 5;
   // Splice-DP terms with no DNA analogue, as in minimap2's splice presets.
   int splice_transition = 0;

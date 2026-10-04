@@ -38,17 +38,31 @@ const std::vector<OptionSpec>& specs_table() {
   // clang-format off: preserve the hand-aligned option table.
     static const std::vector<OptionSpec> kSpecs = {
         // align, shown by --help
+        // minimap2's -g. On a DNA preset it also bounds the dense chain's
+        // reach, which never falls below the chain band; on a splice preset
+        // it bounds base alignment only.
+        {OptionId::DpMaxGap, 'g', "", kSize, kStable, A,
+         "NUM", SEC_PLACEMENT,
+         "max gap in chaining and alignment [5000]"},
+        // minimap2's -r. Base-level alignment only: NUM1 bands the read-end
+        // extensions, NUM2 the gap fills.
         {OptionId::DpBw, 'r', "", kPair, kStable, A,
-         "INT[,INT]", SEC_PLACEMENT,
-         "chaining/alignment bandwidth and long-join bandwidth [500,20000]"},
-        {OptionId::SplicePriRatio, 'p', "", kStr, kStable, A,
+         "NUM[,NUM]", SEC_PLACEMENT,
+         "bandwidths of the read-end extension and of the gap fills [500,20000]"},
+        // minimap2's -m. DNA presets only; the splice presets keep their own
+        // chain floors.
+        {OptionId::MinChainScore, 'm', "", kInt, kStable, A,
+         "INT", SEC_PLACEMENT,
+         "minimal chaining score (matching bases minus log gap penalty) [40]"},
+        {OptionId::PriRatio, 'p', "", kStr, kStable, A,
          "FLOAT", SEC_PLACEMENT,
          "min secondary-to-primary score ratio [0.8]"},
-        // The count includes the best locus: -N 6 keeps it plus at most five
-        // rivals, where minimap2's -N 6 means six secondaries.
+        // As in minimap2: -N 5 keeps the best locus and at most five rivals,
+        // and -N 0 is --secondary no. Both realize up to INT rivals; the
+        // DNA presets default to 1.
         {OptionId::SpliceMaxLoci, 'N', "", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "retain at most INT candidate loci per read [6]"},
+         "retain at most INT secondary alignments [5]"},
         {OptionId::MinSupport, '\0', "--min-support", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "minimal number of seeds on a vote peak [3]"},
@@ -165,7 +179,8 @@ const std::vector<OptionSpec>& specs_table() {
          "output unmapped reads in PAF, with '*' for the strand and contig"},
         // Also --secondary=yes, as minimap2 spells it. yes emits one record
         // per mapped alternative (FLAG 0x100, tp:A:S, MAPQ 0, no SEQ); either
-        // way the alternatives appear on the primary's XA:Z, md:i and s2:i.
+        // way the alternatives appear on the primary's XA:Z, md:i and s2:i,
+        // output-only DNA secondaries (-N >= 2) aside.
         {OptionId::Secondary, '\0', "--secondary", kStr, kStable, A,
          "yes|no", SEC_IO,
          "output secondary alignments [no]"},
@@ -209,11 +224,15 @@ const std::vector<OptionSpec>& specs_table() {
         // read-ahead; 0 scales it with -t.
         {OptionId::IoStaging, '\0', "--io-staging", kInt, kDev, A,
          "", HIDDEN, "", STUDY_CLI_MANUAL},
-        // RNA presets only: --realize-max INT [5], the per-read realization
-        // budget, and --rival-min-diff INT [30], the absolute retention band
-        // beside -p.
-        {OptionId::SpliceRealizeMax, '\0', "--realize-max", kInt, kDev, A,
+        // minimap2's long forms of -G, -S (its -s) and -m.
+        {OptionId::MaxIntron, '\0', "--max-intron-len", kSize, kDev, A,
          "", HIDDEN, "", STUDY_CLI_MANUAL},
+        {OptionId::DpMinScore, '\0', "--min-dp-score", kInt, kDev, A,
+         "", HIDDEN, "", STUDY_CLI_MANUAL},
+        {OptionId::MinChainScore, '\0', "--min-chain-score", kInt, kDev, A,
+         "", HIDDEN, "", STUDY_CLI_MANUAL},
+        // RNA presets only: --rival-min-diff INT [30], the absolute retention
+        // band beside -p.
         {OptionId::SpliceRivalMinDiff, '\0', "--rival-min-diff", kInt, kDev,
          A, "", HIDDEN, "", STUDY_CLI_MANUAL},
 

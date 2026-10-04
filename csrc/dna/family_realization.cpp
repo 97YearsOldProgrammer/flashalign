@@ -112,7 +112,7 @@ DpScoringParams dp_scoring_from_opts(const ResolvedDnaOptions& opts) {
   scoring.bw_long = opts.cigar_dp_bw_long;
   scoring.inversion_zdrop = opts.cigar_dp_inversion_zdrop;
   scoring.inversion_max_gap = opts.cigar_dp_max_gap;
-  scoring.inversion_min_chain_score = opts.cigar_dp_inversion_min_chain_score;
+  scoring.inversion_min_chain_score = opts.min_chain_score;
   scoring.inversion_min_dp_max = opts.cigar_dp_min_dp_max;
   return scoring;
 }
@@ -630,8 +630,9 @@ bool acquire_and_realize_block(const DnaContext& context,
   raw.selected = std::move(anchors);
   raw.realization_end = raw.selected.size();
 
+  // As mm_fix_bad_ends(r, a, bw, min_chain_score * 2, ...).
   ordered::NormalizationControl normalization{
-      std::max(1, context.opts.cigar_dp_bw), 1,
+      std::max(1, context.opts.cigar_dp_bw), context.opts.min_chain_score,
       std::max(1, context.opts.cigar_dp_max_gap)};
   normalization.trim_left = trim_left;
   normalization.trim_right = trim_right;

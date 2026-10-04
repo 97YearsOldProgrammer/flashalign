@@ -53,7 +53,9 @@ struct DnaPresetProfile {
   int fill_dp_gap_extend2;
   int fill_dp_tail_zdrop;
   int fill_dp_inversion_zdrop;
-  int cli_chain_max_gap;
+  // The dense chain's maximum gap; the splice presets borrow it for the fine
+  // harvest chain.
+  int chain_max_gap;
   // Residue recovery does not run below this many chain anchors.
   int residue_recovery_anchor_floor;
   int residue_min_interval_bp;
@@ -150,6 +152,9 @@ inline void set_dna_long_platform_fields(
     mapping.fill_dp_gap_extend2 = profile.fill_dp_gap_extend2;
     mapping.fill_dp_tail_zdrop = profile.fill_dp_tail_zdrop;
     mapping.fill_dp_inversion_zdrop = profile.fill_dp_inversion_zdrop;
+    // 20000 under lr (minimap2's bw_long), 10000 under lr:hq (map-hifi's
+    // max_gap).
+    mapping.cigar_local_interval_anchor_chain_max_gap = profile.chain_max_gap;
     mapping.residue_recovery_anchor_floor =
         profile.residue_recovery_anchor_floor;
     mapping.residue_min_interval_bp = profile.residue_min_interval_bp;
@@ -167,16 +172,6 @@ inline bool is_rna_preset(std::string_view preset) {
 }
 inline bool is_rna_hifi_preset(std::string_view preset) {
     return preset == "splice:hq";
-}
-
-inline int preset_cli_chain_max_gap(std::string_view preset) {
-  if (const auto* profile = find_dna_preset_profile(preset)) {
-    return profile->cli_chain_max_gap;
-  }
-  return dna_preset_profile(
-             is_rna_hifi_preset(preset) ? DnaPresetKind::HiFi
-                                        : DnaPresetKind::Ont)
-      .cli_chain_max_gap;
 }
 
 // The splice realizer supports k = 15 only, so other k are refused up front

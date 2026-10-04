@@ -15,8 +15,15 @@ namespace {
 
 constexpr int kShadowFloorBp = 2000;
 constexpr int kShadowFraction = 10;
-constexpr int kCredibleNumerator = 4;
-constexpr int kCredibleDenominator = 5;
+
+// minimap2's mm_select_sub: a rival is credible at pri_ratio times the
+// owner's score or within credible_gap of it. Exact for int scores at
+// p = 0.8, where it is 5 * score >= 4 * owner.
+bool credible_rival(int score, int owner, double pri_ratio, int credible_gap) {
+  return static_cast<double>(score) >=
+             pri_ratio * static_cast<double>(owner) ||
+         owner - score <= credible_gap;
+}
 
 int query_overlap(int left_begin, int left_end, int right_begin,
                   int right_end) {
@@ -36,11 +43,15 @@ bool same_locus_shadow(const DnaPlacementCandidate& candidate,
                     selected.peak.raw_ref_start) <= window;
 }
 
-}  // namespace
+// A qualifying candidate's sort key: (-score, -anchors, -overlap, id).
+using RankKey = std::tuple<int, int, int, ::fa::cpu::voting::CandidateId>;
 
-DnaAlternativeSelection select_dna_alternative_hypothesis(
+// select_dna_alternative_hypothesis, which also appends every qualifying
+// candidate's key to `qualified` when given.
+DnaAlternativeSelection select_alternative(
     const DnaContext& context, const DnaPlacementFamily& family,
-    const DnaPlacementChainingResult& stable) {
+    const DnaPlacementChainingResult& stable,
+    std::vector<RankKey>* qualified) {
   DnaAlternativeSelection out;
   if (!stable.accepted) return out;
 
@@ -123,12 +134,14 @@ DnaAlternativeSelection select_dna_alternative_hypothesis(
     }
     const int score = record->screening_chain_score;
     const int incumbent_score = incumbent->screening_chain_score;
-    if (static_cast<std::int64_t>(score) * kCredibleDenominator <
-            static_cast<std::int64_t>(incumbent_score) * kCredibleNumerator &&
-        incumbent_score - score > credible_gap) {
+    if (!credible_rival(score, incumbent_score, context.opts.pri_ratio,
+                        credible_gap)) {
       note(DnaAlternativeRefusal::IncredibleOnly);
       continue;
     }
+    if (qualified != nullptr)
+      qualified->emplace_back(-score, -record->screening_chain_anchors,
+                              -overlap, candidate.id);
     if (best == nullptr ||
         std::tuple(-score, -record->screening_chain_anchors, -overlap,
                    candidate.id) <
@@ -147,6 +160,27 @@ DnaAlternativeSelection select_dna_alternative_hypothesis(
   out.candidate = best->id;
   out.refusal = DnaAlternativeRefusal::None;
   return out;
+}
+
+}  // namespace
+
+DnaAlternativeSelection select_dna_alternative_hypothesis(
+    const DnaContext& context, const DnaPlacementFamily& family,
+    const DnaPlacementChainingResult& stable) {
+  return select_alternative(context, family, stable, nullptr);
+}
+
+std::vector<::fa::cpu::voting::CandidateId> rank_dna_alternative_hypotheses(
+    const DnaContext& context, const DnaPlacementFamily& family,
+    const DnaPlacementChainingResult& stable, std::size_t limit) {
+  std::vector<RankKey> qualified;
+  select_alternative(context, family, stable, &qualified);
+  std::sort(qualified.begin(), qualified.end());
+  if (qualified.size() > limit) qualified.resize(limit);
+  std::vector<::fa::cpu::voting::CandidateId> ranked;
+  ranked.reserve(qualified.size());
+  for (const RankKey& key : qualified) ranked.push_back(std::get<3>(key));
+  return ranked;
 }
 
 DnaBlockRivalSelection select_dna_block_rival(
@@ -200,10 +234,8 @@ DnaBlockRivalSelection select_dna_block_rival(
       if (std::llabs(diagonal - block_diagonal) <= window) continue;
     }
     const int score = whole->chain_score;
-    if (static_cast<std::int64_t>(score) * kCredibleDenominator <
-            static_cast<std::int64_t>(owner_chain_score) *
-                kCredibleNumerator &&
-        owner_chain_score - score > credible_gap)
+    if (!credible_rival(score, owner_chain_score, context.opts.pri_ratio,
+                        credible_gap))
       continue;
     if (own_locus != nullptr && *own_locus &&
         (*own_locus)(candidate.id, *whole)) {

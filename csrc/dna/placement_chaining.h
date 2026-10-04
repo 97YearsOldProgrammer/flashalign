@@ -252,11 +252,21 @@ struct DnaRivalExactChain {
   bool reused = false;
 };
 
+// A rank 2..n alternative (-N n on a DNA preset) with its exact whole-query
+// chain. Output only: no selection, MAPQ or rival lookup reads it.
+struct DnaRankedAlternative {
+  ::fa::cpu::voting::CandidateId candidate = ::fa::cpu::voting::kNullCandidate;
+  DnaPlacementCandidateChain exact;
+};
+
 struct DnaPlacementChainingResult {
   DnaPlacementFamily family;
   std::vector<DnaPlacementCandidateChain> candidates;
   DnaAlternativeSelection alternative;
   DnaPlacementCandidateChain alternative_exact;
+  // Ranks 2..n of the alternative ranking whose exact restore succeeded, in
+  // rank order. Empty unless n >= 2.
+  std::vector<DnaRankedAlternative> ranked_alternatives;
   // The MAPQ's cross-locus rivals; empty when none is worth chaining.
   std::vector<DnaRivalExactChain> rival_exact;
   // Whole-query chains built for the MAPQ rivals, reused ones excluded.

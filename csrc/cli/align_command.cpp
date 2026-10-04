@@ -164,10 +164,6 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
   const bool need_cigar = run_needs_cigar(opt);
 
   // (k, s) is not set here: it comes from the .faix or the preset.
-  //
-  // Chain max_gap: 10000 for HiFi (minimap2 map-hifi), 20000 for ONT
-  // (minimap2's bw_long).
-  u.chain_max_gap = fa::cpu::api::preset_cli_chain_max_gap(opt.preset);
   u.num_threads = resolve_num_threads(opt);
   u.enable_full_read_cigar = need_cigar;
   if (!opt.cs.empty()) {
@@ -192,6 +188,8 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.query_tile_unsupported_cost = *opt.tile_unsupported_cost;
   if (opt.min_support)
     u.min_support = *opt.min_support;
+  if (opt.min_chain_score)
+    u.min_chain_score = *opt.min_chain_score;
   // --max-vote-occ: 0 turns occurrence filtering off, >0 fixes the cap.
   if (opt.max_vote_occ) {
     if (*opt.max_vote_occ <= 0) {
@@ -233,6 +231,8 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.dp_bw = *opt.dp_bw;
   if (opt.dp_bw_long)
     u.dp_bw_long = *opt.dp_bw_long;
+  if (opt.dp_max_gap)
+    u.dp_max_gap = *opt.dp_max_gap;
   // Passed as given; the resolver validates the intron bounds.
   if (opt.min_intron)
     u.rna_min_intron = *opt.min_intron;
@@ -242,14 +242,14 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.rna_junction_bed = *opt.rna_junction_bed;
   if (opt.rna_junction_bonus)
     u.rna_junction_bonus = *opt.rna_junction_bonus;
-  if (opt.rna_pri_ratio)
-    u.rna_pri_ratio = *opt.rna_pri_ratio;
+  if (opt.pri_ratio)
+    u.pri_ratio = *opt.pri_ratio;
   if (opt.rna_rival_min_diff)
     u.rna_rival_min_diff = *opt.rna_rival_min_diff;
-  if (opt.rna_realize_max)
-    u.rna_realize_max = *opt.rna_realize_max;
   if (opt.rna_max_loci)
     u.rna_max_loci = *opt.rna_max_loci;
+  if (opt.dna_alternative_realize_max)
+    u.dna_alternative_realize_max = *opt.dna_alternative_realize_max;
   // "auto" (-u b) maps to Unknown, the preset default.
   if (opt.splice_strand) {
     u.rna_strand = static_cast<int>(fa::cpu::lr::rna::parse_strand_mode(

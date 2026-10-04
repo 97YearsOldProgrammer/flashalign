@@ -176,6 +176,16 @@ int64_t parse_size(const std::string& value, const std::string& name) {
     return static_cast<int64_t>(scaled);
 }
 
+// A size that must fit an int (-r, -g, -G).
+int parse_int_size(const std::string& value, const std::string& name) {
+    const int64_t size = parse_size(value, name);
+    if (size > std::numeric_limits<int>::max()) {
+        throw UsageError(
+            "integer out of range for " + name + ": " + value);
+    }
+    return static_cast<int>(size);
+}
+
 // A real ratio in [0,1], for -p and --vote-ratio.
 double parse_ratio(const std::string& value, const std::string& name) {
     char* end = nullptr;
@@ -225,16 +235,16 @@ constexpr std::string_view kSpliceModelHint =
 constexpr std::string_view kSpliceScoreHint =
     "--junc-bed gives annotated junctions a bonus";
 constexpr std::string_view kEndFilterHint =
-    "the terminal-exon filter is always on, at minimap2's default";
-constexpr std::string_view kMemoryCapHint =
-    "drop it: there is no such memory cap";
+    "the end filters are always on, at minimap2's defaults: the bad-end trim "
+    "on DNA, the terminal-exon filter on RNA";
 constexpr std::string_view kAltHint = "map to a reference without ALT contigs";
 
 constexpr Minimap2Hint kAlignHints[] = {
     {"-s", "minimap2's -s, the minimal peak DP score, is -S here"},
     {"-k", "k is set when the index is built: flashalign index -k"},
     {"-w", kSyncmerHint},
-    {"-U", "--max-vote-occ sets the seed occurrence cap"},
+    {"-U", "the occurrence cap's floor (200) and lr:hq's ceiling (500) are "
+           "built in; --max-vote-occ fixes the cap"},
     {"-I", "-I is an index option: flashalign index -I"},
     {"-d", "build the index with flashalign index ref.fa out.faix"},
     {"--split-prefix",
@@ -242,8 +252,9 @@ constexpr Minimap2Hint kAlignHints[] = {
     {"-L", "samtools moves a CIGAR of over 65535 operations to CG:B,I "
            "when it writes BAM"},
     {"-2", "drop it: input and output already run on their own threads"},
-    {"--cap-kalloc", kMemoryCapHint},
-    {"--cap-sw-mem", kMemoryCapHint},
+    {"--cap-kalloc", "drop it: there is no such memory cap"},
+    {"--cap-sw-mem", "the DP matrix cap is fixed at minimap2's default, 100M "
+                     "cells"},
     {"--alt", kAltHint},
     {"--alt-drop", kAltHint},
     {"-J", "FlashAlign always runs minimap2's default splice model, -J1"},
@@ -357,6 +368,7 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         opt.command_line += argv[i];
     }
     bool format_given = false;
+    bool secondary_off_by_n = false;
     std::vector<std::string> positional;
     // Everything after "--" is an operand.
     bool end_of_options = false;
@@ -470,6 +482,11 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 break;
             case OptionId::TileScore: parse_tile_score(val, opt); break;
             case OptionId::MinSupport:    opt.min_support = parse_int(val, arg); break;
+            case OptionId::MinChainScore:
+                opt.min_chain_score = parse_int(val, arg);
+                if (*opt.min_chain_score < 1)
+                    throw UsageError("-m must be at least 1");
+                break;
             case OptionId::DpMatch:    opt.dp_match = parse_int(val, arg); break;
             case OptionId::DpMismatch: opt.dp_mismatch = parse_int(val, arg); break;
             case OptionId::DpGapOpen: {
@@ -500,14 +517,21 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
             case OptionId::DpEndBonus: opt.dp_end_bonus = parse_int(val, arg); break;
             case OptionId::DpMinScore: opt.dp_min_score = parse_int(val, arg); break;
             case OptionId::DpBw: {
-                // A lone value leaves the long-join bandwidth at its default,
-                // as in minimap2.
+                // Sizes ("20k"), and a lone value leaves the long-join
+                // bandwidth at its default, as in minimap2.
                 const auto comma = val.find(',');
-                opt.dp_bw = parse_int(
+                opt.dp_bw = parse_int_size(
                     comma == std::string::npos ? val : val.substr(0, comma), arg);
                 if (comma != std::string::npos) {
-                    opt.dp_bw_long = parse_int(val.substr(comma + 1), arg);
+                    opt.dp_bw_long = parse_int_size(val.substr(comma + 1), arg);
                 }
+                break;
+            }
+            // -g is a size ("10k"), as in minimap2.
+            case OptionId::DpMaxGap: {
+                const int gap = parse_int_size(val, arg);
+                if (gap <= 0) throw UsageError("-g must be > 0");
+                opt.dp_max_gap = gap;
                 break;
             }
             case OptionId::Secondary:
@@ -546,33 +570,35 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
             }
             case OptionId::MinIntron:  opt.min_intron = parse_int(val, arg); break;
             // -G is a size ("200k"), as in minimap2.
-            case OptionId::MaxIntron: {
-                const int64_t bound = parse_size(val, arg);
-                if (bound > std::numeric_limits<int>::max()) {
-                    throw UsageError(
-                        "integer out of range for " + arg + ": " + val);
-                }
-                opt.max_intron = static_cast<int>(bound);
+            case OptionId::MaxIntron:
+                opt.max_intron = parse_int_size(val, arg);
                 break;
-            }
             case OptionId::RnaJunctionBed:
                 opt.rna_junction_bed = val;
                 break;
             case OptionId::RnaJunctionBonus:
                 opt.rna_junction_bonus = parse_int(val, arg);
                 break;
-            case OptionId::SplicePriRatio:
-                opt.rna_pri_ratio = parse_ratio(val, arg);
+            case OptionId::PriRatio:
+                opt.pri_ratio = parse_ratio(val, arg);
                 break;
             case OptionId::SpliceRivalMinDiff:
                 opt.rna_rival_min_diff = parse_int(val, arg);
                 break;
-            case OptionId::SpliceRealizeMax:
-                opt.rna_realize_max = parse_int(val, arg);
+            // minimap2's -N counts secondaries, one fewer than the loci kept.
+            // -N 0 keeps the loci and turns secondary output off, as minimap2
+            // rewrites it to --secondary=no.
+            case OptionId::SpliceMaxLoci: {
+                const int n = parse_int(val, arg);
+                if (n < 0)
+                    throw UsageError("-N must be >= 0");
+                if (n == std::numeric_limits<int>::max())
+                    throw UsageError(
+                        "integer out of range for " + arg + ": " + val);
+                secondary_off_by_n = n == 0;
+                if (n > 0) opt.rna_max_loci = n + 1;
                 break;
-            case OptionId::SpliceMaxLoci:
-                opt.rna_max_loci = parse_int(val, arg);
-                break;
+            }
             // minimap2's letters, stored as the words rna::parse_strand_mode
             // reads.
             case OptionId::SpliceStrand:
@@ -655,6 +681,8 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         throw UsageError(
             "--dw-slope-den and --dw-max are valid only with a DNA preset");
     }
+    if (secondary_off_by_n)
+        opt.output_secondary = false;
     // --cs and --MD imply a CIGAR, as minimap2's --cs does.
     if (!opt.cs.empty() || opt.emit_md)
       opt.paf_cigar = true;
@@ -664,6 +692,8 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
     if (rna && opt.dna_vote_admission_ratio) {
         throw UsageError("--vote-ratio is valid only with a DNA preset");
     }
+    if (rna && opt.min_chain_score)
+        throw UsageError("-m is valid only with lr or lr:hq");
     if (rna && (opt.tile_supported_reward || opt.tile_block_open_cost ||
                 opt.tile_null_cost || opt.tile_unsupported_cost)) {
         throw UsageError(
@@ -688,11 +718,15 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         if (opt.rna_junction_bonus)
             throw UsageError(
                 "--junc-bonus is valid only with splice or splice:hq");
-        if (opt.rna_pri_ratio || opt.rna_rival_min_diff ||
-            opt.rna_realize_max || opt.rna_max_loci)
+        if (opt.rna_rival_min_diff)
           throw UsageError(
-              "-p, -N, --realize-max and --rival-min-diff are valid only "
-              "with splice or splice:hq");
+              "--rival-min-diff is valid only with splice or splice:hq");
+        // -N n realizes up to n alternatives; the DNA default is 1. Ranks
+        // 2..n print only as secondary records, so without secondary output
+        // the count is left at the default.
+        if (opt.rna_max_loci && opt.output_secondary)
+          opt.dna_alternative_realize_max = *opt.rna_max_loci - 1;
+        opt.rna_max_loci.reset();
     }
     // Intron bounds must satisfy 0 < min <= max.
     if (opt.min_intron && *opt.min_intron <= 0) {
@@ -706,8 +740,6 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         throw UsageError("--junc-bonus must be within [0,127]");
     if (opt.rna_rival_min_diff && *opt.rna_rival_min_diff < 0)
         throw UsageError("--rival-min-diff must be >= 0");
-    if (opt.rna_realize_max && *opt.rna_realize_max < 0)
-        throw UsageError("--realize-max must be >= 0");
     if (opt.rna_max_loci && *opt.rna_max_loci < 1)
         throw UsageError("-N must be >= 1");
     if (opt.min_intron && *opt.min_intron > 0 && opt.max_intron && *opt.max_intron > 0 &&

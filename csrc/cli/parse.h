@@ -40,7 +40,8 @@ struct AlignOptions {
     // verbatim. uBAM input has no comment.
     bool copy_comment = false;
     // --secondary yes|no: emit one record per mapped alternative (FLAG 0x100,
-    // tp:A:S) in every format. The primary's XA:Z lists them either way.
+    // tp:A:S) in every format. The primary's XA:Z lists them either way,
+    // output-only DNA secondaries (-N >= 2) aside.
     bool output_secondary = false;
     // -R/--rg: the unescaped @RG header line and its ID; empty when not given.
     std::string read_group_line;
@@ -66,6 +67,8 @@ struct AlignOptions {
     // hold ahead of the reader, as a ceiling; 0 scales it with -t.
     int io_staging_mib = 0;
     std::optional<int> min_support;
+    // -m: minimap2's minimal chain score, >= 1. DNA presets only.
+    std::optional<int> min_chain_score;
     std::optional<int> tile_supported_reward;
     std::optional<int> tile_block_open_cost;
     std::optional<int> tile_null_cost;
@@ -84,12 +87,16 @@ struct AlignOptions {
     std::optional<std::string> splice_strand;
     std::optional<std::string> rna_junction_bed;
     std::optional<int> rna_junction_bonus;
-    // RNA: the secondary retention band (-p/--rival-min-diff), the per-read
-    // realization budget (--realize-max) and the catalogue depth (-N).
-    std::optional<double> rna_pri_ratio;
+    // -p: the DNA alternative's credibility ratio, the RNA rival retention
+    // ratio.
+    std::optional<double> pri_ratio;
+    // RNA: the secondary retention band (--rival-min-diff) and the catalogue
+    // depth (-N + 1), which also sets the realization budget.
     std::optional<int> rna_rival_min_diff;
-    std::optional<int> rna_realize_max;
     std::optional<int> rna_max_loci;
+    // DNA: -N's count of alternatives realized per read; unset without
+    // secondary output.
+    std::optional<int> dna_alternative_realize_max;
     // --vote-ratio: admit vote peaks by their ratio to the read's best vote,
     // in [0,1]; 0 admits by count. DNA presets only.
     std::optional<double> dna_vote_admission_ratio;
@@ -116,6 +123,8 @@ struct AlignOptions {
     // DP bandwidths. A single -r value leaves the long-join bandwidth unset.
     std::optional<int> dp_bw;          // -r (1st)    -> cigar_dp_bw_
     std::optional<int> dp_bw_long;     // -r (2nd)    -> cigar_dp_bw_long_
+    // -g: the DP's maximum gap, and on a DNA preset the chain's too.
+    std::optional<int> dp_max_gap;
 };
 
 struct IndexOptions {

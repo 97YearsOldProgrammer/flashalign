@@ -147,7 +147,7 @@ inline constexpr int kDnaChainMapqChainShadowFraction = 5;
 inline constexpr int kDnaChainMapqPeakShadowFloorBp = 2000;
 inline constexpr int kDnaChainMapqPeakShadowFraction = 10;
 // The winner's sibling chain is realized only when
-// max(sib_f2, kDnaMinChainScore) / f1 reaches this; below it the
+// max(sib_f2, min_chain_score) / f1 reaches this; below it the
 // ratio form is flat and the DP would change nothing.
 inline constexpr double kDnaChainMapqSiblingRealizeMin = 0.5;
 // At most this many block-rival realizations per read, blocks taken by query
@@ -276,6 +276,8 @@ struct DnaChainMapqRealizedRival {
 };
 
 struct DnaChainMapqEvidence {
+  // minimap2's min_chain_score (-m): a rival scoring under it counts as it.
+  int min_chain_score = kDnaMinChainScore;
   int f1 = 0;  // committed whole-query chain score      (mm2 score0 / score)
   int cnt = 0; // committed whole-query chain anchors    (mm2 cnt)
   // The committed candidate's sibling f2 from its own chain partition, a free

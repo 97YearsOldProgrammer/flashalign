@@ -54,7 +54,6 @@ int native_splice_k();
 bool native_splice_k_supported(int k);
 bool preset_is_valid(std::string_view preset);
 std::string accepted_preset_names();
-int preset_cli_chain_max_gap(std::string_view preset);
 
 // What a reference argument holds, judged from its content (reference_kind).
 enum class ReferenceKind { Index, Sequences };
