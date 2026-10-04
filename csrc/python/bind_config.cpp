@@ -79,7 +79,8 @@ void append(std::ostringstream& out, const char* name,
     "Preset name: 'lr', 'lr:hq', 'splice', 'splice:hq' [-x / --preset].")      \
   X(k, "Seed k-mer length [-k]; mapping always uses the index's.")             \
   X(min_support, "Minimum anchor support [--min-support]. -1 = preset-owned.") \
-  X(max_query_seeds, "Query seeds kept per strand. -1 = preset-owned.")        \
+  X(max_query_seeds,                                                           \
+    "Vote seeds per strand [--vote-seeds]; 0 = all. -1 = preset-owned.")       \
   X(full_read_cigar,                                                           \
     "Realize base-level CIGARs; False maps only (the CLI's plain -f paf).")    \
   X(syncmer_s, "Closed-syncmer s [-s]; mapping always uses the index's.")      \

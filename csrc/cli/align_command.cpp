@@ -188,6 +188,14 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.query_tile_unsupported_cost = *opt.tile_unsupported_cost;
   if (opt.min_support)
     u.min_support = *opt.min_support;
+  if (opt.vote_seeds)
+    u.max_query_seeds_per_strand = *opt.vote_seeds;
+  if (opt.max_cands)
+    u.max_cands = *opt.max_cands;
+  if (opt.tiles)
+    u.query_tiles = *opt.tiles;
+  if (opt.tile_owner)
+    u.tile_owner_anchors = *opt.tile_owner == "anchors";
   if (opt.min_chain_score)
     u.min_chain_score = *opt.min_chain_score;
   // --max-vote-occ: 0 turns occurrence filtering off, >0 fixes the cap.

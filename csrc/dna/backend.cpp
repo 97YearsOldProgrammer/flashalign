@@ -1029,8 +1029,9 @@ DnaChainMapqEvidenceRealizations realize_chain_mapq_evidence(
       sibling.refusal = DnaChainMapqRealizeRefusal::WeakSibling;
       return out;
     }
-    const DnaPlacementCandidateChain sibling_chain = dna_sibling_rival_chain(
-        *winner_chain, winner->peak.is_rc, read_len, catalogue.seed_length);
+    const DnaPlacementCandidateChain sibling_chain =
+        dna_sibling_rival_chain(*winner_chain, winner->peak.is_rc, read_len,
+                                catalogue.seed_length, catalogue.tile_count);
     if (sibling_chain.primary.empty()) {
       sibling.refusal = DnaChainMapqRealizeRefusal::NoSibling;
       return out;
@@ -1640,8 +1641,10 @@ AlignResult map_read(const DnaContext& base_dctx,
         build_dna_placement_family(dctx, fwd_enc, raw, scratch.fwd, scratch.rc);
     if (placement_family.valid) {
       const std::vector<uint8_t>& reverse_query = reverse_query_stream();
-      placement_chaining =
-          chain_placement_family(placement_family, DnaTileOwnership::Span);
+      placement_chaining = chain_placement_family(
+          placement_family, dctx.opts.tile_owner_anchors
+                                ? DnaTileOwnership::AnchorTiles
+                                : DnaTileOwnership::Span);
       placement_chaining_ran = true;
       dctx.inversion_gate_seeds = placement_chaining.inversion_gate_seeds.get();
       if (placement_chaining.span_widened)
@@ -1705,7 +1708,8 @@ AlignResult map_read(const DnaContext& base_dctx,
     // realization cannot fill (for example one whose interval holds none of
     // its chain's anchors). A widened family whose primary realization is not
     // accepted is chained once more under the anchor-tile rule and realized
-    // again; the rest of the read (alternative, MAPQ evidence, terminal-clip
+    // again (under --tile-owner anchors nothing is widened, so never); the
+    // rest of the read (alternative, MAPQ evidence, terminal-clip
     // recovery) then uses the re-chained family. The request holds pointers,
     // so the second realization sees it. At most once per read.
     if (!family_outcome.accepted() && unspanned_retry_family.valid) {

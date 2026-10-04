@@ -30,6 +30,8 @@ struct DnaPlacementCandidate {
 struct DnaPlacementFamily {
   int read_length = 0;
   int seed_length = 0;
+  // The partition's tiles (--tiles); masks, blocks and assignments use them.
+  int tile_count = ::fa::cpu::voting::kQueryTileCount;
   // Set only for a restricted alternative-hypothesis catalogue, whose solver
   // ids are positional: the id of the candidate in the original catalogue.
   std::optional<::fa::cpu::voting::CandidateId> original_candidate_id;
@@ -47,10 +49,12 @@ struct DnaPlacementFamily {
       ::fa::cpu::voting::CandidateId id) const noexcept;
 };
 
-// Maps an oriented seed position to its forward-read query tile. The generic
-// catalogue and partition code only sees forward-read tiles.
-int dna_forward_query_tile(int oriented_seed_position, bool reverse,
-                           int read_length, int seed_length) noexcept;
+// Maps an oriented seed position to its forward-read query tile of
+// tile_count. The generic catalogue and partition code only sees forward-read
+// tiles.
+int dna_forward_query_tile(
+    int oriented_seed_position, bool reverse, int read_length, int seed_length,
+    int tile_count) noexcept;
 
 // Builds the candidate catalogue from the whole-read vote peaks and, for a
 // non-empty catalogue, defers the query partition solve (see

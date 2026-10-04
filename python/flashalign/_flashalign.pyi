@@ -54,7 +54,7 @@ class Config:
 
     @property
     def max_query_seeds(self) -> int:
-        """Query seeds kept per strand. -1 = preset-owned."""
+        """Vote seeds per strand [--vote-seeds]; 0 = all. -1 = preset-owned."""
 
     @max_query_seeds.setter
     def max_query_seeds(self, arg: int, /) -> None: ...

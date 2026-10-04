@@ -63,9 +63,11 @@ DnaAlternativeSelection select_alternative(
     ++non_null_blocks;
     out.incumbent = block.candidate;
     block_begin = ::fa::cpu::voting::query_tile_begin(
-        block.query_tile_begin, family.read_length, family.seed_length);
+        block.query_tile_begin, family.read_length, family.seed_length,
+        family.tile_count);
     block_end = ::fa::cpu::voting::query_tile_end(
-        block.query_tile_end, family.read_length, family.seed_length);
+        block.query_tile_end, family.read_length, family.seed_length,
+        family.tile_count);
   }
   if (non_null_blocks != 1) {
     out.refusal = DnaAlternativeRefusal::NotSingleBlock;

@@ -1,6 +1,6 @@
 // Placement chaining. The whole-read vote catalogue is the only source of
 // candidates; this stage harvests and chains anchors for the candidates the
-// partition selects, maps each exact chain back to the 128 forward-query
+// partition selects, maps each exact chain back to the family's forward-query
 // tiles and re-solves the partition. Both map-only projection and CIGAR
 // realization consume the resulting family and anchor paths. No DP runs here.
 #pragma once
@@ -298,12 +298,12 @@ struct DnaPlacementChainingResult {
 
 // The winner's rival sibling as a chain record of its own, for
 // build_dna_rival_placement: the sibling path as `primary`, exact and
-// Accepted, with its own score, anchor count, dense_support and spans; other
-// fields are left empty. Empty (NotSelected) when the winner has no rival
-// sibling.
+// Accepted, with its own score, anchor count, dense_support (on tile_count
+// tiles) and spans; other fields are left empty. Empty (NotSelected) when the
+// winner has no rival sibling.
 DnaPlacementCandidateChain
 dna_sibling_rival_chain(const DnaPlacementCandidateChain& winner, bool reverse,
-                        int read_length, int seed_length);
+                        int read_length, int seed_length, int tile_count);
 
 // The whole-query chain of the committed hypothesis. A promoted alternative
 // uses its restricted rerun, not the stable run's record for that candidate.
@@ -350,10 +350,11 @@ build_dna_rival_placement(const DnaContext& context,
 // re-solves the partition (see stabilize_selected_family).
 enum class DnaTileOwnership : std::uint8_t {
   // Its anchor tiles and every tile between its first and last anchor,
-  // except those a rival at the same locus keeps. Used first.
+  // except those a rival at the same locus keeps. The first rule by default
+  // (--tile-owner span).
   Span,
-  // Its anchor tiles alone; used for the retry when a spanned family fails
-  // to realize.
+  // Its anchor tiles alone: the first rule under --tile-owner anchors, and
+  // the retry's when a spanned family fails to realize.
   AnchorTiles,
 };
 

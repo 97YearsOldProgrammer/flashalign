@@ -67,6 +67,17 @@ struct AlignOptions {
     // hold ahead of the reader, as a ceiling; 0 scales it with -t.
     int io_staging_mib = 0;
     std::optional<int> min_support;
+    // --vote-seeds INT: the vote's seeds per strand, >= 0; 0 is every seed.
+    std::optional<int> vote_seeds;
+    // --max-cands INT: the vote's peaks and the catalogue's candidates per
+    // strand, 1..64. DNA presets only.
+    std::optional<int> max_cands;
+    // --tiles INT: the query partition's tiles per read, 2..4096. DNA
+    // presets only.
+    std::optional<int> tiles;
+    // --tile-owner span|anchors: placement's first tile-ownership rule,
+    // stored as "span" or "anchors". DNA presets only.
+    std::optional<std::string> tile_owner;
     // -m: minimap2's minimal chain score, >= 1. DNA presets only.
     std::optional<int> min_chain_score;
     std::optional<int> tile_supported_reward;

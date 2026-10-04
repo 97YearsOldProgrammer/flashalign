@@ -330,9 +330,81 @@ on it may not be below the width
 .B \-\-dw
 sets. DNA presets only.
 .TP
+.BI \-\-vote\-seeds \ INT
+Seeds per strand that vote [128]: the read is cut into
+.I INT
+equal tiles and each tile votes with one of its seeds; 0 votes with every seed,
+and every preset takes the value. Above 128, a DNA preset keeps the seeds the
+128\-tile cut picks and adds seeds of the
+.IR INT \-tile
+cut, each the farthest from those kept, until it holds as many as that cut picks;
+a rescued seed that would exceed the strand's budget of rescued occurrences is
+skipped, so the count can stop short. The exact refinement of the vote peaks uses the seeds of both
+cuts. Neither
+.B \-\-min\-support
+nor
+.B \-\-max\-cands
+scales with
+.IR INT ;
+a vote peak needs
+.B \-\-min\-support
+votes (3 on the DNA presets), so an
+.I INT
+below that places few reads or none.
+The Python field is
+.BR Config.max_query_seeds .
+.TP
+.BI \-\-max\-cands \ INT
+Vote peaks and placement candidates kept per strand, 1 to 64 [16]. Unset, it is
+16 when vote peaks are admitted by their ratio to the best
+.RB ( \-\-vote\-ratio ),
+where it only bounds the cost, and 4 when
+.B \-\-vote\-ratio
+is 0, where it selects; a value replaces whichever applies. The
+.B \-N
+ranks are drawn from these candidates, so a wider bound can add secondaries.
+DNA presets only.
+.TP
+.BI \-\-tiles \ INT
+Query tiles the read is cut into for placement, 2 to 4096 [128]. The exact query
+partition gives each tile one candidate or none, and an owned block needs two
+tiles with seed support. Under the default
+.BR \-\-tile\-score ,
+2 tiles place no read: a two\-tile block scores 8 \- 12 = \-4, below the \-2
+of leaving both tiles unowned. The
+.B \-\-tile\-score
+terms are per tile, so their weight against each other and against the read's
+length moves with
+.IR INT .
+A candidate starts with the tiles in which a voting seed supports it, so with
+fewer voting seeds than tiles
+.RB ( \-\-vote\-seeds )
+most tiles start unsupported and candidates are hard to admit; keep
+.B \-\-vote\-seeds
+at least
+.IR INT .
+Above 2048 tiles, candidates are admitted by comparing their supports on 2048
+tiles. The partition's work grows with
+.IR INT .
+DNA presets only; the splice presets keep 128.
+.TP
+.BI \-\-tile\-owner \ STR
+Which tiles a placed chain owns when the partition is solved again [span]:
+.B span
+gives it every tile between its first and last anchor except those a rival at
+the same locus keeps, and when a CIGAR is realized
+.RB ( \-c ,
+SAM) a read whose widened block cannot be aligned is placed again under the
+anchors rule;
+.B anchors
+gives it only the tiles that hold its anchors, and there is nothing to place
+again. Plain PAF output follows the same rule. DNA presets only.
+.TP
 .B \-\-tile\-score \fIhit\fR=\fIINT\fR,\fIblock\fR=\fIINT\fR,\fInull\fR=\fIINT\fR,\fImiss\fR=\fIINT\fR
-Objective of the exact query partition, which decides for each of the read's 128
-query tiles which candidate owns it [hit=4,block=12,null=1,miss=0].
+Objective of the exact query partition, which decides for each of the read's
+query tiles
+.RB ( \-\-tiles )
+which candidate owns it [hit=4,block=12,null=1,miss=0].
 .I hit
 rewards an owned tile the seeds support and is at least 1;
 .I block

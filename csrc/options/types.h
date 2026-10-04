@@ -92,6 +92,13 @@ struct UserOverrides {
   // --max-chain-occ: the dense chain's pool occurrence gate, >= 0; 0 is no
   // gate. Unset, the vote's cap. DNA presets only.
   std::optional<int> dna_pool_gate_occ;
+  // --max-cands: the lane bound, the vote's peaks and the catalogue's
+  // candidates per strand, 1..64. DNA presets only.
+  std::optional<int> max_cands;
+  // --tiles: the query partition's tiles per read, 2..4096. DNA presets only.
+  std::optional<int> query_tiles;
+  // --tile-owner: true for anchors, false for span. DNA presets only.
+  std::optional<bool> tile_owner_anchors;
 };
 
 struct ResolveRequest {

@@ -132,7 +132,7 @@ QueryTileMask factual_forward_support(
     const DnaContext& context,
     const std::vector<std::uint8_t>& forward_query,
     const VotePeak& peak, const ChainWindowPeakScratch& scratch,
-    std::uint64_t& posting_tests) {
+    std::uint64_t& posting_tests, int tile_count) {
   QueryTileMask support;
   const int read_length = static_cast<int>(forward_query.size());
   const int seed_length = std::max(1, context.opts.k);
@@ -159,8 +159,8 @@ QueryTileMask factual_forward_support(
     }
     posting_tests += contributed ? posting + 1 : view.view.count;
     if (contributed) {
-      support.set(dna_forward_query_tile(
-          view.seed.read_pos, peak.is_rc, read_length, seed_length));
+      support.set(dna_forward_query_tile(view.seed.read_pos, peak.is_rc,
+                                         read_length, seed_length, tile_count));
     }
   };
   if (!scratch.retained_seeds.empty()) {
@@ -190,13 +190,14 @@ class RankedPeakMaskSource final
                        const std::vector<VotePeak>& ranked,
                        const ChainWindowPeakScratch& forward_scratch,
                        const ChainWindowPeakScratch& reverse_scratch,
-                       std::uint64_t& posting_tests)
+                       std::uint64_t& posting_tests, int tile_count)
       : context_(context),
         forward_query_(forward_query),
         ranked_(ranked),
         forward_scratch_(forward_scratch),
         reverse_scratch_(reverse_scratch),
         posting_tests_(posting_tests),
+        tile_count_(tile_count),
         masks_(ranked.size()),
         ready_(ranked.size(), 0) {}
 
@@ -206,7 +207,8 @@ class RankedPeakMaskSource final
       const VotePeak& peak = ranked_[index];
       masks_[index] = factual_forward_support(
           context_, forward_query_, peak,
-          peak.is_rc ? reverse_scratch_ : forward_scratch_, posting_tests_);
+          peak.is_rc ? reverse_scratch_ : forward_scratch_, posting_tests_,
+          tile_count_);
       ready_[index] = 1;
     }
     return masks_[index];
@@ -219,6 +221,7 @@ class RankedPeakMaskSource final
   const ChainWindowPeakScratch& forward_scratch_;
   const ChainWindowPeakScratch& reverse_scratch_;
   std::uint64_t& posting_tests_;
+  int tile_count_;
   std::vector<QueryTileMask> masks_;
   std::vector<char> ready_;
 };
@@ -247,12 +250,13 @@ GeometryKey geometry_key(const VotePeak& peak) {
 }  // namespace
 
 int dna_forward_query_tile(int oriented_seed_position, bool reverse,
-                           int read_length, int seed_length) noexcept {
+                           int read_length, int seed_length,
+                           int tile_count) noexcept {
   const int forward_position =
       reverse ? read_length - seed_length - oriented_seed_position
               : oriented_seed_position;
   return ::fa::cpu::voting::query_tile_for_position(
-      forward_position, read_length, seed_length);
+      forward_position, read_length, seed_length, tile_count);
 }
 
 const DnaPlacementCandidate* DnaPlacementFamily::find(
@@ -273,6 +277,7 @@ DnaPlacementFamily build_dna_placement_family(
   DnaPlacementFamily family;
   family.read_length = static_cast<int>(forward_query.size());
   family.seed_length = std::max(1, context.opts.k);
+  family.tile_count = context.opts.query_tiles;
   std::vector<VotePeak> ranked = whole_read_peaks;
   // Peaks tied on every evidence key are ordered by a read-seeded hash of
   // their locus, as minimap2 breaks ties. Catalogue ranks and ids follow this
@@ -286,7 +291,11 @@ DnaPlacementFamily build_dna_placement_family(
   // Ratio admission (the default): masks are computed lazily and the
   // admission gets each peak's coarse tile range, which contains its mask.
   // With --vote-ratio 0 the count rule applies and masks are computed eagerly.
+  // Ratio admission compares masks on a grid of at most
+  // kMaxAdmissionQueryTiles tiles; the partition keeps the family's.
   const bool ratio_admission = context.opts.vote_admission_ratio > 0.0;
+  const int admission_tiles = std::min(
+      family.tile_count, ::fa::cpu::voting::kMaxAdmissionQueryTiles);
   std::vector<GeometryKey> keys;
   std::vector<VotePeak> key_peaks;
   std::vector<CandidateInput> inputs;
@@ -312,10 +321,10 @@ DnaPlacementFamily build_dna_placement_family(
       if (peak.evidence_read_lo <= peak.evidence_read_hi) {
         const int tile_a = dna_forward_query_tile(
             peak.evidence_read_lo, peak.is_rc, family.read_length,
-            family.seed_length);
+            family.seed_length, admission_tiles);
         const int tile_b = dna_forward_query_tile(
             peak.evidence_read_hi, peak.is_rc, family.read_length,
-            family.seed_length);
+            family.seed_length, admission_tiles);
         input.coarse_tile_lo = std::min(tile_a, tile_b);
         input.coarse_tile_hi = std::max(tile_a, tile_b);
       }
@@ -323,18 +332,20 @@ DnaPlacementFamily build_dna_placement_family(
       input.support = factual_forward_support(
           context, forward_query, peak,
           peak.is_rc ? reverse_scratch : forward_scratch,
-          family.exact_posting_tests);
+          family.exact_posting_tests, family.tile_count);
     }
     inputs.push_back(input);
   }
 
   QueryPartitionProblem problem;
-  problem.tile_count = ::fa::cpu::voting::kQueryTileCount;
+  problem.tile_count = family.tile_count;
   for (int tile = 0; tile < problem.tile_count; ++tile) {
-    if (::fa::cpu::voting::query_tile_end(
-            tile + 1, family.read_length, family.seed_length) >
-        ::fa::cpu::voting::query_tile_begin(
-            tile, family.read_length, family.seed_length)) {
+    if (::fa::cpu::voting::query_tile_end(tile + 1, family.read_length,
+                                          family.seed_length,
+                                          family.tile_count) >
+        ::fa::cpu::voting::query_tile_begin(tile, family.read_length,
+                                            family.seed_length,
+                                            family.tile_count)) {
       problem.valid_tiles.set(tile);
     }
   }
@@ -343,13 +354,24 @@ DnaPlacementFamily build_dna_placement_family(
   // ratio does the selecting.
   RankedPeakMaskSource mask_source(context, forward_query, ranked,
                                    forward_scratch, reverse_scratch,
-                                   family.exact_posting_tests);
+                                   family.exact_posting_tests,
+                                   admission_tiles);
   problem.catalogue = ::fa::cpu::voting::build_candidate_catalogue(
-      std::move(inputs),
-      ratio_admission ? ::fa::cpu::voting::kCatalogueLaneBound
-                      : ::fa::cpu::voting::kCountAdmissionLaneBound,
+      std::move(inputs), context.opts.catalogue_lane_bound,
       ratio_admission ? context.opts.vote_admission_ratio : 0.0,
-      ratio_admission ? &mask_source : nullptr);
+      ratio_admission ? &mask_source : nullptr, admission_tiles);
+  // Admitted on the coarser grid, a candidate's support is rebuilt on the
+  // family's.
+  if (ratio_admission && admission_tiles != family.tile_count) {
+    for (auto& generic : problem.catalogue.candidates) {
+      const VotePeak& peak =
+          key_peaks[static_cast<std::size_t>(generic.equivalence_key - 1)];
+      generic.support = factual_forward_support(
+          context, forward_query, peak,
+          peak.is_rc ? reverse_scratch : forward_scratch,
+          family.exact_posting_tests, family.tile_count);
+    }
+  }
   for (const auto& generic : problem.catalogue.candidates) {
     const std::size_t key_index =
         static_cast<std::size_t>(generic.equivalence_key - 1);

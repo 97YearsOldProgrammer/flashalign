@@ -38,14 +38,14 @@ struct DeferredSlice {
   KmerPostingIntervalView interval;
 };
 
-::fa::cpu::voting::QueryTileMask valid_tiles(
-    int read_length, int seed_length) {
+::fa::cpu::voting::QueryTileMask valid_tiles(int read_length, int seed_length,
+                                             int tile_count) {
   ::fa::cpu::voting::QueryTileMask result;
-  for (int tile = 0; tile < ::fa::cpu::voting::kQueryTileCount; ++tile) {
-    if (::fa::cpu::voting::query_tile_end(
-            tile + 1, read_length, seed_length) >
-        ::fa::cpu::voting::query_tile_begin(
-            tile, read_length, seed_length)) {
+  for (int tile = 0; tile < tile_count; ++tile) {
+    if (::fa::cpu::voting::query_tile_end(tile + 1, read_length, seed_length,
+                                          tile_count) >
+        ::fa::cpu::voting::query_tile_begin(tile, read_length, seed_length,
+                                            tile_count)) {
       result.set(tile);
     }
   }
@@ -62,9 +62,9 @@ int selected_tiles(
 ::fa::cpu::voting::QueryPartitionResult repartition(
     const DnaContext& context, const DnaPlacementFamily& family) {
   ::fa::cpu::voting::QueryPartitionProblem problem;
-  problem.tile_count = ::fa::cpu::voting::kQueryTileCount;
+  problem.tile_count = family.tile_count;
   problem.valid_tiles =
-      valid_tiles(family.read_length, family.seed_length);
+      valid_tiles(family.read_length, family.seed_length, family.tile_count);
   problem.parameters = context.opts.query_partition;
   problem.catalogue.candidates.reserve(family.candidates.size());
   for (const DnaPlacementCandidate& candidate : family.candidates) {
@@ -516,8 +516,9 @@ bool chain_candidate(
   record.overlapping_rivals = partition.n_sub;
   record.chain_anchors = static_cast<int>(record.primary.size());
   for (const chaining::Anchor& anchor : record.primary) {
-    record.dense_support.set(dna_forward_query_tile(
-        anchor.q, reverse, family.read_length, family.seed_length));
+    record.dense_support.set(
+        dna_forward_query_tile(anchor.q, reverse, family.read_length,
+                               family.seed_length, family.tile_count));
   }
   if (whole_query_exact) {
     for (std::size_t which = 0; which < chained.chains.size(); ++which) {
@@ -568,23 +569,40 @@ bool chain_candidate(
 // Owners take their supports after the sweep that chained them, so each
 // sees every rival's post-sweep chain.
 
+// One index per tile, -1 for none; the first 128 tiles allocate nothing.
+struct TileAnchorIndices {
+  std::array<int, ::fa::cpu::voting::kQueryTileCount> local;
+  std::vector<int> extra;
+
+  explicit TileAnchorIndices(int tile_count) {
+    local.fill(-1);
+    if (tile_count > static_cast<int>(local.size()))
+      extra.assign(static_cast<std::size_t>(tile_count) - local.size(), -1);
+  }
+  int& operator[](std::size_t tile) {
+    return tile < local.size() ? local[tile] : extra[tile - local.size()];
+  }
+  int operator[](std::size_t tile) const {
+    return tile < local.size() ? local[tile] : extra[tile - local.size()];
+  }
+};
+
 // Per forward-query tile, the anchors of one chain with the smallest and the
 // largest oriented query start (indices into the chain, -1 for none).
 struct TileAnchorEnds {
-  std::array<int, ::fa::cpu::voting::kQueryTileCount> first;
-  std::array<int, ::fa::cpu::voting::kQueryTileCount> last;
+  TileAnchorIndices first;
+  TileAnchorIndices last;
 };
 
 TileAnchorEnds tile_anchor_ends(const std::vector<chaining::Anchor>& anchors,
-                                bool reverse, int read_length,
-                                int seed_length) {
-  TileAnchorEnds ends;
-  ends.first.fill(-1);
-  ends.last.fill(-1);
+                                bool reverse, int read_length, int seed_length,
+                                int tile_count) {
+  TileAnchorEnds ends{TileAnchorIndices(tile_count),
+                      TileAnchorIndices(tile_count)};
   for (std::size_t index = 0; index < anchors.size(); ++index) {
-    const int tile = dna_forward_query_tile(anchors[index].q, reverse,
-                                            read_length, seed_length);
-    if (tile < 0 || tile >= ::fa::cpu::voting::kQueryTileCount) continue;
+    const int tile = dna_forward_query_tile(
+        anchors[index].q, reverse, read_length, seed_length, tile_count);
+    if (tile < 0 || tile >= tile_count) continue;
     const int at = static_cast<int>(index);
     const std::size_t tile_index = static_cast<std::size_t>(tile);
     if (ends.first[tile_index] < 0 ||
@@ -639,11 +657,11 @@ bool span_seam_bridges(const DnaContext& context, int chromosome, bool reverse,
     const DnaPlacementCandidate& owner,
     const DnaPlacementCandidateChain& chain) {
   namespace voting = ::fa::cpu::voting;
-  constexpr int kTiles = voting::kQueryTileCount;
+  const int tiles = family.tile_count;
   const voting::QueryTileMask& anchor_tiles = chain.dense_support;
   int first = -1;
   int last = -1;
-  for (int tile = 0; tile < kTiles; ++tile) {
+  for (int tile = 0; tile < tiles; ++tile) {
     if (!anchor_tiles.test(tile)) continue;
     if (first < 0) first = tile;
     last = tile;
@@ -655,17 +673,17 @@ bool span_seam_bridges(const DnaContext& context, int chromosome, bool reverse,
   const int seed_length = family.seed_length;
   const int max_gap = context.opts.cigar_dp_max_gap;
   const auto forward_begin = [&](int tile) {
-    return tile >= kTiles ? read_length
+    return tile >= tiles ? read_length
                           : voting::query_tile_begin(tile, read_length,
-                                                     seed_length);
+                                                     seed_length, tiles);
   };
   const auto forward_tile = [&](const chaining::Anchor& anchor) {
-    return dna_forward_query_tile(anchor.q, reverse, read_length,
-                                  seed_length);
+    return dna_forward_query_tile(anchor.q, reverse, read_length, seed_length,
+                                  tiles);
   };
   const std::vector<chaining::Anchor>& own = chain.primary;
   const TileAnchorEnds own_ends =
-      tile_anchor_ends(own, reverse, read_length, seed_length);
+      tile_anchor_ends(own, reverse, read_length, seed_length, tiles);
   const auto own_at = [&](int index) -> const chaining::Anchor& {
     return own[static_cast<std::size_t>(index)];
   };
@@ -691,7 +709,7 @@ bool span_seam_bridges(const DnaContext& context, int chromosome, bool reverse,
   }
   if (!ascending) long_links.clear();
 
-  std::array<bool, kTiles> keep{};
+  voting::QueryTileMask keep;
   for (const DnaPlacementCandidate& rival : family.candidates) {
     if (rival.id == owner.id || rival.peak.chr != chromosome ||
         rival.peak.is_rc != reverse)
@@ -708,7 +726,7 @@ bool span_seam_bridges(const DnaContext& context, int chromosome, bool reverse,
     if (!any) continue;
     const std::vector<chaining::Anchor>& theirs = rival_chain->primary;
     const TileAnchorEnds their_ends =
-        tile_anchor_ends(theirs, reverse, read_length, seed_length);
+        tile_anchor_ends(theirs, reverse, read_length, seed_length, tiles);
     const auto uncontested = [&](int tile) {
       return anchor_tiles.test(tile) && !held.test(tile);
     };
@@ -783,7 +801,7 @@ bool span_seam_bridges(const DnaContext& context, int chromosome, bool reverse,
           });
       if (bridges || gap) {
         for (int tile = begin; tile <= end; ++tile)
-          if (at_stake(tile)) keep[static_cast<std::size_t>(tile)] = true;
+          if (at_stake(tile)) keep.set(tile);
       }
       begin = end + 1;
     }
@@ -791,7 +809,7 @@ bool span_seam_bridges(const DnaContext& context, int chromosome, bool reverse,
 
   voting::QueryTileMask owned = anchor_tiles;
   for (int tile = first; tile <= last; ++tile) {
-    if (!anchor_tiles.test(tile) && !keep[static_cast<std::size_t>(tile)])
+    if (!anchor_tiles.test(tile) && !keep.test(tile))
       owned.set(tile);
   }
   return owned;
@@ -900,8 +918,7 @@ std::vector<ResidueRun> owned_unsupported_runs(
     const DnaPlacementFamily& family) {
   std::vector<ResidueRun> runs;
   const auto& assignment = family.partition.selected.assignment;
-  if (assignment.size() !=
-      static_cast<std::size_t>(::fa::cpu::voting::kQueryTileCount))
+  if (assignment.size() != static_cast<std::size_t>(family.tile_count))
     return runs;
   for (const auto& block : family.partition.selected.blocks) {
     if (block.candidate == ::fa::cpu::voting::kNullCandidate) continue;
@@ -920,12 +937,14 @@ std::vector<ResidueRun> owned_unsupported_runs(
       run.tile_begin = run_begin;
       run.tile_end = tile;
       run.query_begin_bp = ::fa::cpu::voting::query_tile_begin(
-          run_begin, family.read_length, family.seed_length);
+          run_begin, family.read_length, family.seed_length,
+          family.tile_count);
       run.query_end_bp =
-          tile == ::fa::cpu::voting::kQueryTileCount
+          tile == family.tile_count
               ? family.read_length
               : ::fa::cpu::voting::query_tile_begin(
-                    tile, family.read_length, family.seed_length);
+                    tile, family.read_length, family.seed_length,
+                    family.tile_count);
       if (run.query_end_bp > run.query_begin_bp) runs.push_back(run);
     }
   }
@@ -1042,12 +1061,13 @@ bool collect_residue_anchors(const DnaContext& context,
 int residue_block_query_bp(const DnaPlacementFamily& family,
                            const ::fa::cpu::voting::QueryBlock& block) {
   const int begin = ::fa::cpu::voting::query_tile_begin(
-      block.query_tile_begin, family.read_length, family.seed_length);
-  const int end = block.query_tile_end == ::fa::cpu::voting::kQueryTileCount
+      block.query_tile_begin, family.read_length, family.seed_length,
+      family.tile_count);
+  const int end = block.query_tile_end == family.tile_count
                       ? family.read_length
                       : ::fa::cpu::voting::query_tile_begin(
                             block.query_tile_end, family.read_length,
-                            family.seed_length);
+                            family.seed_length, family.tile_count);
   return std::max(0, end - begin);
 }
 
@@ -1126,7 +1146,7 @@ void append_residue_candidate(DnaPlacementFamily& family,
   int forward_end = std::numeric_limits<int>::min();
   for (const chaining::Anchor& anchor : outcome.primary) {
     support.set(dna_forward_query_tile(anchor.q, reverse, family.read_length,
-                                       family.seed_length));
+                                       family.seed_length, family.tile_count));
     const int position = forward_query_position(
         anchor.q, reverse, family.read_length, family.seed_length);
     forward_begin = std::min(forward_begin, position);
@@ -1232,9 +1252,11 @@ void run_residue_recovery(const DnaContext& context,
   if (winner == nullptr ||
       winner->chain_anchors < context.opts.residue_recovery_anchor_floor)
     return;
-  // The solver rejects a catalogue wider than twice the per-lane bound.
-  const std::size_t capacity =
-      static_cast<std::size_t>(2 * ::fa::cpu::voting::kCatalogueLaneBound);
+  // Recovery fills the catalogue up to twice its lane bound, never below
+  // twice kCatalogueLaneBound.
+  const std::size_t capacity = static_cast<std::size_t>(
+      2 * std::max(::fa::cpu::voting::kCatalogueLaneBound,
+                   context.opts.catalogue_lane_bound));
   if (family.candidates.size() >= capacity) return;
   const int admission_budget = std::min<int>(
       kDnaResidueMaxAdmissionsPerRead,
@@ -1396,9 +1418,11 @@ void chain_mapq_rivals(
         const DnaPlacementCandidate* owner = family.find(block.candidate);
         if (owner == nullptr) continue;
         const int block_begin = ::fa::cpu::voting::query_tile_begin(
-            block.query_tile_begin, family.read_length, family.seed_length);
+            block.query_tile_begin, family.read_length, family.seed_length,
+            family.tile_count);
         const int block_end = ::fa::cpu::voting::query_tile_end(
-            block.query_tile_end, family.read_length, family.seed_length);
+            block.query_tile_end, family.read_length, family.seed_length,
+            family.tile_count);
         const int block_span = std::max(0, block_end - block_begin);
         std::vector<std::size_t> block_ranked;
         for (std::size_t index = 0; index < family.candidates.size();
@@ -1635,7 +1659,7 @@ DnaResidueDetachedChain dna_residue_detached_chain(
   int forward_end = std::numeric_limits<int>::min();
   for (const chaining::Anchor& anchor : outcome.primary) {
     support.set(dna_forward_query_tile(anchor.q, reverse, family.read_length,
-                                       family.seed_length));
+                                       family.seed_length, family.tile_count));
     const int position = forward_query_position(
         anchor.q, reverse, family.read_length, family.seed_length);
     forward_begin = std::min(forward_begin, position);
@@ -1899,7 +1923,7 @@ const DnaPlacementCandidateChain* DnaPlacementChainingResult::whole_query_chain(
 
 DnaPlacementCandidateChain
 dna_sibling_rival_chain(const DnaPlacementCandidateChain& winner, bool reverse,
-                        int read_length, int seed_length) {
+                        int read_length, int seed_length, int tile_count) {
   DnaPlacementCandidateChain sibling;
   sibling.candidate = winner.candidate;
   if (winner.rival_sibling < 0 ||
@@ -1914,8 +1938,8 @@ dna_sibling_rival_chain(const DnaPlacementCandidateChain& winner, bool reverse,
   sibling.chain_score = winner.sibling_scores[which];
   sibling.chain_anchors = static_cast<int>(sibling.primary.size());
   for (const chaining::Anchor& anchor : sibling.primary)
-    sibling.dense_support.set(
-        dna_forward_query_tile(anchor.q, reverse, read_length, seed_length));
+    sibling.dense_support.set(dna_forward_query_tile(
+        anchor.q, reverse, read_length, seed_length, tile_count));
   sibling.exact = true;
   sibling.status = DnaPlacementChainStatus::Accepted;
   set_spans(sibling, reverse, read_length);
@@ -2102,6 +2126,7 @@ DnaPlacementChainingResult build_dna_rival_placement(
   DnaPlacementFamily family;
   family.read_length = stable_family.read_length;
   family.seed_length = stable_family.seed_length;
+  family.tile_count = stable_family.tile_count;
   family.original_candidate_id = original;
   DnaPlacementCandidate only = *source;
   only.id = 0;

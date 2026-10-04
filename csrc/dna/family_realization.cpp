@@ -249,8 +249,8 @@ void record_inversion_probe(const realization::RealizationOutcome& outcome,
 }
 
 int query_begin_for_tile(const DnaPlacementFamily& family, int tile) {
-  return ::fa::cpu::voting::query_tile_begin(tile, family.read_length,
-                                             family.seed_length);
+  return ::fa::cpu::voting::query_tile_begin(
+      tile, family.read_length, family.seed_length, family.tile_count);
 }
 
 bool exact_anchor_equal(const chaining::Anchor& left,
@@ -279,7 +279,7 @@ bool materialize_plans(const DnaContext& context,
     plan.reverse = candidate->peak.is_rc;
     plan.forward_begin = query_begin_for_tile(family, block.query_tile_begin);
     plan.forward_end =
-        block.query_tile_end == ::fa::cpu::voting::kQueryTileCount
+        block.query_tile_end == family.tile_count
             ? family.read_length
             : query_begin_for_tile(family, block.query_tile_end);
     // The evidence-only query clip. A single-candidate family's block spans

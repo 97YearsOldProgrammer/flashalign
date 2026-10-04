@@ -65,19 +65,20 @@ bool project_chained_block_impl(
       candidate->peak.chr >= context.ref.contig_count() ||
       block.query_tile_begin < 0 ||
       block.query_tile_end <= block.query_tile_begin ||
-      block.query_tile_end > ::fa::cpu::voting::kQueryTileCount)
+      block.query_tile_end > family.tile_count)
     return false;
   if (block.supporting_tiles < kDnaPostCommitRecordMinBlockTiles)
     return false;
 
   const int forward_begin = ::fa::cpu::voting::query_tile_begin(
-      block.query_tile_begin, family.read_length, family.seed_length);
+      block.query_tile_begin, family.read_length, family.seed_length,
+      family.tile_count);
   const int forward_end =
-      block.query_tile_end == ::fa::cpu::voting::kQueryTileCount
+      block.query_tile_end == family.tile_count
           ? family.read_length
           : ::fa::cpu::voting::query_tile_begin(
                 block.query_tile_end, family.read_length,
-                family.seed_length);
+                family.seed_length, family.tile_count);
   const int oriented_begin =
       candidate->peak.is_rc ? family.read_length - forward_end
                             : forward_begin;
@@ -94,7 +95,7 @@ bool project_chained_block_impl(
   for (const chaining::Anchor& anchor : chain.primary) {
     const int tile = dna_forward_query_tile(
         anchor.q, candidate->peak.is_rc, family.read_length,
-        family.seed_length);
+        family.seed_length, family.tile_count);
     if (tile >= block.query_tile_begin && tile < block.query_tile_end)
       anchors.push_back(&anchor);
   }

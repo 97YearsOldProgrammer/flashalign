@@ -158,7 +158,16 @@ std::string resolved_config_text(const AlignOptions& opt,
 
   row("min_support", i2s(cfg.common.min_support),
       src(opt.min_support.has_value(), "preset"));
-  row("max_query_seeds", i2s(cfg.common.max_query_seeds_per_strand), "preset");
+  row("max_query_seeds", i2s(cfg.common.max_query_seeds_per_strand),
+      src(opt.vote_seeds.has_value(), "preset"));
+  // Above kVoteSeedNestBase a DNA selection keeps the kVoteSeedNestBase one
+  // and fills it (seeding/syncmer.h).
+  if (!is_rna)
+    row("vote_seed_sampler",
+        cfg.common.max_query_seeds_per_strand > fa::cpu::lr::kVoteSeedNestBase
+            ? "nested"
+            : "original",
+        "derived");
   // max_seed_occ is the effective vote occurrence cap; 0 means no filtering.
   fa::cpu::lr::LongOccPolicyConfig occ_cfg;
   occ_cfg.policy = mapping.long_occ_policy;
@@ -235,6 +244,21 @@ std::string resolved_config_text(const AlignOptions& opt,
   row("partition.min_tiles",
       i2s(mapping.query_partition.minimum_supported_tiles_per_non_null_block),
       tile_owner);
+  // The splice presets partition into their own 128 tiles.
+  row("partition.tiles", i2s(mapping.query_tiles),
+      is_rna ? "fixed" : src(opt.tiles.has_value(), "preset"));
+  // Ratio admission compares masks on at most kMaxAdmissionQueryTiles tiles.
+  if (!is_rna)
+    row("partition.admission_tiles",
+        mapping.vote_admission_ratio > 0.0
+            ? i2s(std::min(mapping.query_tiles,
+                           fa::cpu::voting::kMaxAdmissionQueryTiles))
+            : std::string("none (count admission)"),
+        "derived");
+  if (!is_rna)
+    row("partition.tile_owner",
+        mapping.tile_owner_anchors ? "anchors" : "span",
+        src(opt.tile_owner.has_value(), "preset"));
   row("mapq.output_range", "0..60", "fixed");
 
   row("chain_max_gap", i2s(mapping.cigar_local_interval_anchor_chain_max_gap),
@@ -247,7 +271,7 @@ std::string resolved_config_text(const AlignOptions& opt,
         "builtin");
   else
     row("chain_max_cands", i2s(fa::cpu::lr::dna_chain_max_candidates(mapping)),
-        "derived");
+        src(opt.max_cands.has_value(), "derived"));
   row("local_diag_band", i2s(mapping.cigar_local_diag_band), "builtin");
 
   // DNA: -A -B -O -E -z --score-N are the gap-fill row; the end row, which

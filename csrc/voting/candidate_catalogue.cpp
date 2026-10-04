@@ -14,11 +14,11 @@ namespace fa::cpu::voting {
 
 CandidateCatalogue build_candidate_catalogue(
     std::vector<CandidateInput> inputs, int max_per_lane,
-    double admission_ratio, CandidateMaskSource* mask_source) {
-  if (max_per_lane < 1 || max_per_lane > kCatalogueLaneBound) {
+    double admission_ratio, CandidateMaskSource* mask_source, int tile_count) {
+  if (max_per_lane < 1 || max_per_lane > kMaxCatalogueLaneBound) {
     throw std::invalid_argument(
         "candidate catalogue per-lane bound must be within [1," +
-        std::to_string(kCatalogueLaneBound) + "]");
+        std::to_string(kMaxCatalogueLaneBound) + "]");
   }
   if (admission_ratio < 0.0 || admission_ratio > 1.0)
     throw std::invalid_argument(
@@ -69,11 +69,10 @@ CandidateCatalogue build_candidate_catalogue(
     const auto coarse_valid = [&inputs](std::size_t index) {
       return inputs[index].coarse_tile_lo <= inputs[index].coarse_tile_hi;
     };
-    const auto coarse_range = [&inputs](std::size_t index) {
+    const auto coarse_range = [&inputs, tile_count](std::size_t index) {
       QueryTileMask range;
       const int lo = std::max(0, inputs[index].coarse_tile_lo);
-      const int hi =
-          std::min(kQueryTileCount - 1, inputs[index].coarse_tile_hi);
+      const int hi = std::min(tile_count - 1, inputs[index].coarse_tile_hi);
       for (int tile = lo; tile <= hi; ++tile) range.set(tile);
       return range;
     };

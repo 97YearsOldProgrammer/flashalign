@@ -482,6 +482,26 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 break;
             case OptionId::TileScore: parse_tile_score(val, opt); break;
             case OptionId::MinSupport:    opt.min_support = parse_int(val, arg); break;
+            case OptionId::VoteSeeds:
+                opt.vote_seeds = parse_int(val, arg);
+                if (*opt.vote_seeds < 0)
+                    throw UsageError("--vote-seeds must be >= 0");
+                break;
+            case OptionId::MaxCands:
+                opt.max_cands = parse_int(val, arg);
+                if (*opt.max_cands < 1 || *opt.max_cands > 64)
+                    throw UsageError("--max-cands must be within [1,64]");
+                break;
+            case OptionId::Tiles:
+                opt.tiles = parse_int(val, arg);
+                if (*opt.tiles < 2 || *opt.tiles > 4096)
+                    throw UsageError("--tiles must be within [2,4096]");
+                break;
+            case OptionId::TileOwner:
+                if (val != "span" && val != "anchors")
+                    throw UsageError("--tile-owner must be span or anchors");
+                opt.tile_owner = val;
+                break;
             case OptionId::MinChainScore:
                 opt.min_chain_score = parse_int(val, arg);
                 if (*opt.min_chain_score < 1)
@@ -694,6 +714,12 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
     }
     if (rna && opt.min_chain_score)
         throw UsageError("-m is valid only with lr or lr:hq");
+    if (rna && opt.max_cands)
+        throw UsageError("--max-cands is valid only with lr or lr:hq");
+    if (rna && opt.tiles)
+        throw UsageError("--tiles is valid only with lr or lr:hq");
+    if (rna && opt.tile_owner)
+        throw UsageError("--tile-owner is valid only with lr or lr:hq");
     if (rna && (opt.tile_supported_reward || opt.tile_block_open_cost ||
                 opt.tile_null_cost || opt.tile_unsupported_cost)) {
         throw UsageError(

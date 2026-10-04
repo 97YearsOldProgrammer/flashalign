@@ -44,6 +44,9 @@ enum class OptionId {
     VoteDiagBinWidth,
     VoteDiagSlopeDen, VoteDiagWidthMax,
     MinSupport,
+    // align: the vote's seeds per strand, its candidates per strand, the
+    // partition's tiles and its first tile-ownership rule
+    VoteSeeds, MaxCands, Tiles, TileOwner,
     // align: DP scoring (minimap2 -A/-B/-O/-E/-z, --score-N, --end-bonus).
     // DpMinScore is minimap2's -s, spelled -S here.
     DpMatch, DpMismatch, DpGapOpen, DpGapExtend, DpZdrop, DpScoreN, DpEndBonus,

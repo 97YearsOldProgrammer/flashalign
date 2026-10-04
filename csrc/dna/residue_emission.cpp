@@ -82,8 +82,8 @@ DnaResidueBlockOutcome dna_residue_chain_block(
   for (const chaining::Anchor& anchor : chain.primary) {
     const int tile = dna_forward_query_tile(
         anchor.q, candidate.peak.is_rc, family.read_length,
-        family.seed_length);
-    if (tile < 0 || tile >= ::fa::cpu::voting::kQueryTileCount)
+        family.seed_length, family.tile_count);
+    if (tile < 0 || tile >= family.tile_count)
       return outcome;
     tiles.set(tile);
     begin = std::min(begin, tile);

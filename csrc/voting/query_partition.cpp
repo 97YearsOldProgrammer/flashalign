@@ -756,12 +756,12 @@ QueryPartitionPath Solver::best_final_path() {
 
 QueryPartitionResult
 solve_query_partition(const QueryPartitionProblem& problem) {
-  if (problem.tile_count < 1 || problem.tile_count > kQueryTileCount)
+  if (problem.tile_count < 1 || problem.tile_count > kMaxQueryTiles)
     throw std::invalid_argument(
-        "query partition tile count must be within [1,128]");
+        "query partition tile count must be within [1,4096]");
   if (problem.catalogue.candidates.empty() ||
       problem.catalogue.candidates.size() >
-          static_cast<std::size_t>(2 * kCatalogueLaneBound))
+          static_cast<std::size_t>(2 * kMaxCatalogueLaneBound))
     throw std::invalid_argument(
         "query partition candidate count is out of range");
   if (problem.parameters.minimum_supported_tiles_per_non_null_block !=

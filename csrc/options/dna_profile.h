@@ -87,12 +87,22 @@ inline constexpr int kDnaHiFiTileRescueOcc = 1024;
 // deliberately not applied: pen_s1 is the bare term (dna/chain_mapq.cpp).
 
 struct DnaLongOptions {
-  // --vote-ratio R: nominate every vote peak with vote >= R * best, with
-  // kCatalogueLaneBound as a cost bound only; 0 admits by count. DNA presets
-  // install kDnaProductionVoteAdmissionRatio.
+  // --vote-ratio R: nominate every vote peak with vote >= R * best, with the
+  // lane bound (dna_chain_max_candidates) as a cost bound only; 0 admits by
+  // count. DNA presets install kDnaProductionVoteAdmissionRatio.
   double vote_admission_ratio = 0.0;
-  // Objective of the 128-tile query partition (--tile-score).
+  // Objective of the query partition (--tile-score), per tile.
   ::fa::cpu::voting::QueryPartitionParameters query_partition;
+  // The query partition's tiles per read (--tiles),
+  // kMinQueryTiles..kMaxQueryTiles. DNA presets only; the splice presets
+  // partition into kQueryTileCount.
+  int query_tiles = ::fa::cpu::voting::kQueryTileCount;
+  // --tile-owner anchors: placement's first tile-ownership rule gives an
+  // accepted owner its anchor tiles alone, not its span (DnaTileOwnership).
+  bool tile_owner_anchors = false;
+  // --max-cands: the lane bound, 1..kMaxCatalogueLaneBound; 0 leaves it to
+  // the admission rule (dna_chain_max_candidates).
+  int max_cands = 0;
   int vote_diag_bin_width = 64;
   // DNA presets widen the vote with read length; --dw turns this off.
   bool vote_diag_bin_width_adaptive = false;
@@ -215,9 +225,12 @@ struct DnaLongOptions {
   int alternative_realize_max = 1;
 };
 
-// The catalogue's candidates per vote window: kCatalogueLaneBound under
-// ratio admission, kCountAdmissionLaneBound under count admission.
+// The lane bound: the vote's peaks and the catalogue's candidates per strand.
+// --max-cands sets it; otherwise kCatalogueLaneBound under ratio admission,
+// kCountAdmissionLaneBound under count admission.
 inline int dna_chain_max_candidates(const DnaLongOptions& mapping) noexcept {
+  if (mapping.max_cands > 0)
+    return mapping.max_cands;
   return std::max(mapping.chain_max_candidates_per_window,
                   mapping.vote_admission_ratio > 0.0
                       ? ::fa::cpu::voting::kCatalogueLaneBound

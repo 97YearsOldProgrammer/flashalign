@@ -14,6 +14,8 @@
 #include <cassert>
 #include <climits>
 #include <cstdint>
+#include <iterator>
+#include <set>
 #include <vector>
 
 namespace fa { namespace cpu { namespace lr {
@@ -146,7 +148,9 @@ inline void extract_chain_closed_syncmer_seeds_into(
         ctx, query_enc, span, std::max(1, ctx.syncmer_downsample), out);
 }
 
-inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
+// One vote seed per tile of max_query_seeds_per_strand equal tiles (every
+// seed when it is 0).
+inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_uniform_into(
     const LongReadSeedContext& ctx,
     const std::vector<QuerySeed>& input,
     int span,
@@ -298,6 +302,118 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
               tile_admitted);
     emit_rescue(tile_admitted);
     out.views_ready = true;
+    return true;
+}
+
+// The vote seeds of one strand. With ctx.nested_vote_seeds and more than
+// kVoteSeedNestBase seeds asked, the kVoteSeedNestBase selection is kept and
+// filled from the full selection, up to its size: next is the seed farthest
+// from every kept position, ties to the lower occurrence, then the lower
+// position. A rescued seed that would take the rescued occurrence past
+// kDnaTileRescueBudget is passed over, so the fill can stop short; when the
+// kept selection is the larger, nothing is added. The exact-refine views are
+// the union of both selections'.
+inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
+    const LongReadSeedContext& ctx,
+    const std::vector<QuerySeed>& input,
+    int span,
+    ChainSeedLookupCache* lookup_cache,
+    DnaLongSeedBundle& out,
+    ChainWindowPeakScratch& scratch,
+    const KmerPostingView* seed_views = nullptr
+) {
+    const bool ready =
+        extract_chain_closed_syncmer_occ_aware_seed_bundle_uniform_into(
+            ctx, input, span, lookup_cache, out, scratch, seed_views);
+    if (!ready || !ctx.nested_vote_seeds ||
+        ctx.max_query_seeds_per_strand <= kVoteSeedNestBase)
+        return ready;
+    LongReadSeedContext base_ctx = ctx;
+    base_ctx.max_query_seeds_per_strand = kVoteSeedNestBase;
+    DnaLongSeedBundle base;
+    extract_chain_closed_syncmer_occ_aware_seed_bundle_uniform_into(
+        base_ctx, input, span, lookup_cache, base, scratch, seed_views);
+
+    const auto by_position = [](const DnaLongSeedView& a,
+                                const DnaLongSeedView& b) {
+        return a.seed.read_pos < b.seed.read_pos;
+    };
+    out.exact_refine_views.insert(out.exact_refine_views.end(),
+                                  base.exact_refine_views.begin(),
+                                  base.exact_refine_views.end());
+    std::sort(out.exact_refine_views.begin(), out.exact_refine_views.end(),
+              by_position);
+    out.exact_refine_views.erase(
+        std::unique(out.exact_refine_views.begin(),
+                    out.exact_refine_views.end(),
+                    [](const DnaLongSeedView& a, const DnaLongSeedView& b) {
+                        return a.seed.read_pos == b.seed.read_pos;
+                    }),
+        out.exact_refine_views.end());
+
+    const std::size_t target = out.selected_views.size();
+    std::vector<DnaLongSeedView> selected = std::move(base.selected_views);
+    std::set<int> kept;
+    uint64_t rescued_occurrence = 0;
+    for (const DnaLongSeedView& v : selected) {
+        kept.insert(v.seed.read_pos);
+        if (v.rescued) rescued_occurrence += v.view.occurrence;
+    }
+    const auto distance_to_kept = [&](int read_pos) {
+        const auto hi = kept.lower_bound(read_pos);
+        int distance = span;
+        if (hi != kept.end()) distance = *hi - read_pos;
+        if (hi != kept.begin())
+            distance = std::min(distance, read_pos - *std::prev(hi));
+        return distance;
+    };
+    // A max-heap; distances only shrink, so a popped seed whose distance has
+    // shrunk since its push goes back with the new one.
+    struct Fill {
+        int distance;
+        uint32_t occurrence;
+        int read_pos;
+        std::size_t index;
+    };
+    const auto after = [](const Fill& a, const Fill& b) {
+        if (a.distance != b.distance) return a.distance < b.distance;
+        if (a.occurrence != b.occurrence) return a.occurrence > b.occurrence;
+        return a.read_pos > b.read_pos;
+    };
+    std::vector<Fill> heap;
+    if (selected.size() < target) {
+        for (std::size_t i = 0; i < out.selected_views.size(); ++i) {
+            const DnaLongSeedView& v = out.selected_views[i];
+            if (kept.count(v.seed.read_pos)) continue;
+            heap.push_back({distance_to_kept(v.seed.read_pos),
+                            v.view.occurrence, v.seed.read_pos, i});
+        }
+        std::make_heap(heap.begin(), heap.end(), after);
+    }
+    while (selected.size() < target && !heap.empty()) {
+        std::pop_heap(heap.begin(), heap.end(), after);
+        Fill next = heap.back();
+        heap.pop_back();
+        const DnaLongSeedView& v = out.selected_views[next.index];
+        if (v.rescued &&
+            rescued_occurrence + v.view.occurrence > kDnaTileRescueBudget)
+            continue;
+        const int distance = distance_to_kept(next.read_pos);
+        if (distance != next.distance) {
+            next.distance = distance;
+            heap.push_back(next);
+            std::push_heap(heap.begin(), heap.end(), after);
+            continue;
+        }
+        selected.push_back(v);
+        kept.insert(v.seed.read_pos);
+        if (v.rescued) rescued_occurrence += v.view.occurrence;
+    }
+    std::sort(selected.begin(), selected.end(), by_position);
+    out.selected_views = std::move(selected);
+    out.seeds.clear();
+    for (const DnaLongSeedView& v : out.selected_views)
+        out.seeds.push_back(v.seed);
     return true;
 }
 

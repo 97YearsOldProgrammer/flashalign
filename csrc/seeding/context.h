@@ -121,6 +121,9 @@ inline bool seed_allowed_by_long_occ_policy(
            view.occurrence <= static_cast<uint32_t>(cap);
 }
 
+// Seeds per strand that a larger DNA vote selection keeps (syncmer.h).
+inline constexpr int kVoteSeedNestBase = 128;
+
 struct LongReadSeedContext {
     int k = 0;
     const SeedIndex* index = nullptr;
@@ -133,6 +136,9 @@ struct LongReadSeedContext {
     // lowest-occ seed per read-position strip (occ <= cap). When disabled (RNA),
     // the window votes every extracted seed (capped only by max_query_seeds).
     int max_query_seeds_per_strand = 0;
+    // DNA: above kVoteSeedNestBase seeds per strand the selection keeps the
+    // kVoteSeedNestBase selection and fills from the larger one (syncmer.h).
+    bool nested_vote_seeds = false;
     bool syncmer_occ_aware_enabled = false;  // DNA: true; RNA: false
     LongOccPolicyConfig occ_policy;
 

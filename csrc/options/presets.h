@@ -105,6 +105,8 @@ inline void set_dna_long_platform_fields(
     // (seeding/context.h), up to long_occ_ceiling.
     mapping.long_occ_cap = 200;
     mapping.query_partition = profile.query_partition;
+    mapping.query_tiles = ::fa::cpu::voting::kQueryTileCount;
+    mapping.tile_owner_anchors = false;
     mapping.vote_admission_ratio = lr::kDnaProductionVoteAdmissionRatio;
     mapping.dna_tandem_window = lr::kDnaTandemWindow;
     // minimap2's min_ksw_len, the piece length of its gap-filling loop.

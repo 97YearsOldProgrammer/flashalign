@@ -59,9 +59,11 @@ struct CandidateCatalogue {
 // inputs whose tile masks overlap this one's by at least half of the smaller mask (an empty
 // mask competes with everything); max_per_lane is then only a cost ceiling. With
 // mask_source, inputs carry a mask_slot and masks are built lazily; without it,
-// input.support is used as given.
+// input.support is used as given. Masks and coarse ranges are on a grid of
+// tile_count tiles.
 CandidateCatalogue build_candidate_catalogue(
     std::vector<CandidateInput> inputs, int max_per_lane,
-    double admission_ratio = 0.0, CandidateMaskSource* mask_source = nullptr);
+    double admission_ratio = 0.0, CandidateMaskSource* mask_source = nullptr,
+    int tile_count = kFixedQueryTiles);
 
 }  // namespace fa::cpu::voting

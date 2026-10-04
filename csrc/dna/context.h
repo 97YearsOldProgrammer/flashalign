@@ -122,9 +122,16 @@ struct ResolvedDnaOptions {
   int chain_syncmer_s = 9;
   int chain_syncmer_downsample = 1;
   // Admit vote peaks by their ratio to the read's best vote; 0 admits by
-  // count. See kCatalogueLaneBound.
+  // count. See catalogue_lane_bound.
   double vote_admission_ratio = 0.0;
   ::fa::cpu::voting::QueryPartitionParameters query_partition;
+  // The query partition's tiles per read, kMinQueryTiles..kMaxQueryTiles.
+  int query_tiles = ::fa::cpu::voting::kQueryTileCount;
+  // Placement's first tile-ownership rule is AnchorTiles, not Span.
+  bool tile_owner_anchors = false;
+  // The catalogue's candidates per strand (options/dna_profile.h
+  // dna_chain_max_candidates).
+  int catalogue_lane_bound = ::fa::cpu::voting::kCatalogueLaneBound;
 };
 
 // Non-owning views, valid for the duration of one stage call.

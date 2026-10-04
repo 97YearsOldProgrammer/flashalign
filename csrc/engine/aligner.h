@@ -372,6 +372,7 @@ private:
     ctx.syncmer_downsample = config.index.syncmer_downsample;
     ctx.max_query_seeds_per_strand =
         config.common.max_query_seeds_per_strand;
+    ctx.nested_vote_seeds = !config.is_rna();
     ctx.syncmer_occ_aware_enabled = true; // DNA: per-strip single-cap selector
     ctx.occ_policy = long_occ_policy_config(mapping);
     ctx.vote_diag_bin_width = mapping.vote_diag_bin_width;
@@ -725,6 +726,10 @@ private:
     dctx.opts.chain_syncmer_downsample = cfg_.index.syncmer_downsample;
     dctx.opts.vote_admission_ratio = mapping.vote_admission_ratio;
     dctx.opts.query_partition = mapping.query_partition;
+    dctx.opts.query_tiles = mapping.query_tiles;
+    dctx.opts.tile_owner_anchors = mapping.tile_owner_anchors;
+    dctx.opts.catalogue_lane_bound =
+        ::fa::cpu::lr::dna_chain_max_candidates(mapping);
     return dctx;
   }
 

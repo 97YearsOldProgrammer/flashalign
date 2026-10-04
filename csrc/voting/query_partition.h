@@ -19,12 +19,15 @@ inline constexpr int kCatalogueLaneBound = 16;
 // Lane bound of count admission (vote_admission_ratio == 0, --vote-ratio 0).
 inline constexpr int kCountAdmissionLaneBound = 4;
 static_assert(kCountAdmissionLaneBound <= kCatalogueLaneBound);
-// Each of the four objective terms may contribute on every one of the 128 tiles, so the
-// terms may use the full int range while the accumulated objective fits int64_t.
+// The largest lane bound (--max-cands); the solver takes up to twice it.
+inline constexpr int kMaxCatalogueLaneBound = 64;
+static_assert(kCatalogueLaneBound <= kMaxCatalogueLaneBound);
+// Each of the four objective terms may contribute on every tile, up to kMaxQueryTiles, so
+// the terms may use the full int range while the accumulated objective fits int64_t.
 inline constexpr int kMaxQueryTileObjectiveTerm =
     std::numeric_limits<int>::max();
 static_assert(static_cast<std::int64_t>(kMaxQueryTileObjectiveTerm) * 4 *
-                  kQueryTileCount <
+                  kMaxQueryTiles <
               std::numeric_limits<std::int64_t>::max());
 
 // Preset-owned integer objective of the query partition. The DNA presets set
@@ -42,6 +45,8 @@ struct QueryPartitionParameters {
   // admitted candidate also opens at this cost. The supporting-tile floor is unchanged.
   int same_candidate_resume_cost = kNoCandidateResumeDiscount;
 };
+static_assert(kMinQueryTiles == QueryPartitionParameters{}
+                                    .minimum_supported_tiles_per_non_null_block);
 
 // What the caller wants besides the winner; the runner-up costs extra and is opt-in.
 enum class QueryPartitionRival : std::uint8_t {

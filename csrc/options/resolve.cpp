@@ -151,6 +151,35 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
     mapping.query_partition.unsupported_ownership_cost =
         *user.query_tile_unsupported_cost;
   }
+  if (user.max_cands) {
+    if (rna_mode)
+      throw std::invalid_argument(
+          "--max-cands is valid only with a DNA preset");
+    if (*user.max_cands < 1 ||
+        *user.max_cands > ::fa::cpu::voting::kMaxCatalogueLaneBound)
+      throw std::invalid_argument(
+          "--max-cands must be within [1," +
+          std::to_string(::fa::cpu::voting::kMaxCatalogueLaneBound) + "]");
+    mapping.max_cands = *user.max_cands;
+  }
+  // --tiles: the splice presets keep their own partition.
+  if (user.query_tiles) {
+    if (rna_mode)
+      throw std::invalid_argument("--tiles is valid only with a DNA preset");
+    if (*user.query_tiles < ::fa::cpu::voting::kMinQueryTiles ||
+        *user.query_tiles > ::fa::cpu::voting::kMaxQueryTiles)
+      throw std::invalid_argument(
+          "--tiles must be within [" +
+          std::to_string(::fa::cpu::voting::kMinQueryTiles) + "," +
+          std::to_string(::fa::cpu::voting::kMaxQueryTiles) + "]");
+    mapping.query_tiles = *user.query_tiles;
+  }
+  if (user.tile_owner_anchors) {
+    if (rna_mode)
+      throw std::invalid_argument(
+          "--tile-owner is valid only with a DNA preset");
+    mapping.tile_owner_anchors = *user.tile_owner_anchors;
+  }
   // 1 <= s <= k; s == k is legal, like minimap2's -w 1.
   if (user.k && *user.k < 1)
     throw std::invalid_argument("-k must be at least 1");

@@ -96,6 +96,29 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::VoteDiagWidthMax, '\0', "--dw-max", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "max diagonal bin width in voting [2048]"},
+        // The Python Config.max_query_seeds. Above 128 a DNA preset keeps the
+        // 128-seed selection and fills it from the larger one
+        // (seeding/syncmer.h).
+        {OptionId::VoteSeeds, '\0', "--vote-seeds", kInt, kStable, A,
+         "INT", SEC_PLACEMENT,
+         "seeds per strand in voting; 0 for all [128]"},
+        // The lane bound, DNA presets only, 1..64: the vote's peaks and the
+        // catalogue's candidates per strand. Unset, 16 under ratio admission
+        // and 4 under count admission (--vote-ratio 0).
+        {OptionId::MaxCands, '\0', "--max-cands", kInt, kStable, A,
+         "INT", SEC_PLACEMENT,
+         "max placement candidates per strand [16]"},
+        // DNA presets only, 2..4096; the splice presets keep 128. The
+        // --tile-score terms are per tile.
+        {OptionId::Tiles, '\0', "--tiles", kInt, kStable, A,
+         "INT", SEC_PLACEMENT,
+         "query tiles in the read's placement partition [128]"},
+        // DNA presets only. span: an accepted chain owns the tiles between
+        // its first and last anchor, except those a same-locus rival keeps;
+        // anchors: only its anchor tiles (dna/placement_chaining.h).
+        {OptionId::TileOwner, '\0', "--tile-owner", kStr, kStable, A,
+         "STR", SEC_PLACEMENT,
+         "tiles a placed chain owns: span or anchors [span]"},
 
         // On a DNA preset -A -B -O -E -z --score-N set the DP row of the gap
         // fills between anchors; the read ends keep the preset's own row,
@@ -236,8 +259,8 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::SpliceRivalMinDiff, '\0', "--rival-min-diff", kInt, kDev,
          A, "", HIDDEN, "", STUDY_CLI_MANUAL},
 
-        // --tile-score hit=INT,block=INT,null=INT,miss=INT: the DNA 128-tile
-        // objective, preset-owned; partial keys merge. hit: reward per
+        // --tile-score hit=INT,block=INT,null=INT,miss=INT: the DNA tile
+        // objective (--tiles), preset-owned; partial keys merge. hit: reward per
         // supported tile in a block (>0); block: cost per block opened; null:
         // cost per tile in no block; miss: penalty per unsupported tile in a
         // block.
