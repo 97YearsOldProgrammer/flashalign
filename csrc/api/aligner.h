@@ -50,8 +50,6 @@ PresetSeeding resolve_preset_seeding(std::string_view preset);
 bool is_hifi_preset(std::string_view preset);
 bool is_rna_preset(std::string_view preset);
 bool is_rna_hifi_preset(std::string_view preset);
-int native_splice_k();
-bool native_splice_k_supported(int k);
 bool preset_is_valid(std::string_view preset);
 std::string accepted_preset_names();
 

@@ -115,8 +115,8 @@ bool options_are_supported(const SpliceControllerOptions& value) noexcept {
       valid_dual_gap && first_gap + second_gap <= 127 &&
       value.junction_bonus >= 0 && value.junction_bonus <= 127 &&
       value.junction_penalty >= 0 && value.junction_penalty <= 127;
-  return value.k == expected.k && value.window == expected.window &&
-      safe_kernel_row && value.transition == expected.transition &&
+  return value.k > 0 && safe_kernel_row &&
+      value.transition == expected.transition &&
       value.zdrop >= 0 && value.inversion_zdrop >= 0 &&
       value.zdrop >= value.inversion_zdrop && value.end_bonus >= -1 &&
       value.maximum_gap > 0 && value.maximum_reference_gap > 0 &&

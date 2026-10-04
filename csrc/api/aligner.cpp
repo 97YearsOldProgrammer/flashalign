@@ -64,12 +64,6 @@ bool is_rna_preset(std::string_view preset) {
 bool is_rna_hifi_preset(std::string_view preset) {
   return ::fa::cpu::options::is_rna_hifi_preset(preset);
 }
-int native_splice_k() {
-  return ::fa::cpu::options::kNativeSpliceK;
-}
-bool native_splice_k_supported(int k) {
-  return ::fa::cpu::options::native_splice_k_supported(k);
-}
 bool preset_is_valid(std::string_view preset) {
   return ::fa::cpu::options::preset_is_valid(preset);
 }

@@ -20,7 +20,8 @@ struct RnaLongOptions {
   int max_chain_predecessors = 64;
   // Rival realization (rna/realization/rival_lifecycle.h). A rival is
   // retained when its chain score is within rival_pri_ratio of the primary's,
-  // or within rival_min_diff of it absolutely (default 30 = 2k).
+  // or within rival_min_diff of it absolutely (default 30, minimap2's 2k at
+  // k = 15; not rescaled with the index's k).
   double rival_pri_ratio = 0.8;
   int rival_min_diff = 30;
   // At most this many rival realizations per read; -N sets it to the loci

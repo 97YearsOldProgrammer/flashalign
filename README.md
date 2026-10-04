@@ -126,12 +126,15 @@ and in scoring.
 
 ```sh
 flashalign align -ax splice ref.fa cdna.fq.gz > aln.sam            # Nanopore cDNA
-flashalign align -ax splice -u f ref.fa drna.fq.gz > aln.sam       # Nanopore direct RNA
+flashalign index -x splice -k 14 ref.fa ref.k14.faix               # Nanopore direct RNA: a k14 index
+flashalign align -ax splice -u f ref.k14.faix drna.fq.gz > aln.sam
 flashalign align -ax splice:hq -u f ref.fa isoseq.fq.gz > aln.sam  # PacBio Iso-Seq
 ```
 
 `-u b`, the default, looks for splice sites on both strands; `-u f` looks on the transcript
-strand only, for reads already on that strand, such as direct RNA and Iso-Seq.
+strand only, for reads already on that strand, such as direct RNA and Iso-Seq. For noisy
+Nanopore direct RNA, an index built with `-k 14` finds more junctions, short first and last
+exons above all.
 
 FlashAlign can take annotated junctions and prefer them during base alignment:
 

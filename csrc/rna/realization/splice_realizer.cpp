@@ -299,7 +299,7 @@ RnaSpliceRealizationResult realize_exact_anchor_path(
       refuse(result, RnaControllerRefusal::InvalidRequest);
       return result;
     }
-    if (request.index_k != 15 || request.options.k != request.index_k) {
+    if (request.options.k != request.index_k) {
       refuse(result, RnaControllerRefusal::UnsupportedProfile);
       return result;
     }

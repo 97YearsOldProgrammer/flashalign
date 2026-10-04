@@ -176,13 +176,6 @@ inline bool is_rna_hifi_preset(std::string_view preset) {
     return preset == "splice:hq";
 }
 
-// The splice realizer supports k = 15 only, so other k are refused up front
-// rather than failing silently after placement.
-inline constexpr int kNativeSpliceK = 15;
-inline bool native_splice_k_supported(int k) {
-    return k == kNativeSpliceK;
-}
-
 inline bool is_dna_long_preset(std::string_view preset) {
     return find_dna_preset_profile(preset) != nullptr;
 }

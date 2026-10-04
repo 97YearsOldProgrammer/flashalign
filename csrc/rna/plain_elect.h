@@ -14,9 +14,9 @@ namespace fa::cpu::lr::rna {
 inline constexpr std::int64_t kRnaPlainElectScale = 1000;
 
 // The credit per junction, in thousandths of an anchor. A junction removes about k - 1
-// anchor positions, (k - 1) * 2 / (k - s + 1) = 14/3 anchors at the closed-syncmer
-// density of both RNA presets (k = 15, s = 10). The credit is 4.7, the measured value,
-// not 14/3.
+// anchor positions, (k - 1) * 2 / (k - s + 1) = 14/3 anchors at the splice presets'
+// default seeding (k = 15, s = 10). The credit is 4.7, the measured value, not 14/3,
+// and is not rescaled for an index of another k or s.
 inline constexpr std::int64_t kRnaPlainElectJunctionCredit = 4700;
 
 // The chain's junctions: consecutive chained anchors whose reference gap exceeds their

@@ -259,17 +259,6 @@ int run_index(const IndexOptions& opt) {
           std::to_string(fa::cpu::kFaixMaxK));
     }
 
-    if (fa::cpu::api::is_rna_preset(opt.preset) &&
-        !fa::cpu::api::native_splice_k_supported(build_k)) {
-        throw UsageError(
-            "the splice presets require k=" +
-            std::to_string(fa::cpu::api::native_splice_k()) +
-            " (got k=" + std::to_string(build_k) +
-            "); build the splice index with -k " +
-            std::to_string(fa::cpu::api::native_splice_k()) +
-            " or choose a DNA preset");
-    }
-
     if (fa::cpu::api::reference_kind(opt.ref_path) ==
         fa::cpu::api::ReferenceKind::Index) {
         throw std::runtime_error(

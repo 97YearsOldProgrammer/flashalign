@@ -129,14 +129,20 @@ See
 .BR "Preset options" .
 .TP
 .BI \-k \ INT
-Syncmer k-mer length [21], no larger than 23. A k-mer that is its own reverse
-complement, possible at an even value only, is never a seed.
+Syncmer k-mer length [21], no larger than 23. Every preset maps an index of any
+such k; Nanopore direct RNA maps on a
+.B \-k14
+splice index. A k-mer that is its own reverse complement,
+possible at an even value only, is never a seed.
 .TP
 .BI \-s \ INT
 Closed-syncmer s-mer size, 1 to
 .I k
 [9]. A closed syncmer is a k-mer whose minimal s-mer sits at one of its two
-ends; the seed density is about 2/(k\-s+1).
+ends; the seed density is about 2/(k\-s+1). A preset's s larger than
+.I k
+is taken as
+.IR k .
 .TP
 .BI \-I \ NUM
 Load at most
@@ -739,7 +745,11 @@ CIGAR operator, and
 .B \-r
 and
 .B \-m
-are refused.
+are refused. For Nanopore direct RNA, index with
+.B \-k14
+.RB ( "flashalign index \-x splice \-k 14 ref.fa" )
+and align with
+.BR "\-x splice \-u f" .
 .TP
 .B splice:hq
 Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq

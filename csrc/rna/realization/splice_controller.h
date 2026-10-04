@@ -32,7 +32,6 @@ enum class SplicePacketRole : std::uint8_t {
 
 struct SpliceControllerOptions {
   int k = 15;
-  int window = 5;
   int match = 1;
   int mismatch = 2;
   int gap_open = 2;

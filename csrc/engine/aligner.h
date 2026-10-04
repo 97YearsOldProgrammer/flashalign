@@ -525,13 +525,6 @@ private:
     if (config.index.k <= 0) {
       throw std::invalid_argument("k must be at least 1");
     }
-    if (config.is_rna() &&
-        !::fa::cpu::options::native_splice_k_supported(config.index.k)) {
-      throw std::invalid_argument(
-          "the splice presets require k=" +
-          std::to_string(::fa::cpu::options::kNativeSpliceK) +
-          " (got k=" + std::to_string(config.index.k) + ")");
-    }
     if (!index_->empty() && config.index.k != index_->k()) {
       throw std::invalid_argument(
           "k=" + std::to_string(config.index.k) +

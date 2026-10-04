@@ -7,8 +7,9 @@ namespace cpu {
 namespace lr {
 namespace rna {
 
-// Defaults follow minimap2: pri_ratio and min_diff are its secondary retention band
-// (min_diff = 2k = 30 at k = 15).
+// Defaults follow minimap2: pri_ratio and min_diff are its secondary retention band.
+// minimap2's min_diff is 2k; 30 is its value at k = 15 and is not rescaled with the
+// index's k.
 
 struct RnaRivalLifecycleConfig {
   // -p / --rival-min-diff: a competitor is admitted when its chain score is within

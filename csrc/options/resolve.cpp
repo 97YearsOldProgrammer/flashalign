@@ -222,14 +222,6 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
           ? *user.syncmer_downsample
           : 1;
 
-  if (rna_mode && !native_splice_k_supported(index.k)) {
-    throw std::invalid_argument(
-        "the splice presets require k=" +
-        std::to_string(kNativeSpliceK) + " (got k=" + std::to_string(index.k) +
-        "); rebuild the splice index with -k " +
-        std::to_string(kNativeSpliceK) + " or choose a DNA preset");
-  }
-
   // The splice kernel has no bandwidth parameter, so -r is refused rather
   // than ignored.
   if (rna_mode && (user.dp_bw || user.dp_bw_long)) {
