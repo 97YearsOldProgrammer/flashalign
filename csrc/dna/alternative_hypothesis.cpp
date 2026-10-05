@@ -97,8 +97,6 @@ DnaAlternativeSelection select_alternative(
     if (std::find(selected.begin(), selected.end(), candidate.id) !=
         selected.end())
       continue;
-    // A recovered candidate has no whole-read vote and may not become primary.
-    if (candidate.residue_admitted) continue;
     if (candidate.peak.chr < 0 || candidate.peak.chr >= contig_count) {
       note(DnaAlternativeRefusal::NoLocus);
       continue;
@@ -202,7 +200,6 @@ DnaBlockRivalSelection select_dna_block_rival(
   };
   const DnaPlacementCandidate* best = nullptr;
   for (const DnaPlacementCandidate& candidate : family.candidates) {
-    if (candidate.residue_admitted) continue;
     bool owns_selected_block = false;
     for (const auto& block : family.partition.selected.blocks) {
       if (block.candidate == candidate.id) {

@@ -708,8 +708,6 @@ private:
     dctx.opts.residue_min_interval_bp = mapping.residue_min_interval_bp;
     dctx.opts.residue_min_anchor_density_per_100bp =
         mapping.residue_min_anchor_density_per_100bp;
-    dctx.opts.residue_recovery_anchor_floor =
-        mapping.residue_recovery_anchor_floor;
     dctx.opts.postdp_rescoring = mapping.postdp_rescoring;
     dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
     dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;

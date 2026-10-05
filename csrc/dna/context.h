@@ -33,9 +33,9 @@ struct ResolvedDnaOptions {
   int cigar_local_interval_anchor_interval_pad = 512;
   int cigar_local_interval_anchor_chain_max_gap = 5000;
   int cigar_local_diag_band = 20000;
-  // Global occurrence cap: the screening pass's pool gate, residue recovery
-  // and terminal-clip recovery. Set to the vote's resolved cap (INT_MAX when
-  // it has none); 200 is the vote's cap on a human index.
+  // Global occurrence cap: the screening pass's pool gate and terminal-clip
+  // recovery. Set to the vote's resolved cap (INT_MAX when it has none); 200
+  // is the vote's cap on a human index.
   int cigar_local_global_occ = 200;
   // Run count at or above which the dense chain uses the diagonal-keyed
   // predecessor search instead of the linear scan. Both are exact; 0 always
@@ -93,8 +93,7 @@ struct ResolvedDnaOptions {
   bool enable_full_read_cigar = true;
   // Optional cs:Z / MD:Z output (minimap2 --cs / --MD); empty by default.
   ::fa::cpu::output::CigarReplayRequest cigar_replay_request;
-  // Preset bounds for residue recovery from cached fine-seed postings.
-  int residue_recovery_anchor_floor = 800;
+  // Preset bounds for terminal-clip recovery from cached fine-seed postings.
   int residue_min_interval_bp = 200;
   int residue_min_anchor_density_per_100bp = 9;
   // Post-DP rescoring (postdp_scoring.h) supplies the MAPQ's dp1 / dp2. HiFi

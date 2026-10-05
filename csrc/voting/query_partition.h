@@ -13,8 +13,8 @@ namespace fa::cpu::voting {
 inline constexpr int kQueryTileCount = 128;
 // Negative disables the same-candidate resume discount (the ordinary objective).
 inline constexpr int kNoCandidateResumeDiscount = -1;
-// Catalogue lane bound for the catalogue builder, the solver and residue admission. Ratio
-// admission (vote_admission_ratio > 0) widens a lane up to this bound as a cost guard.
+// Catalogue lane bound for the catalogue builder and the solver. Ratio admission
+// (vote_admission_ratio > 0) widens a lane up to this bound as a cost guard.
 inline constexpr int kCatalogueLaneBound = 16;
 // Lane bound of count admission (vote_admission_ratio == 0, --vote-ratio 0).
 inline constexpr int kCountAdmissionLaneBound = 4;
@@ -41,8 +41,8 @@ struct QueryPartitionParameters {
   // Negative: every non-null block pays block_open_cost. Otherwise a block that opens for
   // the candidate owning the run just before the ending one pays this instead: in A-B-A,
   // the interruption B would otherwise bill A the full open twice. Null tiles are a run
-  // like any other, so A-null-A is a resumption and A-null-B-null-A is not. A residue-
-  // admitted candidate also opens at this cost. The supporting-tile floor is unchanged.
+  // like any other, so A-null-A is a resumption and A-null-B-null-A is not. The
+  // supporting-tile floor is unchanged.
   int same_candidate_resume_cost = kNoCandidateResumeDiscount;
 };
 static_assert(kMinQueryTiles == QueryPartitionParameters{}

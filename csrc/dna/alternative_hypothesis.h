@@ -40,11 +40,11 @@ struct DnaAlternativeSelection {
 };
 
 // Picks at most one alternative to the owner of a single-block family, from
-// the screening chains. A candidate qualifies when it is neither selected nor
-// residue-admitted, is not a shadow of a selected locus (same contig and strand,
-// vote start within max(2 kb, read length / 10)), overlaps the block by at
-// least half the shorter query span, and scores at least -p (0.8) times the
-// owner or within 2k of it. Best by (score, anchors, overlap, lowest id).
+// the screening chains. A candidate qualifies when it is not selected, is not
+// a shadow of a selected locus (same contig and strand, vote start within
+// max(2 kb, read length / 10)), overlaps the block by at least half the
+// shorter query span, and scores at least -p (0.8) times the owner or within
+// 2k of it. Best by (score, anchors, overlap, lowest id).
 DnaAlternativeSelection select_dna_alternative_hypothesis(
     const DnaContext& context, const DnaPlacementFamily& family,
     const DnaPlacementChainingResult& stable);
@@ -56,14 +56,13 @@ std::vector<::fa::cpu::voting::CandidateId> rank_dna_alternative_hypotheses(
     const DnaPlacementChainingResult& stable, std::size_t limit);
 
 // The best rival of one block of a family, by the same rules applied to
-// whole-query chains: the candidate owns no selected block and is not
-// residue-admitted; its accepted whole-query chain competes with the block's
-// forward query span [block_q_begin, block_q_end) under
-// dna_chain_mapq_spans_compete; its start diagonal is not within the shadow
-// window of `block_diagonal` on the same contig and strand; and it is credible
-// against `owner_chain_score`. Best by (chain score, anchors, overlap, lowest
-// id). `refusal` is None on success, else the furthest stage any candidate
-// reached.
+// whole-query chains: the candidate owns no selected block; its accepted
+// whole-query chain competes with the block's forward query span
+// [block_q_begin, block_q_end) under dna_chain_mapq_spans_compete; its start
+// diagonal is not within the shadow window of `block_diagonal` on the same
+// contig and strand; and it is credible against `owner_chain_score`. Best by
+// (chain score, anchors, overlap, lowest id). `refusal` is None on success,
+// else the furthest stage any candidate reached.
 struct DnaBlockRivalSelection {
   ::fa::cpu::voting::CandidateId candidate =
       ::fa::cpu::voting::kNullCandidate;

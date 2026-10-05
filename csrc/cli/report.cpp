@@ -329,8 +329,6 @@ std::string resolved_config_text(const AlignOptions& opt,
         src(opt.min_chain_score.has_value(), "builtin"));
 
   if (!is_rna) {
-    row("residue_anchor_floor", i2s(mapping.residue_recovery_anchor_floor),
-        "preset");
     row("residue_min_interval", i2s(mapping.residue_min_interval_bp), "preset");
     row("residue_min_density",
         i2s(mapping.residue_min_anchor_density_per_100bp), "preset");

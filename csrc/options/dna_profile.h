@@ -56,8 +56,8 @@ inline constexpr int kDnaPoolGateOcc = 0;
 //   lr:hq  N = min(500, max(200, mm_idx_cal_max_occ(index, 1.81e-4)))
 // where 500 is minimap2's map-hifi max_mid_occ. dna_chain_occ_thresholds()
 // hands N to the pool gate (and through it the terminal clip nomination's
-// ceiling, min(4095, gate)) and to the global cap read by the screening pass,
-// residue recovery and terminal-clip recovery.
+// ceiling, min(4095, gate)) and to the global cap read by the screening pass
+// and terminal-clip recovery.
 // --max-vote-occ INT sets N for the vote and the chain alike, and 0 removes
 // every cap; --max-chain-occ INT replaces N on the pool gate only.
 //
@@ -182,10 +182,8 @@ struct DnaLongOptions {
   int dna_dense_diag_min_runs = kDnaDenseDiagMinRuns;
   // Tandem release half-window (kDnaTandemWindow); 0 on RNA presets.
   int dna_tandem_window = kDnaTandemWindow;
-  // Residue recovery does not run below this many chain anchors.
-  int residue_recovery_anchor_floor = 800;
-  // Minimum query length in base pairs of an owned-but-unsupported run before
-  // bounded cached-evidence recovery may consider it.
+  // Minimum query length in base pairs of a terminal clip that terminal-clip
+  // recovery's regular attempt searches.
   int residue_min_interval_bp = 200;
   // Minimum anchor density of an admitted chain, in anchors per 100 query bp:
   // chain_anchors * 100 >= D * chain_query_span.

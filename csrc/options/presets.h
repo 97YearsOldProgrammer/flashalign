@@ -56,8 +56,6 @@ struct DnaPresetProfile {
   // The dense chain's maximum gap; the splice presets borrow it for the fine
   // harvest chain.
   int chain_max_gap;
-  // Residue recovery does not run below this many chain anchors.
-  int residue_recovery_anchor_floor;
   int residue_min_interval_bp;
   int residue_min_anchor_density_per_100bp;
 };
@@ -69,12 +67,12 @@ inline constexpr std::array<DnaPresetProfile, 2> kDnaPresetProfiles{{
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
-     20000, 800, 200, 9},
+     20000, 200, 9},
     {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048, {4, 12, 0, 1, 2},
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
      10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
-     10000, 1600, 100, 9},
+     10000, 100, 9},
 }};
 
 inline const DnaPresetProfile* find_dna_preset_profile(
@@ -157,8 +155,6 @@ inline void set_dna_long_platform_fields(
     // 20000 under lr (minimap2's bw_long), 10000 under lr:hq (map-hifi's
     // max_gap).
     mapping.cigar_local_interval_anchor_chain_max_gap = profile.chain_max_gap;
-    mapping.residue_recovery_anchor_floor =
-        profile.residue_recovery_anchor_floor;
     mapping.residue_min_interval_bp = profile.residue_min_interval_bp;
     mapping.residue_min_anchor_density_per_100bp =
         profile.residue_min_anchor_density_per_100bp;

@@ -155,15 +155,6 @@ private:
 
   FA_QP_INLINE bool resuming() const noexcept { return resume_cost_ >= 0; }
 
-  // Cost of opening a block for `value` against no resumable predecessor. A residue-
-  // admitted candidate interrupts a block already open, so it pays the resumption cost.
-  FA_QP_INLINE std::int64_t
-  open_cost_for(const QueryCandidate& value) const noexcept {
-    return resuming() && value.residue_admitted
-               ? static_cast<std::int64_t>(resume_cost_)
-               : static_cast<std::int64_t>(p_.parameters.block_open_cost);
-  }
-
   // The predecessor slot a run owned by `candidate_index` leaves behind. With resumption
   // disabled there is one slot and the dimension collapses.
   FA_QP_INLINE int predecessor_of(int candidate_index) const noexcept {
@@ -329,12 +320,10 @@ QueryPartitionPath evaluate(const QueryPartitionProblem& p,
         p.catalogue.candidates[static_cast<std::size_t>(id)];
     if (id != previous) {
       // Same two clauses the DP charges: an A-B-A resumption of this candidate,
-      // otherwise a full open unless this candidate is residue-admitted.
-      const int open = (resume_cost >= 0 && value.residue_admitted)
-                           ? resume_cost
-                           : p.parameters.block_open_cost;
-      path.score -= (resume_cost >= 0 && run_predecessor == id) ? resume_cost
-                                                                : open;
+      // otherwise a full open.
+      path.score -= (resume_cost >= 0 && run_predecessor == id)
+                        ? resume_cost
+                        : p.parameters.block_open_cost;
     }
     if (value.support.test(tile))
       path.score += p.parameters.supported_tile_reward;
@@ -553,7 +542,7 @@ QueryPartitionResult Solver::run() {
           const std::int64_t open_cost =
               resuming() && predecessor == resume_predecessor
                   ? resume_cost_
-                  : open_cost_for(value);
+                  : static_cast<std::int64_t>(p_.parameters.block_open_cost);
           for (int slot = 0; slot < slots_; ++slot) {
             const Cell& cell = current_[cell_index(from_state, slot)];
             if (!cell.present)
@@ -585,8 +574,9 @@ QueryPartitionResult Solver::run() {
             if (ranked.candidate_index == index)
               continue;
             ++taken;
-            open_after(ranked, state_of(index, opened_support, kNoPredecessor),
-                       open_cost_for(value));
+            open_after(
+                ranked, state_of(index, opened_support, kNoPredecessor),
+                static_cast<std::int64_t>(p_.parameters.block_open_cost));
           }
           continue;
         }
@@ -607,7 +597,9 @@ QueryPartitionResult Solver::run() {
             if (ranked.predecessor == resume_predecessor)
               continue;
             ++taken;
-            open_after(ranked, to_state, open_cost_for(value));
+            open_after(
+                ranked, to_state,
+                static_cast<std::int64_t>(p_.parameters.block_open_cost));
           }
           const int resumed_state =
               state_of(closing, kSupportStates - 1, resume_predecessor);

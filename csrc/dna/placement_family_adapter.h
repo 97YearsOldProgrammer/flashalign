@@ -22,9 +22,6 @@ struct DnaPlacementCandidate {
   int vote_evidence = 0;
   // Chain score over the screening-pass anchors.
   int screening_chain_score = 0;
-  // A recovered candidate has no whole-read vote behind it, so it may compete
-  // for supplementary blocks but must never be promoted to primary.
-  bool residue_admitted = false;
 };
 
 struct DnaPlacementFamily {

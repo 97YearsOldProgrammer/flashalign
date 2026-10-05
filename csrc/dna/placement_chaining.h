@@ -84,10 +84,11 @@ struct DnaPlacementCandidateChain {
   std::int64_t dense_runs = 0;
 };
 
-// Residue recovery: query tiles the stable partition owns without support are
-// searched again, from cached postings only. With no candidate or diagonal to
-// start from, anchors carry their contig and are clustered by a coarse
-// (contig, diagonal) histogram before the colinear DP scores them.
+// Terminal-clip recovery: the terminal query intervals the committed records
+// leave uncovered are searched again, from cached postings only. With no
+// candidate or diagonal to start from, anchors carry their contig and are
+// clustered by a coarse (contig, diagonal) histogram before the colinear DP
+// scores them.
 
 // Diagonal histogram bin width, in reference base pairs.
 inline constexpr int kDnaResidueDiagonalWidth = 256;
@@ -112,7 +113,6 @@ inline constexpr int kDnaMapqRivalVoteDenominator = 4;
 inline constexpr int kDnaResidueMaxClustersPerStrand = 2;
 // Hard bounds. Exceeding the posting budget refuses the whole interval.
 inline constexpr int kDnaResidueMaxIntervalPostings = 65536;
-inline constexpr int kDnaResidueMaxIntervalsPerRead = 2;
 inline constexpr int kDnaResidueMaxAdmissionsPerRead = 2;
 
 bool dna_residue_posting_budget_allows(std::int64_t used,

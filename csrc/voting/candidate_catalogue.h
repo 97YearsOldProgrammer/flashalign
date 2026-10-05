@@ -42,11 +42,6 @@ struct QueryCandidate {
   int vote_evidence = 0;
   int chain_evidence = 0;
   QueryTileMask support;
-  // Set for a candidate appended by residue recovery rather than the whole-read vote.
-  // Under a same-candidate resume discount the solver opens its block at that cost instead
-  // of block_open_cost, since it interrupts a block that is already open.
-  // build_candidate_catalogue never sets it.
-  bool residue_admitted = false;
 };
 
 struct CandidateCatalogue {

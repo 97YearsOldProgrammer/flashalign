@@ -105,8 +105,8 @@ chain_mapq_rival_from_placement(const DnaPlacementFamily& catalogue,
 
 // The MAPQ evidence for one block owner of the committed family: the primary,
 // or a supplementary scored on its own candidate's chain. Every owner sees the
-// same rivals: candidates that own no selected block, are not
-// residue-admitted and are not the winner. Only the primary has a dp2 owner.
+// same rivals: candidates that own no selected block and are not the winner.
+// Only the primary has a dp2 owner.
 DnaChainMapqEvidence build_chain_mapq_evidence(
     const DnaContext& dctx, const DnaPlacementFamily& catalogue,
     const DnaPlacementChainingResult& placement, bool placement_ran,
@@ -162,7 +162,7 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
   std::vector<::fa::cpu::voting::CandidateId> ids;
   ids.reserve(catalogue.candidates.size());
   for (const DnaPlacementCandidate& candidate : catalogue.candidates) {
-    if (candidate.id == winner_candidate || candidate.residue_admitted)
+    if (candidate.id == winner_candidate)
       continue;
     bool owns_selected_block = false;
     for (const auto& block : catalogue.partition.selected.blocks) {
@@ -795,7 +795,7 @@ void mark_chain_mapq_record_shadows(
   }
   bool appended = false;
   for (const DnaPlacementCandidate& candidate : catalogue.candidates) {
-    if (candidate.id == winner_candidate || candidate.residue_admitted)
+    if (candidate.id == winner_candidate)
       continue;
     bool owns_selected_block = false;
     for (const auto& block : catalogue.partition.selected.blocks)
