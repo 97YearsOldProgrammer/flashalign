@@ -156,7 +156,10 @@ struct DnaLongOptions {
   int cigar_dp_tail_zdrop = 400; // minimap2 -z
   int cigar_dp_tail_end_bonus = -1;
   // Bandwidths (minimap2 -r) before minimap2's 1.5x inflation, which
-  // dp/params.h bw_eff() and bw_long_eff() apply.
+  // dp/params.h bw_eff() and bw_long_eff() apply. On a DNA preset
+  // cigar_dp_bw_long, uninflated, is also the dense chains' diagonal band.
+  // On a splice preset cigar_dp_bw is only the fine chain's band and
+  // cigar_dp_bw_long only bounds it.
   int cigar_dp_bw = 500;
   int cigar_dp_bw_long = 20000;
   int cigar_dp_max_gap = 5000;
@@ -192,8 +195,11 @@ struct DnaLongOptions {
   int cigar_dp_min_ksw_len = kDnaMinKswLen;
   int cigar_local_interval_anchor_occ_cap = 32;
   int cigar_local_interval_anchor_interval_pad = 512;
+  // The chains' maximum gap (-g); on a splice preset the fine chain's query
+  // gap.
   int cigar_local_interval_anchor_chain_max_gap = 5000;
-  int cigar_local_diag_band = 20000;
+  // The DNA screening chain's diagonal band.
+  int screen_diag_band = 20000;
   bool cigar_local_occ_mode_global = true;
   // Global occurrence cap: seeds whose exact reference occurrence exceeds it
   // are dropped. Only the RNA path reads this field (compose_rna_runtime); the

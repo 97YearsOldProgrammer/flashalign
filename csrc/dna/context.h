@@ -32,7 +32,9 @@ struct ResolvedDnaOptions {
   // Local interval-anchor harvest.
   int cigar_local_interval_anchor_interval_pad = 512;
   int cigar_local_interval_anchor_chain_max_gap = 5000;
-  int cigar_local_diag_band = 20000;
+  // The screening chain's diagonal band; the dense chains take
+  // cigar_dp_bw_long.
+  int screen_diag_band = 20000;
   // Global occurrence cap: the screening pass's pool gate and terminal-clip
   // recovery. Set to the vote's resolved cap (INT_MAX when it has none); 200
   // is the vote's cap on a human index.
@@ -53,6 +55,7 @@ struct ResolvedDnaOptions {
   int k = 21; // seed length
   int cigar_dp_ambi = 1;
   int cigar_dp_bw = 500;
+  // Also the dense chains' diagonal band.
   int cigar_dp_bw_long = 20000;
   int cigar_dp_gap_extend1 = 2;
   int cigar_dp_gap_extend2 = 1;

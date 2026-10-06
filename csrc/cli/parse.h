@@ -97,7 +97,8 @@ struct AlignOptions {
     // Unlike --dw they do not switch it off. DNA presets only.
     std::optional<int> vote_diag_slope_den;
     std::optional<int> vote_diag_width_max;
-    // RNA intron bounds; -G takes a k/m/g suffix.
+    // RNA intron bounds; -G takes a k/m/g suffix and drops a -r typed before
+    // it.
     std::optional<int> min_intron;
     std::optional<int> max_intron;
     // -u {f,b,r,n} (RNA only), stored as forward, auto, reverse or none.
@@ -142,8 +143,12 @@ struct AlignOptions {
     // DP bandwidths. A single -r value leaves the long-join bandwidth unset.
     std::optional<int> dp_bw;          // -r (1st)    -> cigar_dp_bw_
     std::optional<int> dp_bw_long;     // -r (2nd)    -> cigar_dp_bw_long_
-    // -g: the DP's maximum gap, and on a DNA preset the chain's too.
+    // -g: the DP's maximum gap and the chains' gap (on a splice preset the
+    // fine chain's query gap).
     std::optional<int> dp_max_gap;
+    // --screen-band NUM: the DNA screening chain's diagonal band, >= 1. DNA
+    // presets only.
+    std::optional<int> screen_band;
     // Every option the command line gave, filled where the parser dispatches
     // a spelling.
     std::set<OptionId> given_options;

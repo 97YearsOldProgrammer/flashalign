@@ -47,8 +47,6 @@ struct SpliceControllerOptions {
   int end_bonus = -1;
   int maximum_gap = 2000;
   int maximum_reference_gap = 200000;
-  int bandwidth = 200000;
-  int long_bandwidth = 200000;
   int minimum_anchor_count = 3;
   int minimum_match_bases = 40;
   int minimum_dp_maximum = 80;

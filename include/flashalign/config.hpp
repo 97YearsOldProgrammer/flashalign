@@ -58,7 +58,9 @@ struct Config {
   double rna_rival_pri_ratio = -1.0;  ///< splice: secondary-to-primary score ratio [-p], [0,1]
   int rna_max_loci = -1;              ///< splice: candidate loci kept per read [-N], >= 1
   int dp_min_score = -1;        ///< minimum DP alignment score [-S] (minimap2 -s)
-  /// Bandwidths [-r INT[,INT]]. A splice preset rejects them, and config() reports -1 there.
+  /// Bandwidths [-r INT[,INT]]. Under a splice preset the first is the fine chain's band and
+  /// the second only bounds it, and rna_max_intron sets both first, as -G sets -r. config()
+  /// reports -1 where they equal rna_max_intron.
   int dp_bw = -1;
   int dp_bw_long = -1;
   /// cs and MD output [--cs, --MD]. Either one turns on full_read_cigar.

@@ -107,7 +107,9 @@ void append(std::ostringstream& out, const char* name,
     "-1 = dp_zdrop; on a copy of Aligner.config, set it with dp_zdrop.")       \
   X(dp_end_bonus, "Alignment end bonus [--end-bonus]. -2 = preset-owned.")     \
   X(rna_min_intron, "Minimum intron length [--min-intron]; splice only.")      \
-  X(rna_max_intron, "Maximum intron length [-G]; splice only.")                \
+  X(rna_max_intron,                                                            \
+    "Maximum intron length [-G]; splice only. It also sets dp_bw and\n"        \
+    "dp_bw_long, which a value of their own then replaces.")                   \
   X(rna_strand_mode,                                                           \
     "Transcript strand [-u]: -1 unset, 0 auto, 1 forward, 2 reverse, 3 none.") \
   X(tile_score_hit,                                                            \
@@ -130,11 +132,13 @@ void append(std::ostringstream& out, const char* name,
     "realized. -1 = preset-owned.")                                            \
   X(dp_min_score, "Minimum DP alignment score [-S]. -1 = preset-owned.")       \
   X(dp_bw,                                                                     \
-    "Chaining and alignment bandwidth [-r]. -1 = preset-owned; a splice\n"     \
-    "preset rejects it.")                                                      \
+    "The first -r value: the read-end alignment bandwidth on a DNA preset,\n"  \
+    "the fine chain's band on a splice preset. -1 = preset-owned, or on a\n"   \
+    "splice preset rna_max_intron, as -G sets -r.")                            \
   X(dp_bw_long,                                                                \
-    "Long-join bandwidth, the second -r value. -1 = preset-owned; a\n"         \
-    "splice preset rejects it.")                                               \
+    "The second -r value: the gap-fill bandwidth and the dense chain's band\n" \
+    "on a DNA preset, only a bound on dp_bw on a splice preset. -1 =\n"        \
+    "preset-owned, or on a splice preset rna_max_intron, as -G sets -r.")      \
   X(emit_md, "Emit the MD:Z difference string [--MD].")                        \
   X(emit_eqx, "Write =/X CIGAR operators instead of M [--eqx].")
 

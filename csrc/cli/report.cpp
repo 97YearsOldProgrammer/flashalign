@@ -274,8 +274,9 @@ std::string resolved_config_text(const AlignOptions& opt,
         src(opt.tile_owner.has_value(), "preset"));
   row("mapq.output_range", "0..60", "fixed");
 
+  // On a splice preset, the fine chain's query gap.
   row("chain_max_gap", i2s(mapping.cigar_local_interval_anchor_chain_max_gap),
-      src(!is_rna && opt.dp_max_gap.has_value(), "preset"));
+      src(opt.dp_max_gap.has_value(), "preset"));
   row("interval_pad", i2s(mapping.cigar_local_interval_anchor_interval_pad),
       "builtin");
   // The bound the vote catalogue runs with.
@@ -285,7 +286,9 @@ std::string resolved_config_text(const AlignOptions& opt,
   else
     row("chain_max_cands", i2s(fa::cpu::lr::dna_chain_max_candidates(mapping)),
         src(opt.max_cands.has_value(), overlap ? "preset" : "derived"));
-  row("local_diag_band", i2s(mapping.cigar_local_diag_band), "builtin");
+  if (!is_rna)
+    row("screen_band", i2s(mapping.screen_diag_band),
+        src(opt.screen_band.has_value(), "builtin"));
 
   // lr, lr:hq: -A -B -O -E -z --score-N are the gap-fill row; the end row,
   // which prices every path, is the preset's (dp_end_row). The assembly
@@ -315,8 +318,12 @@ std::string resolved_config_text(const AlignOptions& opt,
       dp_src(opt.dp_zdrop));
   row("dp_end_bonus", i2s(mapping.cigar_dp_tail_end_bonus),
       dp_src(opt.dp_end_bonus));
-  row("dp_bw", i2s(mapping.cigar_dp_bw), dp_src(opt.dp_bw));
-  row("dp_bw_long", i2s(mapping.cigar_dp_bw_long), dp_src(opt.dp_bw_long));
+  // On a splice preset dp_bw is the fine chain's band, and -G sets both.
+  const bool intron_typed = is_rna && opt.max_intron.has_value();
+  row("dp_bw", i2s(mapping.cigar_dp_bw),
+      src(opt.dp_bw.has_value() || intron_typed, "preset"));
+  row("dp_bw_long", i2s(mapping.cigar_dp_bw_long),
+      src(opt.dp_bw_long.has_value() || intron_typed, "preset"));
   row("dp_max_gap", i2s(mapping.cigar_dp_max_gap), dp_src(opt.dp_max_gap));
   row("dp_min_score", i2s(mapping.cigar_dp_min_dp_max),
       dp_src(opt.dp_min_score));

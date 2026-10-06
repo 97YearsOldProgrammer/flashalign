@@ -45,17 +45,20 @@ const std::vector<OptionSpec>& specs_table() {
   // clang-format off: preserve the hand-aligned option table.
     static const std::vector<OptionSpec> kSpecs = {
         // align, shown by --help
-        // minimap2's -g. On a DNA preset it also bounds the dense chain's
-        // reach, which never falls below the chain band; on a splice preset
-        // it bounds base alignment only.
+        // minimap2's -g. On a DNA preset it also bounds the chains' reach,
+        // which never falls below a chain's band (-r's NUM2 for the dense
+        // chains, --screen-band for the screening chain); on a splice preset
+        // it also sets the fine chain's query gap, which the band does not
+        // raise.
         {OptionId::DpMaxGap, 'g', "", kSize, kStable, A,
          "NUM", SEC_PLACEMENT,
          "stop alignment elongation if there are no seeds in NUM-bp [5000]"},
-        // minimap2's -r. Base-level alignment only: NUM1 bands the read-end
-        // extensions, NUM2 the gap fills.
+        // minimap2's -r. On a DNA preset NUM1 bands the read-end extensions
+        // and no chain, and NUM2 the gap fills and the dense chains. On a
+        // splice preset NUM1 bands the fine chain and NUM2 only bounds NUM1.
         {OptionId::DpBw, 'r', "", kPair, kStable, A,
          "NUM[,NUM]", SEC_PLACEMENT,
-         "alignment bandwidth and gap-fill bandwidth [500,20000]", "", kBaseAlign},
+         "alignment bandwidth and gap-fill/chaining bandwidth [500,20000]", "", kBaseAlign},
         // minimap2's -m. DNA presets only; the splice presets keep their own
         // chain floors.
         {OptionId::MinChainScore, 'm', "", kInt, kStable, A,
@@ -161,10 +164,11 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::MinIntron, '\0', "--min-intron", kInt, kStable, A,
          "INT", SEC_SPLICE,
          "min intron length [20]"},
-        // Unlike minimap2's -G, this does not also change -r.
+        // As minimap2's -G, it also sets both -r values; between -G and -r
+        // the later typed wins.
         {OptionId::MaxIntron, 'G', "", kSize, kStable, A,
          "NUM", SEC_SPLICE,
-         "max intron length (effective with -xsplice) [200k]"},
+         "max intron length (effective with -xsplice; changing -r) [200k]"},
         {OptionId::SpliceStrand, 'u', "", kStr, kStable, A,
          "CHAR", SEC_SPLICE,
          "how to find GT-AG. f:transcript strand, b:both strands, r:reverse strand, n:don't match GT-AG [b]"},
@@ -272,6 +276,11 @@ const std::vector<OptionSpec>& specs_table() {
         // cost per tile in no block; miss: penalty per unsupported tile in a
         // block.
         {OptionId::TileScore, '\0', "--tile-score", kStr, kDev, A, "",
+         HIDDEN, "", STUDY_FLASH_NATIVE, kPartition},
+        // --screen-band NUM [20000]: the DNA screening chain's diagonal band,
+        // >= 1, a size like -g. The screening pass feeds the partition; the
+        // overlap presets run neither. DNA presets only.
+        {OptionId::ScreenBand, '\0', "--screen-band", kSize, kDev, A, "",
          HIDDEN, "", STUDY_FLASH_NATIVE, kPartition},
         // --dual yes|no, also --dual=yes|no: the overlap presets only. no
         // prints a pair once, from the read whose name sorts first, as

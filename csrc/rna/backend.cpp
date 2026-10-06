@@ -205,6 +205,7 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
   harvest_options.global_occurrence_cap = rctx.opts.cigar_local_global_occ;
   harvest_options.chain_query_gap =
       std::max(1, rctx.opts.cigar_local_interval_anchor_chain_max_gap);
+  harvest_options.chain_band = rctx.opts.fine_chain_band;
   harvest_options.chain_min_count = 2;
   harvest_options.chain_min_score = 20;
   harvest_options.max_intron = max_intron;

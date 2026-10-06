@@ -120,8 +120,6 @@ bool options_are_supported(const SpliceControllerOptions& value) noexcept {
       value.zdrop >= 0 && value.inversion_zdrop >= 0 &&
       value.zdrop >= value.inversion_zdrop && value.end_bonus >= -1 &&
       value.maximum_gap > 0 && value.maximum_reference_gap > 0 &&
-      value.bandwidth == expected.bandwidth &&
-      value.long_bandwidth == expected.long_bandwidth &&
       value.minimum_anchor_count == expected.minimum_anchor_count &&
       value.minimum_match_bases == expected.minimum_match_bases &&
       value.minimum_dp_maximum >= 0 &&

@@ -237,13 +237,6 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
           ? *user.syncmer_downsample
           : 1;
 
-  // The splice kernel has no bandwidth parameter, so -r is refused rather
-  // than ignored.
-  if (rna_mode && (user.dp_bw || user.dp_bw_long)) {
-    throw std::invalid_argument(
-        "-r is not supported under the splice presets");
-  }
-
   if (user.num_threads)
     common.num_threads = *user.num_threads;
   if (user.enable_full_read_cigar) {
@@ -432,23 +425,37 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
   if (user.dp_min_dp_max) {
     mapping.cigar_dp_min_dp_max = std::max(0, *user.dp_min_dp_max);
   }
+  // On a splice preset -G sets both -r values, as minimap2's
+  // mm_mapopt_max_intron_len, and -r then applies on top: the parser drops a
+  // -r typed before -G, and the API's dp_bw acts as typed after it.
+  if (rna_mode && user.rna_max_intron && *user.rna_max_intron > 0) {
+    mapping.cigar_dp_bw = *user.rna_max_intron;
+    mapping.cigar_dp_bw_long = *user.rna_max_intron;
+  }
   if (user.dp_bw)
     mapping.cigar_dp_bw = std::max(1, *user.dp_bw);
   if (user.dp_bw_long)
     mapping.cigar_dp_bw_long = std::max(1, *user.dp_bw_long);
-  // minimap2's mm_check_opt; the splice presets refuse -r.
-  if (!rna_mode && mapping.cigar_dp_bw > mapping.cigar_dp_bw_long)
+  // minimap2's mm_check_opt.
+  if (mapping.cigar_dp_bw > mapping.cigar_dp_bw_long)
     throw std::invalid_argument(
         "with '-rNUM1,NUM2', NUM1 (" + std::to_string(mapping.cigar_dp_bw) +
         ") can't be larger than NUM2 (" +
         std::to_string(mapping.cigar_dp_bw_long) + ")");
-  // -g, minimap2's max_gap. The splice presets keep their fine harvest chain
-  // gap.
+  // -g, minimap2's max_gap, sets the DP's gap and the chains' gap, which on a
+  // splice preset is the fine chain's query gap. Untyped, each keeps its own
+  // preset value.
   if (user.dp_max_gap) {
     mapping.cigar_dp_max_gap = std::max(1, *user.dp_max_gap);
-    if (!rna_mode)
-      mapping.cigar_local_interval_anchor_chain_max_gap =
-          mapping.cigar_dp_max_gap;
+    mapping.cigar_local_interval_anchor_chain_max_gap =
+        mapping.cigar_dp_max_gap;
+  }
+  // --screen-band: the DNA screening chain's band.
+  if (user.screen_band) {
+    if (rna_mode)
+      throw std::invalid_argument(
+          "--screen-band is valid only with a DNA preset");
+    mapping.screen_diag_band = std::max(1, *user.screen_band);
   }
 
   if (rna_mode) {

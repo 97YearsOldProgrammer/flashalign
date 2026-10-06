@@ -138,7 +138,8 @@ fa::cpu::options::ResolvedOptions resolve_config(
   }
   if (source.dp_min_score >= 0)
     request.user.dp_min_dp_max = source.dp_min_score;
-  // Only an explicit bandwidth is passed; the resolver rejects one under a splice preset.
+  // Only an explicit bandwidth is passed. On a splice preset it applies after
+  // rna_max_intron, as a -r typed after -G.
   if (source.dp_bw > 0) request.user.dp_bw = source.dp_bw;
   if (source.dp_bw_long > 0) request.user.dp_bw_long = source.dp_bw_long;
   request.user.cs = internal_cs(source.cs);
@@ -172,7 +173,7 @@ Config to_public_config(const fa::cpu::options::ResolvedOptions& source,
   config.k = source.index.k;
   config.min_support = source.common.min_support;
   config.max_query_seeds = source.common.max_query_seeds_per_strand;
-  // A splice preset rejects --tile-score, so report None there, as dp_bw below.
+  // A splice preset rejects --tile-score, so report None there.
   if (!rna) {
     config.tile_score_hit = mapping.query_partition.supported_tile_reward;
     config.tile_score_block = mapping.query_partition.block_open_cost;
@@ -210,9 +211,13 @@ Config to_public_config(const fa::cpu::options::ResolvedOptions& source,
                             : mapping.fill_dp_inversion_zdrop;
   config.dp_end_bonus = mapping.cigar_dp_tail_end_bonus;
   config.dp_min_score = mapping.cigar_dp_min_dp_max;
-  // A splice preset fixes the bandwidth, so report -1 and keep config() -> reconfigure() valid.
-  config.dp_bw = rna ? -1 : mapping.cigar_dp_bw;
-  config.dp_bw_long = rna ? -1 : mapping.cigar_dp_bw_long;
+  // On a splice preset -G sets both -r values; -1 where they still follow it,
+  // so a copy whose rna_max_intron is edited keeps following it.
+  config.dp_bw =
+      rna && mapping.cigar_dp_bw == rna->max_intron ? -1 : mapping.cigar_dp_bw;
+  config.dp_bw_long = rna && mapping.cigar_dp_bw_long == rna->max_intron
+                          ? -1
+                          : mapping.cigar_dp_bw_long;
   config.cs = public_cs(source.common.cs);
   config.emit_md = source.common.emit_md;
   config.emit_eqx = source.common.emit_eqx;

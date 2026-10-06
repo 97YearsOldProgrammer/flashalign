@@ -65,11 +65,17 @@ struct UserOverrides {
   std::optional<int> dp_inversion_zdrop; // -z's second value
   std::optional<int> dp_tail_end_bonus;
   std::optional<int> dp_min_dp_max; // -S (minimap2 -s)
-  // DP bandwidths (-r INT[,INT]) and maximum gap (-g), which on a DNA preset
-  // is also the dense chain's.
+  // DP bandwidths (-r INT[,INT]) and maximum gap (-g); -g is also the chains'
+  // gap. On a DNA preset the second bandwidth is also the dense chains' band.
+  // On a splice preset the first bandwidth is only the fine chain's band and
+  // the second only bounds it; both apply after rna_max_intron, which sets
+  // both.
   std::optional<int> dp_bw;
   std::optional<int> dp_bw_long;
   std::optional<int> dp_max_gap;
+  // --screen-band: the DNA screening chain's diagonal band, >= 1. DNA presets
+  // only.
+  std::optional<int> screen_band;
   std::optional<int> rna_min_intron;
   std::optional<int> rna_max_intron;
   // RNA transcript strand (-u) as rna::StrandMode: 0 auto, 1 forward,

@@ -137,7 +137,7 @@ Rank1HarvestResult harvest_rank1(
   result.regions = std::move(region_result.regions);
   result.harvest_params = harvest_params;
 
-  result.anchor_path_params.bw = std::max(1, options.max_intron);
+  result.anchor_path_params.bw = std::max(1, options.chain_band);
   result.anchor_path_params.max_dist_x = std::max(
       result.anchor_path_params.bw,
       options.max_intron > 0 ? options.max_intron : options.chain_query_gap);

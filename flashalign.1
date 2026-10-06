@@ -205,9 +205,25 @@ Stop alignment elongation if there are no seeds within
 DNA preset two pieces of a read join into one record only across gaps of at most
 .IR NUM .
 Under a DNA preset it is also the maximum gap of chaining, whose reach is never
-below 20000 or a quarter of the read length (up to 131072), so values under
-20000 leave chaining unchanged. Under a splice preset it bounds base alignment
-only, and
+below the chain's band or a quarter of the read length (up to 131072), so values
+under the band leave that chain unchanged. The band is
+.I NUM2
+of
+.B \-r
+for the dense chains and
+.B \-\-screen\-band
+for the screening chain, both 20000 under
+.B lr
+and
+.BR lr:hq .
+Under a splice preset it bounds base alignment and is also the maximum
+query gap of the fine chain, which is 20000 under
+.B splice
+and 10000 under
+.B splice:hq
+when
+.B \-g
+is not given; there
 .B \-G
 bounds introns.
 .B lr
@@ -218,19 +234,33 @@ uses 5000,
 may be ending with k/K/m/M/g/G.
 .TP
 .B \-r \fINUM1\fR[,\fINUM2\fR]
-Bandwidth for base alignment [500,20000].
+Bandwidth for base alignment and chaining [500,20000].
+Under a DNA preset,
 .I NUM1
-is used for alignment extension toward the read ends and for inverted middles;
-.I NUM2
-for closing gaps between anchors. They act only when base-level alignment runs
+is used for alignment extension toward the read ends and for inverted middles,
+only when base-level alignment runs
 .RB ( \-c ,
-SAM), never on placement or plain PAF output. A single value sets
+SAM).
+.I NUM2
+is used for closing gaps between anchors and as the diagonal band of the dense
+chains, so it also acts on placement and plain PAF output; the screening chain
+keeps its own band
+.RB ( \-\-screen\-band ).
+A single value sets
 .I NUM1
 only. Each value may be ending with k/K/m/M/g/G, and
 .I NUM1
 may not exceed
 .IR NUM2 .
-DNA presets only.
+Under a splice preset
+.I NUM1
+is the diagonal band of the fine chain and
+.I NUM2
+only bounds
+.IR NUM1 ;
+neither bands base alignment there, and
+.B \-G
+sets both [200000,200000].
 .TP
 .BI \-m \ INT
 Discard alignments with chaining score
@@ -445,6 +475,24 @@ per valid tile left unowned, and
 .I miss
 per owned tile without seed support, each at least 0. Any subset of the keys may
 be given, and a repeated key keeps its last value. DNA presets only.
+.TP
+.BI \-\-screen\-band \ NUM
+Diagonal band of placement's bounded screening chain [20000]. It keeps the
+anchors whose diagonal lies within
+.I NUM
+of the candidate's and chains them at a bandwidth of
+.I NUM
+or a quarter of the read length (up to 131072), whichever is larger. The dense
+chains band at
+.I NUM2
+of
+.BR \-r .
+.I NUM
+is at least 1 and may be ending with k/K/m/M/g/G. DNA presets only;
+.B ava\-ont
+and
+.BR ava\-hifi ,
+which run no screening pass, refuse it.
 .SS Alignment options
 Under a DNA preset,
 .BR \-A ", " \-B ", " \-O ", " \-E ", " \-z " and " \-\-score\-N
@@ -549,7 +597,13 @@ Splice presets only.
 .TP
 .BI \-G \ NUM
 Maximum gap on the reference (effective with a splice preset), that is the
-maximum intron length [200k].
+maximum intron length [200k]. It also sets both values of
+.BR \-r ,
+as in minimap2; when both
+.B \-G
+and
+.B \-r
+are given, the later one decides them.
 .I NUM
 may be ending with k/K/m/M/g/G. The long form is
 .BR \-\-max\-intron\-len .
@@ -788,10 +842,8 @@ Long-read spliced alignment
 In the splice mode a long deletion is taken as an intron and represented as the
 .RB ` N '
 CIGAR operator, and
-.B \-r
-and
 .B \-m
-are refused. For Nanopore direct RNA, index with
+is refused. For Nanopore direct RNA, index with
 .B \-k14
 .RB ( "flashalign index \-x splice \-k 14 ref.fa" )
 and align with
@@ -804,7 +856,10 @@ Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq
 .BR \-O6,24 ).
 It differs from
 .B splice
-only in scoring.
+in scoring and also in the vote's diagonal bin (48 against 64), the fine
+chain's query gap (10000 against 20000; see
+.BR \-g )
+and the MAPQ coverage threshold (0.70 against 0.55).
 .TP
 .B asm5
 Experimental. Align an assembly to a reference that it differs from by about

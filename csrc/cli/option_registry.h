@@ -57,6 +57,8 @@ enum class OptionId {
     DpMinScore,
     // align: band geometry (minimap2 -r) and maximum gap (minimap2 -g).
     DpBw, DpMaxGap,
+    // the DNA screening chain's band
+    ScreenBand,
     // DNA tile objective, key=value list
     TileScore,
     // RNA intron bounds, strand and junction annotation

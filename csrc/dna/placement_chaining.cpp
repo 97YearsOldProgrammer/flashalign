@@ -370,8 +370,11 @@ bool chain_candidate(
   const std::uint32_t pool_gate_cap = static_cast<std::uint32_t>(
       std::max(1, whole_query_exact ? pool_gate_occ
                                     : context.opts.cigar_local_global_occ));
+  // The pass's band, for both its harvest and its chain: -r's second value
+  // on the whole-query pass, the screening band on the screening pass.
   const int diagonal_band =
-      std::max(1, context.opts.cigar_local_diag_band);
+      std::max(1, whole_query_exact ? context.opts.cigar_dp_bw_long
+                                    : context.opts.screen_diag_band);
   // The read's own exact diagonal gives no anchor (DnaContext::self_contig).
   const bool skip_own_diagonal =
       !reverse && candidate.peak.chr == context.self_contig;
@@ -493,7 +496,8 @@ bool chain_candidate(
       anchors.end());
 
   const chaining::ColinearChainParams chain_params =
-      dna_candidate_chain_params(context, seed_length, family.read_length);
+      dna_candidate_chain_params(context, diagonal_band, seed_length,
+                                 family.read_length);
   chaining::DenseChainStats dense_stats;
   chaining::DenseChainParams dense_params = dna_dense_chain_params(
       chain_params, seed_length, context.opts.dna_dense_diag_min_runs);
@@ -1574,7 +1578,8 @@ DnaResidueChainOutcome dna_residue_chain_cluster(
                   }),
       anchors.end());
   const chaining::ColinearChainParams chain_params =
-      dna_candidate_chain_params(context, seed_length, read_length);
+      dna_candidate_chain_params(context, context.opts.cigar_dp_bw_long,
+                                 seed_length, read_length);
   // The dense chain, as in the whole-query pass. Clusters are small, so this
   // usually takes the linear scan.
   chaining::DenseChainStats dense_stats;
@@ -1624,9 +1629,9 @@ DnaResidueChainOutcome dna_residue_chain_cluster(
 }
 
 chaining::ColinearChainParams dna_candidate_chain_params(
-    const DnaContext& context, int seed_length, int read_length) {
+    const DnaContext& context, int band, int seed_length, int read_length) {
   chaining::ColinearChainParams params;
-  params.bw = std::max(1, context.opts.cigar_local_diag_band);
+  params.bw = std::max(1, band);
   const int preset_reach = std::max(
       params.bw, context.opts.cigar_local_interval_anchor_chain_max_gap);
   const int read_reach =

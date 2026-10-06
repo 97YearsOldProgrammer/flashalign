@@ -91,8 +91,8 @@ struct DnaPresetProfile {
   int fill_dp_gap_extend2;
   int fill_dp_tail_zdrop;
   int fill_dp_inversion_zdrop;
-  // The dense chain's maximum gap; the splice presets borrow it for the fine
-  // harvest chain.
+  // The dense chain's maximum gap; the splice presets borrow it as the fine
+  // chain's query gap. -g sets it.
   int chain_max_gap;
   int residue_min_interval_bp;
   int residue_min_anchor_density_per_100bp;
@@ -361,6 +361,7 @@ inline void set_splice_fields(
     mapping.base.cigar_dp_tail_zdrop = 200;
     mapping.base.cigar_dp_tail_end_bonus = -1;
     mapping.base.cigar_dp_min_dp_max = 80;
+    // -r: the fine chain's band, and a bound on it; -G sets both.
     mapping.base.cigar_dp_bw = 200000;
     mapping.base.cigar_dp_bw_long = 200000;
     mapping.base.cigar_dp_max_gap = 2000;

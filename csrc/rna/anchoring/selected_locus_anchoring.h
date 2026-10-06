@@ -18,6 +18,8 @@ namespace rna {
 struct Rank1HarvestOptions {
   int global_occurrence_cap = 200;
   int chain_query_gap = 5000;
+  // The chain's diagonal band.
+  int chain_band = 200000;
   int chain_min_count = 2;
   int chain_min_score = 20;
   float chain_gap_penalty = 0.0f;

@@ -494,8 +494,6 @@ private:
       controller.end_bonus = mapping.cigar_dp_tail_end_bonus;
       controller.maximum_gap = mapping.cigar_dp_max_gap;
       controller.maximum_reference_gap = rc.max_intron;
-      controller.bandwidth = mapping.cigar_dp_bw;
-      controller.long_bandwidth = mapping.cigar_dp_bw_long;
       controller.minimum_dp_maximum = mapping.cigar_dp_min_dp_max;
       controller.transition = rna_mapping->splice_transition;
       controller.junction_bonus = rna_mapping->splice_junction_bonus;
@@ -516,6 +514,7 @@ private:
     opts.cigar_local_global_occ = mapping.cigar_local_global_occ;
     opts.cigar_local_interval_anchor_chain_max_gap =
         mapping.cigar_local_interval_anchor_chain_max_gap;
+    opts.fine_chain_band = mapping.cigar_dp_bw;
     opts.query_partition = mapping.query_partition;
     if (rna_mapping) {
       opts.rival_lifecycle.pri_ratio = rna_mapping->rival_pri_ratio;
@@ -712,7 +711,7 @@ private:
         mapping.cigar_local_interval_anchor_interval_pad;
     dctx.opts.cigar_local_interval_anchor_chain_max_gap =
         mapping.cigar_local_interval_anchor_chain_max_gap;
-    dctx.opts.cigar_local_diag_band = mapping.cigar_local_diag_band;
+    dctx.opts.screen_diag_band = mapping.screen_diag_band;
     dctx.opts.dna_dense_diag_min_runs = mapping.dna_dense_diag_min_runs;
     dctx.opts.dna_tandem_window = mapping.dna_tandem_window;
     dctx.opts.dna_pool_gate_occ = chain_occ.pool_gate_occ;

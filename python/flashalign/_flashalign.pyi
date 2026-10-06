@@ -195,7 +195,10 @@ class Config:
 
     @property
     def rna_max_intron(self) -> int:
-        """Maximum intron length [-G]; splice only."""
+        """
+        Maximum intron length [-G]; splice only. It also sets dp_bw and
+        dp_bw_long, which a value of their own then replaces.
+        """
 
     @rna_max_intron.setter
     def rna_max_intron(self, arg: int, /) -> None: ...
@@ -280,8 +283,9 @@ class Config:
     @property
     def dp_bw(self) -> int:
         """
-        Chaining and alignment bandwidth [-r]. -1 = preset-owned; a splice
-        preset rejects it.
+        The first -r value: the read-end alignment bandwidth on a DNA preset,
+        the fine chain's band on a splice preset. -1 = preset-owned, or on a
+        splice preset rna_max_intron, as -G sets -r.
         """
 
     @dp_bw.setter
@@ -290,8 +294,9 @@ class Config:
     @property
     def dp_bw_long(self) -> int:
         """
-        Long-join bandwidth, the second -r value. -1 = preset-owned; a
-        splice preset rejects it.
+        The second -r value: the gap-fill bandwidth and the dense chain's band
+        on a DNA preset, only a bound on dp_bw on a splice preset. -1 =
+        preset-owned, or on a splice preset rna_max_intron, as -G sets -r.
         """
 
     @dp_bw_long.setter

@@ -176,7 +176,7 @@ int64_t parse_size(const std::string& value, const std::string& name) {
     return static_cast<int64_t>(scaled);
 }
 
-// A size that must fit an int (-r, -g, -G).
+// A size that must fit an int (-r, -g, -G, --screen-band).
 int parse_int_size(const std::string& value, const std::string& name) {
     const int64_t size = parse_size(value, name);
     if (size > std::numeric_limits<int>::max()) {
@@ -652,6 +652,13 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 opt.dp_max_gap = gap;
                 break;
             }
+            case OptionId::ScreenBand: {
+                const int band = parse_int_size(val, arg);
+                if (band < 1)
+                    throw UsageError("--screen-band must be at least 1");
+                opt.screen_band = band;
+                break;
+            }
             case OptionId::Secondary:
             case OptionId::Dual:
                 // Handled above.
@@ -688,9 +695,13 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 break;
             }
             case OptionId::MinIntron:  opt.min_intron = parse_int(val, arg); break;
-            // -G is a size ("200k"), as in minimap2.
+            // -G is a size ("200k"), as in minimap2. It also sets both -r
+            // values (options/resolve.cpp), so a -r typed before it is
+            // dropped and only a later one applies.
             case OptionId::MaxIntron:
                 opt.max_intron = parse_int_size(val, arg);
+                opt.dp_bw.reset();
+                opt.dp_bw_long.reset();
                 break;
             case OptionId::RnaJunctionBed:
                 opt.rna_junction_bed = val;
@@ -793,6 +804,8 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         throw UsageError("--tiles is valid only with a DNA preset");
     if (rna && opt.tile_owner)
         throw UsageError("--tile-owner is valid only with a DNA preset");
+    if (rna && opt.screen_band)
+        throw UsageError("--screen-band is valid only with a DNA preset");
     if (rna && (opt.tile_supported_reward || opt.tile_block_open_cost ||
                 opt.tile_null_cost || opt.tile_unsupported_cost)) {
         throw UsageError(

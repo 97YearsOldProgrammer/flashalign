@@ -163,10 +163,10 @@ dna_residue_diagonal_clusters(const std::vector<DnaResidueAnchor>& anchors,
                               std::uint32_t tie_seed, bool reverse);
 
 // Sorts and deduplicates the anchors, runs the dense chain with
-// dna_candidate_chain_params and applies the admission bar to the expanded
-// chain: at least bar.min_chain_anchors anchors, a score of at least
-// kDnaResidueScoreFloorMatches * min(seed_length, 255), and the anchor
-// density per 100 query bases.
+// dna_candidate_chain_params at -r's second value and applies the admission
+// bar to the expanded chain: at least bar.min_chain_anchors anchors, a score
+// of at least kDnaResidueScoreFloorMatches * min(seed_length, 255), and the
+// anchor density per 100 query bases.
 DnaResidueChainOutcome dna_residue_chain_cluster(
     const DnaContext& context, std::vector<chaining::Anchor> anchors,
     int seed_length, int read_length,
@@ -314,10 +314,10 @@ const DnaPlacementCandidateChain* dna_committed_winner_chain(
     ::fa::cpu::voting::CandidateId primary_candidate,
     bool primary_is_alternative) noexcept;
 
-// Chain parameters for the candidate paths.
+// Chain parameters for the candidate paths under diagonal band `band`.
 chaining::ColinearChainParams
-dna_candidate_chain_params(const DnaContext& context, int seed_length,
-                           int read_length);
+dna_candidate_chain_params(const DnaContext& context, int band,
+                           int seed_length, int read_length);
 
 // The same parameters for the dense run chain: the scoring is unchanged, and
 // max_iter and max_skip have no counterpart. The diagonal-keyed search runs

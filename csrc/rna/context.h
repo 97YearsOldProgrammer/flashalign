@@ -32,9 +32,11 @@ struct ResolvedOptions {
   // reader. RNA keeps the struct's defaults.
   ::fa::cpu::voting::QueryPartitionParameters query_partition;
 
-  // Rank-1 harvest and exact-anchor-path chain options.
+  // Rank-1 harvest and exact-anchor-path chain options: the fine chain's query gap, which
+  // -g sets, and its band, -r's first value.
   int cigar_local_global_occ = 200;
   int cigar_local_interval_anchor_chain_max_gap = 5000;
+  int fine_chain_band = 200000;
 
   // Rival realization lifecycle options; the lifecycle is the requested-CIGAR path's
   // only arbitration.
