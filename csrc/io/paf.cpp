@@ -60,8 +60,10 @@ void write_paf_record(
         << tend << '\t'
         << acc.matches << '\t'
         << acc.block_len << '\t'
-        << (emitted_role_is_secondary(role) ? 0 : clamp_sam_mapq(result.mapq))
-        << "\tAS:i:" << result.score;
+        << (emitted_role_is_secondary(role) ? 0 : clamp_sam_mapq(result.mapq));
+    // An all-chains record carries minimap2's overlap tags, which have no AS.
+    if (result.origin != AlignmentOrigin::DnaAllChains)
+        out << "\tAS:i:" << result.score;
     // md and s2 compare a record with its alternatives, so secondaries do not
     // carry them, as in minimap2 and minibwa.
     const AlignmentAuxiliaryTags auxiliary = alignment_auxiliary_tags(result);

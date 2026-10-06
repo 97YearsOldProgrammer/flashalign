@@ -1453,6 +1453,65 @@ DnaMapOnlyCommit commit_map_only_hypothesis(
   return out;
 }
 
+// The all-chains lane (options/dna_profile.h all_chains). Every chain of
+// `chains`, parallel to family.candidates, that reaches min_chain_score is
+// projected whole as one record, best score first. A record on the contig and
+// strand of a kept one, overlapping its reference span, is the same placement
+// and is dropped. The best record is the read's head and the others its
+// supplementary records, all MAPQ 0 and tp:A:S, as minimap2's -P prints them.
+// A read left with none is unmapped.
+void emit_all_chains(const DnaContext& dctx, const DnaPlacementFamily& family,
+                     const std::vector<DnaPlacementCandidateChain>& chains,
+                     dna::Result& out) {
+  std::vector<std::size_t> order;
+  for (std::size_t index = 0; index < chains.size(); ++index)
+    if (chains[index].status == DnaPlacementChainStatus::Accepted &&
+        chains[index].chain_score >= dctx.opts.min_chain_score)
+      order.push_back(index);
+  // Catalogue order breaks a tie on score.
+  std::stable_sort(order.begin(), order.end(),
+                   [&chains](std::size_t left, std::size_t right) {
+                     return chains[left].chain_score >
+                            chains[right].chain_score;
+                   });
+  // The whole read as one block, so the projection trims nothing.
+  ::fa::cpu::voting::QueryBlock whole;
+  whole.query_tile_begin = 0;
+  whole.query_tile_end = family.tile_count;
+  whole.supporting_tiles = family.tile_count;
+  std::vector<AlignResult> records;
+  std::vector<std::size_t> kept;
+  for (const std::size_t index : order) {
+    const DnaPlacementCandidate& candidate = family.candidates[index];
+    whole.candidate = candidate.id;
+    AlignResult record;
+    if (!dna_project_chained_block(dctx, family, chains[index], whole, record))
+      continue;
+    bool duplicate = false;
+    for (std::size_t slot = 0; slot < kept.size() && !duplicate; ++slot) {
+      const VotePeak& other = family.candidates[kept[slot]].peak;
+      duplicate = other.chr == candidate.peak.chr &&
+                  other.is_rc == candidate.peak.is_rc &&
+                  records[slot].pos < record.target_end &&
+                  record.pos < records[slot].target_end;
+    }
+    if (duplicate)
+      continue;
+    record.origin = AlignmentOrigin::DnaAllChains;
+    record.chain_anchors = chains[index].chain_anchors;
+    record.chain_score = chains[index].chain_score;
+    records.push_back(std::move(record));
+    kept.push_back(index);
+  }
+  if (records.empty())
+    return;
+  static_cast<AlignResult&>(out) = std::move(records.front());
+  for (std::size_t slot = 1; slot < records.size(); ++slot) {
+    out.supplementary.push_back(std::move(records[slot]));
+    out.supplementary_candidates.push_back(family.candidates[kept[slot]].id);
+  }
+}
+
 } // namespace
 
 AlignResult map_read(const DnaContext& base_dctx,
@@ -1475,6 +1534,8 @@ AlignResult map_read(const DnaContext& base_dctx,
   // The read's tie seed, from the name hash and the read length as minimap2;
   // every tie-break of the read uses it.
   dctx.vote_tie_seed = tie_read_seed(dctx.read_name_hash, read_len);
+  if (dctx.opts.all_chains)
+    dctx.self_contig = seed_ctx.self_contig;
   dna::Result out{};
   auto finish = [](dna::Result result) {
     return static_cast<AlignResult&&>(std::move(result));
@@ -1639,6 +1700,22 @@ AlignResult map_read(const DnaContext& base_dctx,
   if (best) {
     placement_family =
         build_dna_placement_family(dctx, fwd_enc, raw, scratch.fwd, scratch.rc);
+    // The all-chains lane: the catalogue's chains are the records, and nothing
+    // below runs.
+    if (dctx.opts.all_chains) {
+      if (placement_family.valid)
+        emit_all_chains(
+            dctx, placement_family,
+            build_dna_all_candidate_chains(
+                dctx, placement_family, fwd_enc, reverse_query_stream(),
+                &scratch.fwd.retained_seeds, &scratch.rc.retained_seeds,
+                shared_fwd_syncmer_seeds, shared_rc_syncmer_seeds,
+                lookup_cache,
+                query_seed_pool.captured_slots(DnaQuerySeedStrand::Forward),
+                query_seed_pool.captured_slots(DnaQuerySeedStrand::Reverse)),
+            out);
+      return finish(std::move(out));
+    }
     if (placement_family.valid) {
       const std::vector<uint8_t>& reverse_query = reverse_query_stream();
       placement_chaining = chain_placement_family(

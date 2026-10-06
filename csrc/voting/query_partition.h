@@ -22,6 +22,11 @@ static_assert(kCountAdmissionLaneBound <= kCatalogueLaneBound);
 // The largest lane bound (--max-cands); the solver takes up to twice it.
 inline constexpr int kMaxCatalogueLaneBound = 64;
 static_assert(kCatalogueLaneBound <= kMaxCatalogueLaneBound);
+// The largest lane bound of a catalogue no solver partitions (the all-chains
+// lane): each candidate of both strands needs a CandidateId.
+inline constexpr int kAllChainsLaneBound = 16383;
+static_assert(2 * kAllChainsLaneBound <=
+              std::numeric_limits<CandidateId>::max());
 // Each of the four objective terms may contribute on every tile, up to kMaxQueryTiles, so
 // the terms may use the full int range while the accumulated objective fits int64_t.
 inline constexpr int kMaxQueryTileObjectiveTerm =

@@ -5,7 +5,8 @@ namespace fa::cpu::cli {
 namespace {
 
 // Row fields, as in OptionSpec:
-//   { id, short, long, kind, tier, modes, metavar, section, help, study }
+//   { id, short, long, kind, tier, modes, metavar, section, help, study,
+//     stage }
 constexpr ValueKind kNone = ValueKind::None;
 constexpr ValueKind kInt = ValueKind::Int;
 constexpr ValueKind kPair = ValueKind::IntPair;
@@ -17,6 +18,12 @@ constexpr HelpTier kDev = HelpTier::Dev;
 
 constexpr unsigned A = ModeAlign;
 constexpr unsigned I = ModeIndex;
+
+constexpr LaneStage kBaseOutput = LaneStage::BaseLevelOutput;
+constexpr LaneStage kBaseAlign = LaneStage::BaseAlignment;
+constexpr LaneStage kSamOutput = LaneStage::SamOutput;
+constexpr LaneStage kSelection = LaneStage::Selection;
+constexpr LaneStage kPartition = LaneStage::Partition;
 
 // Section headers of the align screen, in screen order. The index screen is
 // one list under "Options:".
@@ -48,7 +55,7 @@ const std::vector<OptionSpec>& specs_table() {
         // extensions, NUM2 the gap fills.
         {OptionId::DpBw, 'r', "", kPair, kStable, A,
          "NUM[,NUM]", SEC_PLACEMENT,
-         "alignment bandwidth and gap-fill bandwidth [500,20000]"},
+         "alignment bandwidth and gap-fill bandwidth [500,20000]", "", kBaseAlign},
         // minimap2's -m. DNA presets only; the splice presets keep their own
         // chain floors.
         {OptionId::MinChainScore, 'm', "", kInt, kStable, A,
@@ -56,13 +63,13 @@ const std::vector<OptionSpec>& specs_table() {
          "minimal chaining score (matching bases minus log gap penalty) [40]"},
         {OptionId::PriRatio, 'p', "", kStr, kStable, A,
          "FLOAT", SEC_PLACEMENT,
-         "min secondary-to-primary score ratio [0.8]"},
+         "min secondary-to-primary score ratio [0.8]", "", kSelection},
         // As in minimap2: -N 5 keeps the best locus and at most five rivals,
         // and -N 0 is --secondary no. Both realize up to INT rivals; the
         // DNA presets default to 1.
         {OptionId::SpliceMaxLoci, 'N', "", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "retain at most INT secondary alignments [1]"},
+         "retain at most INT secondary alignments [1]", "", kSelection},
         {OptionId::MinSupport, '\0', "--min-support", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "minimal number of seeds on a vote peak [3]"},
@@ -112,43 +119,43 @@ const std::vector<OptionSpec>& specs_table() {
         // --tile-score terms are per tile.
         {OptionId::Tiles, '\0', "--tiles", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "query tiles in the read's placement partition [128]"},
+         "query tiles in the read's placement partition [128]", "", kPartition},
         // DNA presets only. span: an accepted chain owns the tiles between
         // its first and last anchor, except those a same-locus rival keeps;
         // anchors: only its anchor tiles (dna/placement_chaining.h).
         {OptionId::TileOwner, '\0', "--tile-owner", kStr, kStable, A,
          "STR", SEC_PLACEMENT,
-         "tiles a placed chain owns: span or anchors [span]"},
+         "tiles a placed chain owns: span or anchors [span]", "", kPartition},
 
         // On lr and lr:hq -A -B -O -E -z --score-N set the DP row of the gap
         // fills between anchors; the read ends keep the preset's own row,
         // which also prices every path. On a splice or assembly preset they
         // set its one row. Defaults are lr's.
         {OptionId::DpMatch, 'A', "", kInt, kStable, A,
-         "INT", SEC_ALIGN, "matching score [4]"},
+         "INT", SEC_ALIGN, "matching score [4]", "", kBaseAlign},
         {OptionId::DpMismatch, 'B', "", kInt, kStable, A,
          "INT", SEC_ALIGN,
-         "mismatch penalty (larger value for lower divergence) [8]"},
+         "mismatch penalty (larger value for lower divergence) [8]", "", kBaseAlign},
         {OptionId::DpGapOpen, 'O', "", kPair, kStable, A,
-         "INT[,INT]", SEC_ALIGN, "gap open penalty [8,48]"},
+         "INT[,INT]", SEC_ALIGN, "gap open penalty [8,48]", "", kBaseAlign},
         {OptionId::DpGapExtend, 'E', "", kPair, kStable, A,
          "INT[,INT]", SEC_ALIGN,
-         "gap extension penalty; a k-long gap costs min{O1+k*E1,O2+k*E2} [4,1]"},
+         "gap extension penalty; a k-long gap costs min{O1+k*E1,O2+k*E2} [4,1]", "", kBaseAlign},
         {OptionId::DpZdrop, 'z', "", kPair, kStable, A,
          "INT[,INT]", SEC_ALIGN,
-         "Z-drop score and inversion Z-drop score [800,200]"},
+         "Z-drop score and inversion Z-drop score [800,200]", "", kBaseAlign},
         // minimap2's -s. RNA admits a second family only when its DP maximum
         // reaches it; a primary below it keeps its placement. DNA uses it as
         // the per-record emission floor when a CIGAR is realized, as
         // minimap2's mm_filter_regs; map-only ignores it.
         {OptionId::DpMinScore, 'S', "", kInt, kStable, A,
          "INT", SEC_ALIGN,
-         "minimal peak DP alignment score [80]"},
+         "minimal peak DP alignment score [80]", "", kBaseAlign},
         {OptionId::DpScoreN, '\0', "--score-N", kInt, kStable, A,
-         "INT", SEC_ALIGN, "penalty of a mismatch involving ambiguous bases [2]"},
+         "INT", SEC_ALIGN, "penalty of a mismatch involving ambiguous bases [2]", "", kBaseAlign},
         {OptionId::DpEndBonus, '\0', "--end-bonus", kInt, kStable, A,
          "INT", SEC_ALIGN,
-         "score bonus when alignment extends to the end of the query sequence [-1]"},
+         "score bonus when alignment extends to the end of the query sequence [-1]", "", kBaseAlign},
 
         // RNA presets only.
         {OptionId::MinIntron, '\0', "--min-intron", kInt, kStable, A,
@@ -171,30 +178,32 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::Output,   'o', "--output", kStr, kStable, A,
          "FILE", SEC_IO, "output alignments to FILE [stdout]"},
         {OptionId::OutputSam, 'a', "", kNone, kStable, A,
-         "", SEC_IO, "output in the SAM format (PAF by default)"},
+         "", SEC_IO, "output in the SAM format (PAF by default)", "",
+         kBaseOutput},
         {OptionId::PafCigar, 'c', "", kNone, kStable, A,
-         "", SEC_IO, "output CIGAR in PAF"},
+         "", SEC_IO, "output CIGAR in PAF", "", kBaseOutput},
         // As in minimap2 the value can only be attached (--cs=long); a bare
         // --cs means short.
         {OptionId::Cs, '\0', "--cs", kNone, kStable, A,
          "[=STR]", SEC_IO,
-         "output the cs tag; STR is 'short' (if absent) or 'long' [none]"},
+         "output the cs tag; STR is 'short' (if absent) or 'long' [none]", "",
+         kBaseOutput},
         {OptionId::Md, '\0', "--MD", kNone, kStable, A,
          "", SEC_IO,
-         "output the MD tag"},
+         "output the MD tag", "", kBaseOutput},
         // Applies to every realized CIGAR (SAM, SA:Z, cg:Z); plain PAF
         // has none.
         {OptionId::Eqx, '\0', "--eqx", kNone, kStable, A,
          "", SEC_IO,
-         "write =/X CIGAR operators"},
+         "write =/X CIGAR operators", "", kBaseAlign},
         {OptionId::SoftClipSupp, 'Y', "--soft-clip-supp", kNone, kStable, A,
-         "", SEC_IO, "use soft clipping for supplementary alignments"},
+         "", SEC_IO, "use soft clipping for supplementary alignments", "", kSamOutput},
         {OptionId::ReadGroup, 'R', "--rg", kStr, kStable, A,
          "STR", SEC_IO,
-         "SAM read group line in a format like '@RG\\tID:foo\\tSM:bar' []"},
+         "SAM read group line in a format like '@RG\\tID:foo\\tSM:bar' []", "", kSamOutput},
         {OptionId::SamHitOnly, '\0', "--sam-hit-only", kNone, kStable, A,
          "", SEC_IO,
-         "in SAM, don't output unmapped reads"},
+         "in SAM, don't output unmapped reads", "", kSamOutput},
         {OptionId::PafNoHit, '\0', "--paf-no-hit", kNone, kStable, A,
          "", SEC_IO,
          "in PAF, output unmapped queries; the strand and the reference name fields are set to '*'"},
@@ -204,10 +213,10 @@ const std::vector<OptionSpec>& specs_table() {
         // output-only DNA secondaries (-N >= 2) aside.
         {OptionId::Secondary, '\0', "--secondary", kStr, kStable, A,
          "=yes|no", SEC_IO,
-         "whether to output secondary alignments [no]"},
+         "whether to output secondary alignments [no]", "", kSelection},
         {OptionId::NoHeader, '\0', "--no-header", kNone, kStable, A,
          "", SEC_IO,
-         "don't output the SAM header"},
+         "don't output the SAM header", "", kSamOutput},
         // PAF and SAM copy the comment verbatim, as minimap2 does.
         {OptionId::CopyComment, 'y', "", kNone, kStable, A,
          "", SEC_IO,
@@ -234,7 +243,7 @@ const std::vector<OptionSpec>& specs_table() {
 
         {OptionId::Preset, 'x', "--preset", kStr, kStable, A,
          "STR", SEC_PRESET,
-         "preset: lr, lr:hq, splice, splice:hq; experimental: asm5, asm10, asm20 (see 'flashalign index') [lr]"},
+         "preset: lr, lr:hq, splice, splice:hq; experimental: asm5, asm10, asm20, ava-ont, ava-hifi (see 'flashalign index') [lr]"},
 
         // align, not on the help screen; the manual page lists these.
         // --batch-window INT [3]: batches in flight in the compute stage.
@@ -263,7 +272,12 @@ const std::vector<OptionSpec>& specs_table() {
         // cost per tile in no block; miss: penalty per unsupported tile in a
         // block.
         {OptionId::TileScore, '\0', "--tile-score", kStr, kDev, A, "",
-         HIDDEN, "", STUDY_FLASH_NATIVE},
+         HIDDEN, "", STUDY_FLASH_NATIVE, kPartition},
+        // --dual yes|no, also --dual=yes|no: the overlap presets only. no
+        // prints a pair once, from the read whose name sorts first, as
+        // minimap2's --dual=no.
+        {OptionId::Dual, '\0', "--dual", kStr, kDev, A, "", HIDDEN, "",
+         STUDY_CLI_MANUAL, LaneStage::OverlapPairs},
 
         // index, shown by --help
         {OptionId::Preset, 'x', "--preset", kStr, kStable, I,
@@ -276,7 +290,9 @@ const std::vector<OptionSpec>& specs_table() {
          "  splice:hq  spliced alignment for accurate long RNA reads                    [-k15 -s10]\n"
          "  asm5       experimental: assembly vs reference, ~0.1% divergence            [-k21 -s9]\n"
          "  asm10      experimental: assembly vs reference, ~1% divergence              [-k21 -s9]\n"
-         "  asm20      experimental: assembly vs reference, several % divergence        [-k21 -s9]"},
+         "  asm20      experimental: assembly vs reference, several % divergence        [-k21 -s9]\n"
+         "  ava-ont    experimental: all-vs-all overlap of noisy long reads (Nanopore)  [-k17 -s9]\n"
+         "  ava-hifi   experimental: all-vs-all overlap of accurate long reads (HiFi)   [-k21 -s5]"},
         {OptionId::K, 'k', "", kInt, kStable, I,
          "INT", SEC_IOPT, "k-mer size (no larger than 23) [21]"},
         {OptionId::SyncmerS, 's', "", kInt, kStable, I,

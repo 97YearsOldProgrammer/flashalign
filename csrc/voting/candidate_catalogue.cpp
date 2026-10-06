@@ -14,11 +14,14 @@ namespace fa::cpu::voting {
 
 CandidateCatalogue build_candidate_catalogue(
     std::vector<CandidateInput> inputs, int max_per_lane,
-    double admission_ratio, CandidateMaskSource* mask_source, int tile_count) {
-  if (max_per_lane < 1 || max_per_lane > kMaxCatalogueLaneBound) {
+    double admission_ratio, CandidateMaskSource* mask_source, int tile_count,
+    bool unpartitioned) {
+  const int lane_bound_ceiling =
+      unpartitioned ? kAllChainsLaneBound : kMaxCatalogueLaneBound;
+  if (max_per_lane < 1 || max_per_lane > lane_bound_ceiling) {
     throw std::invalid_argument(
         "candidate catalogue per-lane bound must be within [1," +
-        std::to_string(kMaxCatalogueLaneBound) + "]");
+        std::to_string(lane_bound_ceiling) + "]");
   }
   if (admission_ratio < 0.0 || admission_ratio > 1.0)
     throw std::invalid_argument(

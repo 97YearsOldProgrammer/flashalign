@@ -100,8 +100,29 @@ struct DnaLongOptions {
   // --tile-owner anchors: placement's first tile-ownership rule gives an
   // accepted owner its anchor tiles alone, not its span (DnaTileOwnership).
   bool tile_owner_anchors = false;
-  // --max-cands: the lane bound, 1..kMaxCatalogueLaneBound; 0 leaves it to
-  // the admission rule (dna_chain_max_candidates).
+  // A read that is itself in the index, found by its exact name, is left out
+  // of its own vote: a seed's occurrence does not count the key's postings on
+  // the read's own contig (seeding/context.h vote_seed_occurrence), and the
+  // read's own exact diagonal casts no vote, as minimap2's -D. In the
+  // all-chains lane the chain takes no anchor on that diagonal either
+  // (dna/context.h DnaContext::self_contig); everything else after the vote
+  // still reads the read's own postings.
+  bool skip_self = false;
+  // The all-chains lane, minimap2's -P for map-only PAF: every catalogue
+  // candidate gets its whole-query chain, and each chain at -m or above is
+  // printed once, MAPQ 0 and tp:A:S (dna/backend.cpp emit_all_chains). No
+  // tile mask, partition, -p, -N, recovery or MAPQ runs, so its lane bound
+  // (max_cands) may reach kAllChainsLaneBound. Map-only.
+  bool all_chains = false;
+  // In the all-chains lane, whether a pair prints from both of its reads.
+  // When false (--dual=no) a candidate whose contig name sorts before the
+  // read's name is not chained, so a pair prints once, from the read whose
+  // name sorts first, as minimap2's --dual=no (dna/context.h
+  // DnaContext::dual_rank).
+  bool dual = true;
+  // --max-cands: the lane bound, 1..kMaxCatalogueLaneBound, or
+  // 1..kAllChainsLaneBound in the all-chains lane; 0 leaves it to the
+  // admission rule (dna_chain_max_candidates).
   int max_cands = 0;
   int vote_diag_bin_width = 64;
   // DNA presets widen the vote with read length; --dw turns this off.

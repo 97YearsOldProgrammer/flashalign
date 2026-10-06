@@ -1,7 +1,10 @@
 #pragma once
 
+#include "cli/option_registry.h"
+
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -70,7 +73,8 @@ struct AlignOptions {
     // --vote-seeds INT: the vote's seeds per strand, >= 0; 0 is every seed.
     std::optional<int> vote_seeds;
     // --max-cands INT: the vote's peaks and the catalogue's candidates per
-    // strand, 1..64. DNA presets only.
+    // strand, 1..64, or 1..16383 in the all-chains lane
+    // (check_max_cands_range). DNA presets only.
     std::optional<int> max_cands;
     // --tiles INT: the query partition's tiles per read, 2..4096. DNA
     // presets only.
@@ -80,6 +84,10 @@ struct AlignOptions {
     std::optional<std::string> tile_owner;
     // -m: minimap2's minimal chain score, >= 1. DNA presets only.
     std::optional<int> min_chain_score;
+    // --dual yes|no: whether an overlap preset prints a pair from both of its
+    // reads or, with no, only from the read whose name sorts first. Unset, the
+    // preset's value. Overlap presets only.
+    std::optional<bool> dual;
     std::optional<int> tile_supported_reward;
     std::optional<int> tile_block_open_cost;
     std::optional<int> tile_null_cost;
@@ -136,6 +144,9 @@ struct AlignOptions {
     std::optional<int> dp_bw_long;     // -r (2nd)    -> cigar_dp_bw_long_
     // -g: the DP's maximum gap, and on a DNA preset the chain's too.
     std::optional<int> dp_max_gap;
+    // Every option the command line gave, filled where the parser dispatches
+    // a spelling.
+    std::set<OptionId> given_options;
 };
 
 struct IndexOptions {
@@ -152,6 +163,15 @@ struct IndexOptions {
 };
 
 AlignOptions parse_align_args(int argc, char** argv, int start);
+// Throws UsageError unless --max-cands is within the lane bound's range for
+// opt.preset: 1..kMaxCatalogueLaneBound, or 1..kAllChainsLaneBound where
+// an overlap preset selects the all-chains lane.
+void check_max_cands_range(const AlignOptions& opt);
+// The refusal of an option in `given` whose stage (OptionSpec::stage) the lane
+// of `preset` does not run, or none. Every option of that stage is named, in
+// registry order.
+std::optional<std::string> option_stage_refusal(
+    const std::set<OptionId>& given, const std::string& preset);
 IndexOptions parse_index_args(int argc, char** argv, int start);
 
 }  // namespace fa::cpu::cli

@@ -58,10 +58,18 @@ inline int64_t vote_pack_key(int chr, int bin) {
          | static_cast<int64_t>(static_cast<uint32_t>(bin));
 }
 
-// Occurrence admission for one seed, under the context's occurrence policy.
+// Occurrence admission for one DNA vote seed, under the context's occurrence policy, on
+// the occurrence the vote counts (vote_seed_occurrence).
+inline bool vote_seed_occ_allowed(const LongReadSeedContext& ctx,
+                                  const KmerPostingView& view) {
+    if (ctx.self_contig < 0) return chain_window_seed_occ_allowed(ctx, view);
+    return occurrence_allowed_by_long_occ_policy(
+        vote_seed_occurrence(ctx, view), ctx.occ_policy);
+}
+
 inline bool vote_seed_occ_allowed(const VoteWindowState& st,
                                   const KmerPostingView& view) {
-    return chain_window_seed_occ_allowed(st.ctx, view);
+    return vote_seed_occ_allowed(st.ctx, view);
 }
 
 }}}  // namespace fa::cpu::lr

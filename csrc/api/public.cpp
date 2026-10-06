@@ -39,12 +39,25 @@ CsMode public_cs(fa::cpu::options::CsMode mode) {
   return CsMode::None;
 }
 
+// The overlap presets leave each read out of its own mapping, found in the
+// index by the read's name, and map() and map_batch() take no name.
+void refuse_overlap_preset(const std::string& preset) {
+  if (fa::cpu::options::is_overlap_preset(preset)) {
+    throw std::invalid_argument(
+        "flashalign: preset '" + preset +
+        "' is refused here: it maps reads against an index of the same reads "
+        "and finds each read's own contig by the read's name, which this API "
+        "does not pass; run 'flashalign align -x " + preset + "' instead");
+  }
+}
+
 fa::cpu::options::ResolvedOptions resolve_config(
     const Config& source, int index_k = -1, int index_s = -1) {
   if (!fa::cpu::options::preset_is_valid(source.preset)) {
     throw std::invalid_argument(
         "flashalign: unknown preset: " + source.preset);
   }
+  refuse_overlap_preset(source.preset);
   fa::cpu::options::ResolveRequest request;
   request.preset = source.preset;
   if (index_k > 0 && index_s > 0) {
@@ -230,6 +243,7 @@ std::pair<int, int> preset_seeding(const std::string& preset) {
     throw std::invalid_argument(
         "flashalign: unknown preset: " + preset);
   }
+  refuse_overlap_preset(preset);
   const fa::cpu::options::PresetSeeding seeding =
       fa::cpu::options::resolve_preset_seeding(preset);
   return {seeding.k, seeding.syncmer_s};

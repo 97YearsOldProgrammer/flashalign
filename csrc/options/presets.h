@@ -4,6 +4,7 @@
 
 #include "common_profile.h"
 #include "dna_profile.h"
+#include "lane_stage.h"
 #include "rna_profile.h"
 
 #include <array>
@@ -29,6 +30,29 @@ inline constexpr DnaPlacementDefaults kReadPlacement{
     128, ::fa::cpu::voting::kQueryTileCount, false};
 // Above 128 vote seeds the nested sampler applies (seeding/syncmer.h).
 inline constexpr DnaPlacementDefaults kAssemblyPlacement{4096, 2048, true};
+inline constexpr DnaPlacementDefaults kOntOverlapPlacement{
+    256, ::fa::cpu::voting::kQueryTileCount, false};
+
+// An all-vs-all overlap row turns on both of its mechanisms (dna_profile.h
+// skip_self, all_chains) and replaces --max-cands and --vote-ratio, and -m
+// where min_chain_score is positive. Off on every other row.
+struct DnaOverlapDefaults {
+  bool on;
+  int max_cands;
+  double vote_ratio;
+  int min_chain_score;
+  // --dual's default (dna_profile.h dual).
+  bool dual;
+};
+
+inline constexpr DnaOverlapDefaults kNoOverlap{false, 0, 0.0, 0, true};
+// The all-chains lane's widest bound and count admission, and minimap2's
+// --dual=no.
+inline constexpr DnaOverlapDefaults kHiFiOverlap{
+    true, ::fa::cpu::voting::kAllChainsLaneBound, 0.0, 0, false};
+// The same with minimap2's ava -m100.
+inline constexpr DnaOverlapDefaults kOntOverlap{
+    true, ::fa::cpu::voting::kAllChainsLaneBound, 0.0, 100, false};
 
 struct DnaPresetProfile {
   std::string_view name;
@@ -73,21 +97,22 @@ struct DnaPresetProfile {
   int residue_min_interval_bp;
   int residue_min_anchor_density_per_100bp;
   DnaPlacementDefaults placement;
+  DnaOverlapDefaults overlap;
 };
 
-inline constexpr std::array<DnaPresetProfile, 5> kDnaPresetProfiles{{
+inline constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
     // End row as minimap2: lr is map-ont (-A2 -B4 -O4,24 -E2,1), lr:hq is
     // map-hifi (-A1 -B4 -O6,26 -E2,1). The fill rows are gentler on gaps.
     {"lr", DnaPresetKind::Ont, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
-     20000, 200, 9, kReadPlacement},
+     20000, 200, 9, kReadPlacement, kNoOverlap},
     {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048, {4, 12, 0, 1, 2},
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
      10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
-     10000, 100, 9, kReadPlacement},
+     10000, 100, 9, kReadPlacement, kNoOverlap},
     // minimap2's asm5, asm10 and asm20 scoring with its -r1k,100k -g10k -s200
     // -z200, one row for the fills and the read ends; lr's seeding, vote
     // width, chain gap and terminal-clip bounds.
@@ -95,17 +120,30 @@ inline constexpr std::array<DnaPresetProfile, 5> kDnaPresetProfiles{{
      1, 19, 1, 39, 3, 81, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 19, 1, 39, 3, 81, 1, 200, 200,
-     20000, 200, 9, kAssemblyPlacement},
+     20000, 200, 9, kAssemblyPlacement, kNoOverlap},
     {"asm10", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
      1, 9, 1, 16, 2, 41, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 9, 1, 16, 2, 41, 1, 200, 200,
-     20000, 200, 9, kAssemblyPlacement},
+     20000, 200, 9, kAssemblyPlacement, kNoOverlap},
     {"asm20", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
      1, 4, 1, 6, 2, 26, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 4, 1, 6, 2, 26, 1, 200, 200,
-     20000, 200, 9, kAssemblyPlacement},
+     20000, 200, 9, kAssemblyPlacement, kNoOverlap},
+    // Experimental all-vs-all read overlap, map-only: lr's row at k17 with
+    // the vote width L/64, and lr:hq's row, as overlap rows. They follow the
+    // row of their kind, which dna_preset_profile returns.
+    {"ava-ont", DnaPresetKind::Ont, 17, 9, 64, 64, 2048, {4, 12, 0, 1, 2},
+     2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
+     5000, 80,
+     4, 8, 2, 8, 4, 48, 1, 800, 200,
+     20000, 200, 9, kOntOverlapPlacement, kOntOverlap},
+    {"ava-hifi", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048, {4, 12, 0, 1, 2},
+     1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
+     10000, 200,
+     3, 12, 3, 18, 6, 78, 1, 1200, 600,
+     10000, 100, 9, kReadPlacement, kHiFiOverlap},
 }};
 
 inline const DnaPresetProfile* find_dna_preset_profile(
@@ -139,6 +177,15 @@ inline void set_dna_long_platform_fields(
     mapping.query_tiles = profile.placement.query_tiles;
     mapping.tile_owner_anchors = profile.placement.tile_owner_anchors;
     mapping.vote_admission_ratio = lr::kDnaProductionVoteAdmissionRatio;
+    if (profile.overlap.on) {
+      mapping.skip_self = true;
+      mapping.all_chains = true;
+      mapping.max_cands = profile.overlap.max_cands;
+      mapping.vote_admission_ratio = profile.overlap.vote_ratio;
+      if (profile.overlap.min_chain_score > 0)
+        mapping.min_chain_score = profile.overlap.min_chain_score;
+      mapping.dual = profile.overlap.dual;
+    }
     mapping.dna_tandem_window = lr::kDnaTandemWindow;
     // minimap2's min_ksw_len, the piece length of its gap-filling loop.
     mapping.cigar_dp_min_ksw_len = lr::kDnaMinKswLen;
@@ -204,6 +251,32 @@ inline bool is_assembly_preset(std::string_view preset) {
     return profile && profile->kind == DnaPresetKind::Asm;
 }
 
+// ava-ont and ava-hifi: experimental, map-only.
+inline bool is_overlap_preset(std::string_view preset) {
+    const auto* profile = find_dna_preset_profile(preset);
+    return profile && profile->overlap.on;
+}
+
+// Whether the lane `preset` selects runs `stage`. The all-chains lane of an
+// overlap row prints map-only PAF and every chain, solves no partition, and
+// alone chooses which reads of a pair print it.
+inline bool lane_runs_stage(LaneStage stage, std::string_view preset) {
+    const bool overlap = is_overlap_preset(preset);
+    switch (stage) {
+        case LaneStage::None:
+            return true;
+        case LaneStage::BaseLevelOutput:
+        case LaneStage::BaseAlignment:
+        case LaneStage::SamOutput:
+        case LaneStage::Selection:
+        case LaneStage::Partition:
+            return !overlap;
+        case LaneStage::OverlapPairs:
+            return overlap;
+    }
+    return true;
+}
+
 inline bool is_rna_preset(std::string_view preset) {
     return preset == "splice" || preset == "splice:hq";
 }
@@ -236,12 +309,15 @@ inline std::string accepted_preset_names() {
     if (!names.empty()) names += ", ";
     names += name;
   };
+  const auto experimental = [](const DnaPresetProfile& profile) {
+    return profile.kind == DnaPresetKind::Asm || profile.overlap.on;
+  };
   for (const auto& profile : kDnaPresetProfiles)
-    if (profile.kind != DnaPresetKind::Asm) append(profile.name);
+    if (!experimental(profile)) append(profile.name);
   append("splice");
   append("splice:hq");
   for (const auto& profile : kDnaPresetProfiles)
-    if (profile.kind == DnaPresetKind::Asm) append(profile.name);
+    if (experimental(profile)) append(profile.name);
   return names;
 }
 

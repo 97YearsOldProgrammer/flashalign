@@ -66,9 +66,10 @@ ReferenceMetadata load_fasta_reference_metadata_sorted(const std::string& path) 
     out.index_by_name.reserve(records.size());
     out.offsets.push_back(0);
     for (size_t i = 0; i < records.size(); ++i) {
-        if (i > 0 && records[i - 1].first == records[i].first) {
+        // The previous name has already been moved into out.names.
+        if (i > 0 && out.names.back() == records[i].first) {
             throw std::runtime_error(
-                "duplicate reference sequence name: " + records[i].first);
+                "duplicate sequence name in " + path + ": " + records[i].first);
         }
         out.offsets.push_back(out.offsets.back() + records[i].second);
         out.names.push_back(std::move(records[i].first));
@@ -108,6 +109,12 @@ EncodedReferenceLoad load_fasta_genome_encoded_sorted(const std::string& path) {
 
     std::sort(records.begin(), records.end(),
         [](const auto& a, const auto& b) { return a.first < b.first; });
+    for (size_t i = 1; i < records.size(); ++i) {
+        if (records[i - 1].first == records[i].first) {
+            throw std::runtime_error(
+                "duplicate sequence name in " + path + ": " + records[i].first);
+        }
+    }
 
     EncodedReferenceLoad out;
     out.names.reserve(records.size());

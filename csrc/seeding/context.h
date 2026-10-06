@@ -121,6 +121,16 @@ inline bool seed_allowed_by_long_occ_policy(
            view.occurrence <= static_cast<uint32_t>(cap);
 }
 
+// The same test for a found seed, on a given occurrence.
+inline bool occurrence_allowed_by_long_occ_policy(
+    uint32_t occurrence,
+    const LongOccPolicyConfig& cfg
+) {
+    const int cap = effective_long_primary_occ_cap(cfg);
+    if (cap <= 0) return true;
+    return occurrence > 0 && occurrence <= static_cast<uint32_t>(cap);
+}
+
 // Seeds per strand that a larger DNA vote selection keeps (syncmer.h).
 inline constexpr int kVoteSeedNestBase = 128;
 
@@ -153,19 +163,36 @@ struct LongReadSeedContext {
     int vote_diag_width_max = 2048;
     int min_support = 3;
     int chain_max_candidates_per_window = 0;
-    // DNA ratio admission only: drain the vote heap in batches, so the exact refine walk
-    // is paid per chunk of buckets rather than per bucket. Same output as the sequential
-    // drain.
+    // DNA ratio admission, and the all-chains lane under either admission rule: drain the
+    // vote heap in batches, so the exact refine walk is paid per chunk of buckets rather
+    // than per bucket. Same output as the sequential drain.
     bool vote_batched_refine = false;
     // DNA: a vote tile that admits no seed votes with its rarest found seed at or under
     // this occurrence (options/dna_profile.h kDnaTileRescueOcc); 0 = none, as on RNA.
     int tile_rescue_occ = 0;
+    // DNA, options/dna_profile.h skip_self: the contig that is the query read itself,
+    // found by its exact name; -1 when the read is not in the index or the option is off.
+    int self_contig = -1;
     const std::vector<std::string>* chr_names = nullptr;
 
     bool syncmer_occ_aware_active() const {
         return syncmer_occ_aware_enabled;
     }
 };
+
+// The occurrence the DNA vote counts for a seed: the index's, less the key's postings on
+// the query read's own contig (ctx.self_contig), so 0 for a key that occurs only in the
+// read itself.
+inline uint32_t vote_seed_occurrence(const LongReadSeedContext& ctx,
+                                     const KmerPostingView& view) {
+    if (ctx.self_contig < 0 || !view.found()) return view.occurrence;
+    const uint32_t self = static_cast<uint32_t>(ctx.self_contig);
+    const uint32_t lo =
+        view.positions.lower_bound_packed(pack_ref_pos(self, 0));
+    const uint32_t hi =
+        view.positions.lower_bound_packed(pack_ref_pos(self + 1, 0));
+    return view.occurrence - (hi - lo);
+}
 
 inline int effective_vote_diag_bin_width(
     const LongReadSeedContext& ctx, int read_span) {

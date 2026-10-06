@@ -171,6 +171,7 @@ void append_interval_anchors(
     int diagonal_band,
     int tandem_window,
     bool reverse_lane,
+    bool skip_own_diagonal,
     int query_length,
     std::vector<chaining::Anchor>& anchors,
     DnaPlacementCandidateChain& record) {
@@ -191,6 +192,10 @@ void append_interval_anchors(
     }
     const int reference_position = static_cast<int>(local64);
     const int query_position = seed.seed.read_pos;
+    if (skip_own_diagonal && reference_position == query_position) {
+      ++record.filtered_hits;
+      continue;
+    }
     const bool geometry_ok =
         query_position >= 0 &&
         query_position + seed_length <= query_length &&
@@ -367,6 +372,9 @@ bool chain_candidate(
                                     : context.opts.cigar_local_global_occ));
   const int diagonal_band =
       std::max(1, context.opts.cigar_local_diag_band);
+  // The read's own exact diagonal gives no anchor (DnaContext::self_contig).
+  const bool skip_own_diagonal =
+      !reverse && candidate.peak.chr == context.self_contig;
   // A seed whose key is over the gate is not sliced: nothing reads the
   // postings the gate drops. A key a rescued seed shares, which the gate
   // admits, is sliced.
@@ -435,8 +443,8 @@ bool chain_candidate(
         internal::append_interval_anchors(
             interval, seed, chromosome_base, chromosome_length,
             static_cast<int>(expected), seed_length, diagonal_band,
-            context.opts.dna_tandem_window, reverse, family.read_length,
-            sparse, record);
+            context.opts.dna_tandem_window, reverse, skip_own_diagonal,
+            family.read_length, sparse, record);
       }
     }
   }
@@ -459,8 +467,8 @@ bool chain_candidate(
       internal::append_interval_anchors(
           item.interval, item.seed, chromosome_base, chromosome_length,
           static_cast<int>(expected), seed_length, diagonal_band,
-          context.opts.dna_tandem_window, reverse, family.read_length,
-          anchors, record);
+          context.opts.dna_tandem_window, reverse, skip_own_diagonal,
+          family.read_length, anchors, record);
       record.rescued_anchors += anchors.size() - before;
     }
   }
@@ -1840,6 +1848,43 @@ DnaPlacementChainingResult build_dna_placement_chains(
       initial_assignment != family.partition.selected.assignment;
   result.family = std::move(family);
   return result;
+}
+
+std::vector<DnaPlacementCandidateChain> build_dna_all_candidate_chains(
+    const DnaContext& context, const DnaPlacementFamily& family,
+    const std::vector<std::uint8_t>& forward_query,
+    const std::vector<std::uint8_t>& reverse_query,
+    const std::vector<ChainWindowRetainedSeed>* forward_seeds,
+    const std::vector<ChainWindowRetainedSeed>* reverse_seeds,
+    const std::vector<QuerySeed>* fine_forward_seeds,
+    const std::vector<QuerySeed>* fine_reverse_seeds,
+    ChainSeedLookupCache* lookup_cache,
+    const std::vector<std::uint32_t>* fine_forward_slots,
+    const std::vector<std::uint32_t>* fine_reverse_slots) {
+  std::vector<DnaPlacementCandidateChain> chains;
+  if (!family.valid || context.ref.index == nullptr ||
+      fine_forward_seeds == nullptr || fine_reverse_seeds == nullptr ||
+      lookup_cache == nullptr)
+    return chains;
+  RetainedSeedDensity seed_index;
+  if (!seed_index.build(
+          *context.ref.index, forward_seeds, reverse_seeds, fine_forward_seeds,
+          fine_reverse_seeds, lookup_cache, fine_forward_slots,
+          fine_reverse_slots))
+    return chains;
+  chains.resize(family.candidates.size());
+  for (std::size_t index = 0; index < family.candidates.size(); ++index) {
+    const DnaPlacementCandidate& candidate = family.candidates[index];
+    chains[index].candidate = candidate.id;
+    // --dual=no: the pair prints from the read whose name sorts first.
+    if (candidate.peak.chr < context.dual_rank)
+      continue;
+    chain_candidate(context, family, candidate,
+                    candidate.peak.is_rc ? reverse_query : forward_query,
+                    seed_index, chains[index],
+                    CandidateChainPass::WholeQueryExact);
+  }
+  return chains;
 }
 
 DnaPlacementChainingResult build_dna_alternative_placement(

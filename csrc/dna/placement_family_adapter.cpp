@@ -290,7 +290,8 @@ DnaPlacementFamily build_dna_placement_family(
 
   // Ratio admission (the default): masks are computed lazily and the
   // admission gets each peak's coarse tile range, which contains its mask.
-  // With --vote-ratio 0 the count rule applies and masks are computed eagerly.
+  // With --vote-ratio 0 the count rule applies and masks are computed eagerly,
+  // except in the all-chains lane, which reads none.
   // Ratio admission compares masks on a grid of at most
   // kMaxAdmissionQueryTiles tiles; the partition keeps the family's.
   const bool ratio_admission = context.opts.vote_admission_ratio > 0.0;
@@ -328,7 +329,7 @@ DnaPlacementFamily build_dna_placement_family(
         input.coarse_tile_lo = std::min(tile_a, tile_b);
         input.coarse_tile_hi = std::max(tile_a, tile_b);
       }
-    } else {
+    } else if (!context.opts.all_chains) {
       input.support = factual_forward_support(
           context, forward_query, peak,
           peak.is_rc ? reverse_scratch : forward_scratch,
@@ -359,7 +360,8 @@ DnaPlacementFamily build_dna_placement_family(
   problem.catalogue = ::fa::cpu::voting::build_candidate_catalogue(
       std::move(inputs), context.opts.catalogue_lane_bound,
       ratio_admission ? context.opts.vote_admission_ratio : 0.0,
-      ratio_admission ? &mask_source : nullptr, admission_tiles);
+      ratio_admission ? &mask_source : nullptr, admission_tiles,
+      context.opts.all_chains);
   // Admitted on the coarser grid, a candidate's support is rebuilt on the
   // family's.
   if (ratio_admission && admission_tiles != family.tile_count) {
@@ -391,11 +393,13 @@ DnaPlacementFamily build_dna_placement_family(
       ++family.forward_candidates;
   }
   // Placement solves the partition after its screening pass; nothing reads
-  // it before then.
-  if (family.candidates.empty())
-    family.partition = ::fa::cpu::voting::solve_query_partition(problem);
-  else
-    family.partition_deferred = true;
+  // it before then. The all-chains lane has no partition.
+  if (!context.opts.all_chains) {
+    if (family.candidates.empty())
+      family.partition = ::fa::cpu::voting::solve_query_partition(problem);
+    else
+      family.partition_deferred = true;
+  }
   family.valid = !family.candidates.empty();
   return family;
 }

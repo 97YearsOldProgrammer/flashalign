@@ -1,5 +1,6 @@
 #include "cli/align_command.h"
 
+#include "cli/errors.h"
 #include "cli/parse.h"
 #include "cli/output_writer.h"
 #include "cli/report.h"
@@ -198,6 +199,8 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.tile_owner_anchors = *opt.tile_owner == "anchors";
   if (opt.min_chain_score)
     u.min_chain_score = *opt.min_chain_score;
+  if (opt.dual)
+    u.dual = *opt.dual;
   // --max-vote-occ: 0 turns occurrence filtering off, >0 fixes the cap.
   if (opt.max_vote_occ) {
     if (*opt.max_vote_occ <= 0) {
@@ -379,6 +382,10 @@ int run_align(const AlignOptions& cli_options) {
     opt.preset = in.index_preset;
     opt.preset_source = "index";
   }
+  // parse.cpp's checks that read the preset, for the preset an index records.
+  check_max_cands_range(opt);
+  if (const auto refusal = option_stage_refusal(opt.given_options, opt.preset))
+    throw UsageError(*refusal);
   // RNA mapping needs the reference bases even without a CIGAR. Checked
   // after the preset is settled and before --show-config, so a dry run
   // refuses what a real run would.
@@ -428,10 +435,13 @@ int run_align(const AlignOptions& cli_options) {
   if (!embedded_ref) {
     genome = fa::cpu::io::load_fasta_genome(in.ref_path);
   }
-  // align_batch maps a batch's sequences, given their read-name hashes.
+  // align_batch maps a batch's sequences, given their read-name hashes and,
+  // where the preset leaves a read out of its own vote, their own contigs, and
+  // where it prints a pair once, their names' ranks among the contigs.
   std::unique_ptr<fa::cpu::api::LongReadAligner> dna_aligner;
   std::function<std::vector<fa::cpu::AlignResult>(
-      const std::vector<std::string>&, const std::vector<std::uint32_t>&)>
+      const std::vector<std::string>&, const std::vector<std::uint32_t>&,
+      const std::vector<int>&, const std::vector<int>&)>
       align_batch;
 
   // Fills the output's reference table when no FASTA was loaded.
@@ -520,8 +530,12 @@ int run_align(const AlignOptions& cli_options) {
     backend_mode = resolved->mode();
     auto* p = dna_aligner.get();
     align_batch = [p](const std::vector<std::string>& seqs,
-                      const std::vector<std::uint32_t>& name_hashes) {
-      return p->align_batch(seqs, &name_hashes);
+                      const std::vector<std::uint32_t>& name_hashes,
+                      const std::vector<int>& self_contigs,
+                      const std::vector<int>& name_ranks) {
+      return p->align_batch(
+          seqs, &name_hashes, self_contigs.empty() ? nullptr : &self_contigs,
+          name_ranks.empty() ? nullptr : &name_ranks);
     };
   };
   attach_part(0);
@@ -599,6 +613,34 @@ int run_align(const AlignOptions& cli_options) {
           hashes.push_back(fa::cpu::lr::tie_name_hash(record.name));
         return hashes;
       };
+  // Where the preset leaves a read out of its own vote: each read's own contig
+  // in the index part being mapped, by exact name, -1 when the read is not in
+  // it. Empty otherwise.
+  const bool skip_self = resolved->resolved().long_read().skip_self;
+  const auto read_self_contigs =
+      [&](const std::vector<fa::cpu::io::FastxRecord>& records) {
+        std::vector<int> contigs;
+        if (!skip_self)
+          return contigs;
+        contigs.reserve(records.size());
+        for (const fa::cpu::io::FastxRecord& record : records)
+          contigs.push_back(dna_aligner->contig_id(record.name));
+        return contigs;
+      };
+  // Where the preset prints a pair once (--dual=no): each read name's rank
+  // among the contigs of the index part being mapped. Empty otherwise.
+  const bool skip_dual = resolved->resolved().long_read().all_chains &&
+                         !resolved->resolved().long_read().dual;
+  const auto read_name_ranks =
+      [&](const std::vector<fa::cpu::io::FastxRecord>& records) {
+        std::vector<int> ranks;
+        if (!skip_dual)
+          return ranks;
+        ranks.reserve(records.size());
+        for (const fa::cpu::io::FastxRecord& record : records)
+          ranks.push_back(dna_aligner->contig_name_rank(record.name));
+        return ranks;
+      };
 
   // Window of 1: one barrier per batch.
   auto process_barrier = [&](ReadBatch in) -> std::optional<AlignedBatch> {
@@ -607,7 +649,9 @@ int run_align(const AlignOptions& cli_options) {
     for (auto& rec : in.records)
       seqs.push_back(std::move(rec.seq));
     AlignedBatch done;
-    done.results = align_batch(seqs, read_name_hashes(in.records));
+    done.results = align_batch(seqs, read_name_hashes(in.records),
+                               read_self_contigs(in.records),
+                               read_name_ranks(in.records));
     for (size_t i = 0; i < seqs.size(); ++i)
       in.records[i].seq = std::move(seqs[i]);
     done.records = std::move(in.records);
@@ -637,8 +681,11 @@ int run_align(const AlignOptions& cli_options) {
     for (auto& rec : in.records)
       seqs.push_back(std::move(rec.seq));
     std::vector<std::uint32_t> name_hashes = read_name_hashes(in.records);
+    std::vector<int> self_contigs = read_self_contigs(in.records);
+    std::vector<int> name_ranks = read_name_ranks(in.records);
     windowed_records.push_back(std::move(in.records));
-    session->submit(std::move(seqs), std::move(name_hashes));
+    session->submit(std::move(seqs), std::move(name_hashes),
+                    std::move(self_contigs), std::move(name_ranks));
     if (session->in_flight() < static_cast<size_t>(batch_window))
       return std::nullopt;
     return std::make_optional(collect_windowed());

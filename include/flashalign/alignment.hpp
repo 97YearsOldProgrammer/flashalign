@@ -13,6 +13,7 @@ enum class AlignmentOrigin : std::uint8_t {
   DnaLocalInversion,  ///< the inverted middle of a DNA alignment (PAF tp:A:I / i)
   DnaQueryPartition,  ///< DNA map-only placement, without a CIGAR
   DnaCigarFamily,     ///< DNA placement with a base-level CIGAR
+  DnaAllChains,       ///< one chain of a DNA all-chains run, without a CIGAR (PAF tp:A:S)
 };
 
 /**

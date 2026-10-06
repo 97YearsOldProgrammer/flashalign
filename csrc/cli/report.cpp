@@ -147,9 +147,12 @@ std::string resolved_config_text(const AlignOptions& opt,
 
   row("mode", is_rna ? "rna_long" : "dna_long", "resolved");
   row("preset", opt.preset, opt.preset_source.c_str());
-  // asm5, asm10 and asm20 are not qualified on intact chromosomes.
+  // asm5, asm10 and asm20 are not qualified on intact chromosomes; ava-ont
+  // and ava-hifi are measured on simulated reads only.
   const bool assembly = fa::cpu::api::is_assembly_preset(opt.preset);
-  row("preset_status", assembly ? "experimental" : "supported", "preset");
+  const bool overlap = fa::cpu::api::is_overlap_preset(opt.preset);
+  row("preset_status", assembly || overlap ? "experimental" : "supported",
+      "preset");
   row("index_source", seeding_from_index ? "faix" : "built", "cli");
   row("k", i2s(cfg.index.k), seeding_from_index ? "index" : "preset");
   row("syncmer_s", i2s(cfg.index.syncmer_s),
@@ -222,6 +225,13 @@ std::string resolved_config_text(const AlignOptions& opt,
   }
   // The vote's empty-tile rescue M; 0 on the RNA presets.
   row("tile_rescue_occ", i2s(mapping.dna_tile_rescue_occ), "preset");
+  // The overlap presets' two mechanisms and --dual, printed only under them.
+  if (overlap) {
+    row("skip_self", b2s(mapping.skip_self), "preset");
+    row("all_chains", b2s(mapping.all_chains), "preset");
+    row("dual", mapping.dual ? "yes" : "no",
+        src(opt.dual.has_value(), "preset"));
+  }
 
   if (!is_rna)
     row("vote_ratio", f2s(mapping.vote_admission_ratio),
@@ -274,7 +284,7 @@ std::string resolved_config_text(const AlignOptions& opt,
         "builtin");
   else
     row("chain_max_cands", i2s(fa::cpu::lr::dna_chain_max_candidates(mapping)),
-        src(opt.max_cands.has_value(), "derived"));
+        src(opt.max_cands.has_value(), overlap ? "preset" : "derived"));
   row("local_diag_band", i2s(mapping.cigar_local_diag_band), "builtin");
 
   // lr, lr:hq: -A -B -O -E -z --score-N are the gap-fill row; the end row,
@@ -328,9 +338,14 @@ std::string resolved_config_text(const AlignOptions& opt,
             i2s(mapping.cigar_dp_tail_zdrop) + "," +
             i2s(mapping.cigar_dp_inversion_zdrop),
         "preset");
-  if (fill)
+  if (fill) {
+    // A value that is neither typed nor the struct's own is the preset row's.
+    const int builtin =
+        std::decay_t<decltype(mapping)>{}.min_chain_score;
     row("min_chain_score", i2s(mapping.min_chain_score),
-        src(opt.min_chain_score.has_value(), "builtin"));
+        src(opt.min_chain_score.has_value(),
+            mapping.min_chain_score != builtin ? "preset" : "builtin"));
+  }
 
   if (!is_rna) {
     row("residue_min_interval", i2s(mapping.residue_min_interval_bp), "preset");

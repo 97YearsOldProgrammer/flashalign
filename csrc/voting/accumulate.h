@@ -78,6 +78,10 @@ vote_accumulate(const VoteWindowState &st, ChainWindowPeakScratch &scratch,
                                              st.is_rc))
         continue;
       const int local = static_cast<int>(g - chr_lo);
+      // The read's own k-mer casts no vote, as minimap2's -D drops the anchors on the
+      // exact diagonal; a self hit off that diagonal still votes.
+      if (chr_idx == ctx.self_contig && !st.is_rc && local == seed.read_pos)
+        continue;
       const int ref_start = local - seed.read_pos;
       const int64_t bucket_key =
           vote_pack_key(chr_idx, vote_floor_div(ref_start, st.W));

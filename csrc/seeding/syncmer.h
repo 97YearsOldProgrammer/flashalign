@@ -180,11 +180,12 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_uniform_into(
         ChainSyncmerOccCandidate cand;
         cand.seed = seed;
         cand.view = view;
-        if (!view.found() || view.count == 0 || view.occurrence == 0) {
+        const uint32_t occurrence = vote_seed_occurrence(ctx, view);
+        if (!view.found() || view.count == 0 || occurrence == 0) {
             return cand;
         }
-        cand.occurrence = view.occurrence;
-        cand.valid = seed_allowed_by_long_occ_policy(view, cfg);
+        cand.occurrence = occurrence;
+        cand.valid = occurrence_allowed_by_long_occ_policy(occurrence, cfg);
         return cand;
     };
 
@@ -357,7 +358,7 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
     uint64_t rescued_occurrence = 0;
     for (const DnaLongSeedView& v : selected) {
         kept.insert(v.seed.read_pos);
-        if (v.rescued) rescued_occurrence += v.view.occurrence;
+        if (v.rescued) rescued_occurrence += vote_seed_occurrence(ctx, v.view);
     }
     const auto distance_to_kept = [&](int read_pos) {
         const auto hi = kept.lower_bound(read_pos);
@@ -386,7 +387,8 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
             const DnaLongSeedView& v = out.selected_views[i];
             if (kept.count(v.seed.read_pos)) continue;
             heap.push_back({distance_to_kept(v.seed.read_pos),
-                            v.view.occurrence, v.seed.read_pos, i});
+                            vote_seed_occurrence(ctx, v.view),
+                            v.seed.read_pos, i});
         }
         std::make_heap(heap.begin(), heap.end(), after);
     }
@@ -396,7 +398,8 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
         heap.pop_back();
         const DnaLongSeedView& v = out.selected_views[next.index];
         if (v.rescued &&
-            rescued_occurrence + v.view.occurrence > kDnaTileRescueBudget)
+            rescued_occurrence + vote_seed_occurrence(ctx, v.view) >
+                kDnaTileRescueBudget)
             continue;
         const int distance = distance_to_kept(next.read_pos);
         if (distance != next.distance) {
@@ -407,7 +410,7 @@ inline bool extract_chain_closed_syncmer_occ_aware_seed_bundle_into(
         }
         selected.push_back(v);
         kept.insert(v.seed.read_pos);
-        if (v.rescued) rescued_occurrence += v.view.occurrence;
+        if (v.rescued) rescued_occurrence += vote_seed_occurrence(ctx, v.view);
     }
     std::sort(selected.begin(), selected.end(), by_position);
     out.selected_views = std::move(selected);

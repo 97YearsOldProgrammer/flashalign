@@ -3,6 +3,7 @@
 #pragma once
 
 #include "../core/types.h"
+#include "../options/lane_stage.h"
 #include "../options/resolve.h"
 
 #include <atomic>
@@ -30,6 +31,7 @@ using Alignment = ::fa::cpu::AlignResult;
 
 using ::fa::cpu::options::BackendMode;
 using ::fa::cpu::options::IndexMetadata;
+using ::fa::cpu::options::LaneStage;
 using ::fa::cpu::options::ResolveRequest;
 using ::fa::cpu::options::ResolvedMapOptions;
 using ::fa::cpu::options::UserOverrides;
@@ -49,6 +51,8 @@ struct PresetSeeding {
 PresetSeeding resolve_preset_seeding(std::string_view preset);
 bool is_hifi_preset(std::string_view preset);
 bool is_assembly_preset(std::string_view preset);
+bool is_overlap_preset(std::string_view preset);
+bool lane_runs_stage(LaneStage stage, std::string_view preset);
 bool is_rna_preset(std::string_view preset);
 bool is_rna_hifi_preset(std::string_view preset);
 bool preset_is_valid(std::string_view preset);
@@ -134,10 +138,15 @@ public:
   // name.
   Alignment align(const std::string &read,
                   std::uint32_t read_name_hash = 0) const;
-  // `read_name_hashes` is null or holds one hash per read.
+  // `read_name_hashes` is null or holds one hash per read. `self_contigs` is null or holds
+  // one contig_id() per read, read only where the preset leaves a read out of its own vote.
+  // `name_ranks` is null or holds one contig_name_rank() per read, read only where the
+  // preset prints a pair once (--dual=no).
   std::vector<Alignment>
   align_batch(const std::vector<std::string> &reads,
-              const std::vector<std::uint32_t> *read_name_hashes = nullptr) const;
+              const std::vector<std::uint32_t> *read_name_hashes = nullptr,
+              const std::vector<int> *self_contigs = nullptr,
+              const std::vector<int> *name_ranks = nullptr) const;
 
   // Session that maps up to `window` batches at once with the configured thread count.
   // `helper_threads` of those threads are not started here; the caller's own threads lend
@@ -149,6 +158,11 @@ public:
 
   std::vector<std::string> chromosome_names() const;
   std::vector<int64_t> chromosome_lengths() const;
+  // The reference sequence named exactly `name`, as its index in chromosome_names(); -1
+  // when there is none.
+  int contig_id(std::string_view name) const;
+  // The number of reference sequences whose name sorts before `name`, by strcmp.
+  int contig_name_rank(std::string_view name) const;
 
 private:
   friend class WindowedAlignSession;
@@ -166,9 +180,13 @@ public:
   WindowedAlignSession(const WindowedAlignSession &) = delete;
   WindowedAlignSession &operator=(const WindowedAlignSession &) = delete;
 
-  // `read_name_hashes` is empty or holds one hash per read.
+  // `read_name_hashes` is empty or holds one hash per read, `self_contigs` is empty or
+  // holds one LongReadAligner::contig_id() per read, and `name_ranks` is empty or holds
+  // one LongReadAligner::contig_name_rank() per read.
   void submit(std::vector<std::string> reads,
-              std::vector<std::uint32_t> read_name_hashes = {});
+              std::vector<std::uint32_t> read_name_hashes = {},
+              std::vector<int> self_contigs = {},
+              std::vector<int> name_ranks = {});
   AlignedReadBatch collect();
   std::size_t in_flight() const;
 

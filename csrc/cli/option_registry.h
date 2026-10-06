@@ -7,6 +7,8 @@
 // closed-syncmer size, so minimap2's minimum DP score is -S here.
 // Flash-specific tuning is preset-owned and reported by --show-config.
 
+#include "api/aligner.h"  // LaneStage
+
 #include <cstddef>
 #include <string_view>
 #include <vector>
@@ -22,6 +24,8 @@ enum class OptionId {
     Output, PafCigar, NoHeader, SamHitOnly, PafNoHit, SoftClipSupp,
     CopyComment,
     Secondary, ReadGroup,
+    // align: the overlap presets' --dual, minimap2's spelling
+    Dual,
     // -a, minimap2's "output SAM".
     OutputSam,
     Cs, Md, Eqx,
@@ -88,6 +92,8 @@ enum ModeMask : unsigned {
   ModeIndex = 1u << 1,
 };
 
+using ::fa::cpu::api::LaneStage;
+
 // One row of the registry. Either spelling may be absent.
 struct OptionSpec {
   OptionId id;
@@ -101,6 +107,9 @@ struct OptionSpec {
   std::string_view help;    // description; '\n' forces a wrapped help line
   // Dev rows only: why the row is off the help screen.
   std::string_view study = "";
+  // The stage the option configures; refused where the preset's lane does
+  // not run it (cli/parse.cpp option_stage_refusal).
+  LaneStage stage = LaneStage::None;
 };
 
 // The registry, ordered align-Stable (grouped by section), align-Dev,

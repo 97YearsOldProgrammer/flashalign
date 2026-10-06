@@ -34,7 +34,7 @@ class Config:
     @property
     def preset(self) -> str:
         """
-        Preset name: 'lr', 'lr:hq', 'splice', 'splice:hq'; experimental 'asm5', 'asm10', 'asm20' [-x / --preset].
+        Preset name: 'lr', 'lr:hq', 'splice', 'splice:hq'; experimental 'asm5', 'asm10', 'asm20'. The CLI's experimental 'ava-ont' and 'ava-hifi' are refused [-x / --preset].
         """
 
     @preset.setter
@@ -786,5 +786,6 @@ def preset_seeding(preset: str) -> tuple[int, int]:
 
     Mapping always uses the index's own seeding, so an index built with
     Index.build_from_fasta for a preset other than 'lr' needs this pair.
-    ValueError for an unknown preset.
+    ValueError for an unknown preset, and for 'ava-ont' and 'ava-hifi',
+    which the binding refuses.
     """

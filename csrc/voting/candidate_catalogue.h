@@ -55,10 +55,12 @@ struct CandidateCatalogue {
 // mask competes with everything); max_per_lane is then only a cost ceiling. With
 // mask_source, inputs carry a mask_slot and masks are built lazily; without it,
 // input.support is used as given. Masks and coarse ranges are on a grid of
-// tile_count tiles.
+// tile_count tiles. max_per_lane is at most kMaxCatalogueLaneBound, or
+// kAllChainsLaneBound for an `unpartitioned` catalogue, which no solver takes
+// (query_partition.h).
 CandidateCatalogue build_candidate_catalogue(
     std::vector<CandidateInput> inputs, int max_per_lane,
     double admission_ratio = 0.0, CandidateMaskSource* mask_source = nullptr,
-    int tile_count = kFixedQueryTiles);
+    int tile_count = kFixedQueryTiles, bool unpartitioned = false);
 
 }  // namespace fa::cpu::voting

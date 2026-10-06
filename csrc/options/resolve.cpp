@@ -39,6 +39,7 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
   }
   const bool rna_mode = is_rna_preset(request.preset);
   const bool asm_mode = is_assembly_preset(request.preset);
+  const bool overlap_mode = is_overlap_preset(request.preset);
   const bool hifi_class = rna_mode ? is_rna_hifi_preset(request.preset)
                                    : is_hifi_preset(request.preset);
 
@@ -156,11 +157,13 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
     if (rna_mode)
       throw std::invalid_argument(
           "--max-cands is valid only with a DNA preset");
-    if (*user.max_cands < 1 ||
-        *user.max_cands > ::fa::cpu::voting::kMaxCatalogueLaneBound)
-      throw std::invalid_argument(
-          "--max-cands must be within [1," +
-          std::to_string(::fa::cpu::voting::kMaxCatalogueLaneBound) + "]");
+    // The all-chains lane partitions nothing and takes a wider bound.
+    const int ceiling = mapping.all_chains
+                            ? ::fa::cpu::voting::kAllChainsLaneBound
+                            : ::fa::cpu::voting::kMaxCatalogueLaneBound;
+    if (*user.max_cands < 1 || *user.max_cands > ceiling)
+      throw std::invalid_argument("--max-cands must be within [1," +
+                                  std::to_string(ceiling) + "]");
     mapping.max_cands = *user.max_cands;
   }
   // --tiles: the splice presets keep their own partition.
@@ -199,8 +202,9 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
         " is too large; the maximum is " + std::to_string(::fa::cpu::kFaixMaxK));
   if (request.index.has_index) {
     // The assembly presets map only with the seeding they were measured on.
-    if (asm_mode && (request.index.k != seeding.k ||
-                     request.index.syncmer_s != seeding.syncmer_s))
+    if (asm_mode &&
+        (request.index.k != seeding.k ||
+         request.index.syncmer_s != seeding.syncmer_s))
       throw std::invalid_argument(
           "-x " + request.preset + " requires an index with k=" +
           std::to_string(seeding.k) + " s=" +
@@ -257,6 +261,11 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
   if (common.cs != CsMode::None || common.emit_md) {
     common.enable_full_read_cigar = true;
   }
+  // The CLI refuses this first, as a usage error.
+  if (overlap_mode && common.enable_full_read_cigar)
+    throw std::invalid_argument(
+        "-x " + request.preset +
+        " prints placements only; it is refused with a requested CIGAR");
   // --max-chain-occ: DNA only. The CLI relies on this check.
   if (rna_mode && user.dna_pool_gate_occ)
     throw std::invalid_argument(
@@ -279,6 +288,13 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
       throw std::invalid_argument(
           "--vote-ratio must be within [0,1]");
     mapping.vote_admission_ratio = *user.dna_vote_admission_ratio;
+  }
+  // --dual: the overlap presets only.
+  if (user.dual) {
+    if (!overlap_mode)
+      throw std::invalid_argument(
+          "--dual is valid only with ava-ont or ava-hifi");
+    mapping.dual = *user.dual;
   }
   if (user.max_query_seeds_per_strand) {
     common.max_query_seeds_per_strand =

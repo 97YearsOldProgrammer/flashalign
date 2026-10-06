@@ -238,6 +238,10 @@ constexpr std::string_view kEndFilterHint =
     "the end filters are always on, at minimap2's defaults: the bad-end trim "
     "on DNA, the terminal-exon filter on RNA";
 constexpr std::string_view kAltHint = "map to a reference without ALT contigs";
+constexpr std::string_view kOverlapHint =
+    "-x ava-ont and -x ava-hifi already leave out each read's own diagonal "
+    "(-D), set no primary chain (-P) and chain each candidate once, with no "
+    "long-join re-chain (--no-long-join)";
 
 constexpr Minimap2Hint kAlignHints[] = {
     {"-s", "minimap2's -s, the minimal peak DP score, is -S here"},
@@ -270,6 +274,23 @@ constexpr Minimap2Hint kAlignHints[] = {
     {"--spsc-scale", kSpliceScoreHint},
     {"--write-junc",
      "paftools.js splice2bed writes the junctions of SAM or PAF -c output"},
+    {"-X", "-x ava-ont and -x ava-hifi with --dual=no do what -X does"},
+    {"-D", kOverlapHint},
+    {"-P", kOverlapHint},
+    {"--no-long-join", kOverlapHint},
+    {"-H", "FlashAlign's seeds are not homopolymer-compressed"},
+    {"-e", "FlashAlign has no such option"},
+    {"-n", "FlashAlign has no such option"},
+};
+
+// minimap2 preset names (-x) this tool does not take.
+constexpr Minimap2Hint kPresetHints[] = {
+    {"map-ont", "minimap2's map-ont is -x lr here"},
+    {"map-hifi", "minimap2's map-hifi is -x lr:hq here"},
+    {"map-ccs", "minimap2's map-ccs is -x lr:hq here"},
+    {"cdna", "minimap2's cdna is -x splice here"},
+    {"ava-pb", "minimap2's ava-pb overlaps PacBio CLR reads, which have no "
+               "preset here; -x ava-hifi overlaps HiFi reads"},
 };
 
 constexpr Minimap2Hint kIndexHints[] = {
@@ -291,18 +312,12 @@ std::string minimap2_hint(std::string_view token, unsigned mode) {
     return {};
 }
 
-// The refusal of an unknown -x, naming the preset here when minimap2's name
-// has one.
+// The refusal of an unknown -x, with its hint when minimap2 has the name.
 std::string preset_refusal(const std::string& preset) {
     std::string message =
         "-x preset must be one of: " + fa::cpu::api::accepted_preset_names();
-    std::string_view here;
-    if (preset == "map-ont") here = "lr";
-    else if (preset == "map-hifi" || preset == "map-ccs") here = "lr:hq";
-    else if (preset == "cdna") here = "splice";
-    if (!here.empty())
-        message += "; minimap2's " + preset + " is -x " + std::string(here) +
-                   " here";
+    for (const Minimap2Hint& h : kPresetHints)
+        if (h.spelling == preset) message += "; " + std::string(h.hint);
     return message;
 }
 
@@ -358,7 +373,90 @@ std::string require_value(
     return ts.tokens[++i];
 }
 
+// The align spellings that take a value attached with '=', as in minimap2:
+// --secondary=yes|no and --dual=yes|no, which also take it separate, and
+// --cs=short|long, which takes it only attached (a bare --cs is short).
+constexpr std::string_view kAttachedValueSpellings[] = {"--secondary", "--cs",
+                                                        "--dual"};
+
 }  // namespace
+
+void check_max_cands_range(const AlignOptions& opt) {
+    if (!opt.max_cands) return;
+    const int ceiling = fa::cpu::api::is_overlap_preset(opt.preset)
+                            ? ::fa::cpu::voting::kAllChainsLaneBound
+                            : ::fa::cpu::voting::kMaxCatalogueLaneBound;
+    if (*opt.max_cands < 1 || *opt.max_cands > ceiling)
+        throw UsageError("--max-cands must be within [1," +
+                         std::to_string(ceiling) + "]");
+}
+
+namespace {
+
+// A stage's refusal, checked in this order. {preset} is the preset, {options}
+// every spelling of the stage and {is} "is" or "are" to agree with them.
+struct StageRefusal {
+    LaneStage stage;
+    std::string_view text;
+};
+
+constexpr StageRefusal kStageRefusals[] = {
+    {LaneStage::BaseLevelOutput,
+     "-x {preset} prints map-only PAF; it is refused with {options}"},
+    {LaneStage::BaseAlignment,
+     "-x {preset} prints map-only PAF; {options} set base-level alignment and "
+     "are refused"},
+    {LaneStage::SamOutput,
+     "-x {preset} prints map-only PAF; {options} shape SAM output and are "
+     "refused"},
+    {LaneStage::Selection,
+     "-x {preset} prints every chain; {options} are refused"},
+    {LaneStage::Partition,
+     "-x {preset} does not partition the query; {options} are refused"},
+    {LaneStage::OverlapPairs,
+     "{options} {is} valid only with ava-ont or ava-hifi"},
+};
+
+void replace_all(std::string& text, std::string_view key,
+                 const std::string& value) {
+    for (std::size_t at = text.find(key); at != std::string::npos;
+         at = text.find(key, at + value.size()))
+        text.replace(at, key.size(), value);
+}
+
+}  // namespace
+
+std::optional<std::string> option_stage_refusal(
+    const std::set<OptionId>& given, const std::string& preset) {
+    for (const StageRefusal& refusal : kStageRefusals) {
+        if (fa::cpu::api::lane_runs_stage(refusal.stage, preset)) continue;
+        // One spelling per option, the short one where there is one.
+        std::set<OptionId> listed;
+        std::vector<std::string> spellings;
+        bool was_given = false;
+        for (const OptionSpec& spec : option_specs()) {
+            if (spec.stage != refusal.stage || !(spec.modes & ModeAlign) ||
+                !listed.insert(spec.id).second)
+                continue;
+            was_given = was_given || given.count(spec.id) != 0;
+            spellings.push_back(spec.short_name != '\0'
+                                    ? std::string{'-', spec.short_name}
+                                    : std::string(spec.long_name));
+        }
+        if (!was_given) continue;
+        std::string options;
+        for (std::size_t i = 0; i < spellings.size(); ++i) {
+            if (i > 0) options += i + 1 == spellings.size() ? " and " : ", ";
+            options += spellings[i];
+        }
+        std::string text(refusal.text);
+        replace_all(text, "{preset}", preset);
+        replace_all(text, "{options}", options);
+        replace_all(text, "{is}", spellings.size() == 1 ? "is" : "are");
+        return text;
+    }
+    return std::nullopt;
+}
 
 AlignOptions parse_align_args(int argc, char** argv, int start) {
     AlignOptions opt;
@@ -385,19 +483,18 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
             end_of_options = true;
             continue;
         }
-        // --secondary=VALUE, as minimap2 spells it.
-        constexpr std::string_view kSecondaryPrefix = "--secondary=";
-        const bool secondary_attached =
-            arg.compare(0, kSecondaryPrefix.size(), kSecondaryPrefix) == 0;
-        // --cs takes an optional attached value only, as in minimap2.
-        constexpr std::string_view kCsPrefix = "--cs=";
-        const bool cs_attached =
-            arg.compare(0, kCsPrefix.size(), kCsPrefix) == 0;
-        const OptionSpec* spec =
-            find_option_spec(secondary_attached ? "--secondary"
-                             : cs_attached      ? "--cs"
-                                                : arg,
-                             ModeAlign);
+        // SPELLING=VALUE, for the spellings of kAttachedValueSpellings.
+        std::string_view spelling = arg;
+        std::optional<std::string> attached;
+        for (const std::string_view name : kAttachedValueSpellings) {
+            if (arg.size() > name.size() && arg[name.size()] == '=' &&
+                arg.compare(0, name.size(), name) == 0) {
+                spelling = name;
+                attached = arg.substr(name.size() + 1);
+                break;
+            }
+        }
+        const OptionSpec* spec = find_option_spec(spelling, ModeAlign);
         if (spec == nullptr) {
             if (arg.size() > 1 && arg[0] == '-') {
                 throw UsageError("unknown align option: " + arg +
@@ -407,15 +504,22 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
             positional.push_back(arg);
             continue;
         }
+        opt.given_options.insert(spec->id);
         // --secondary accepts its value attached or separate.
         if (spec->id == OptionId::Secondary) {
             const std::string answer =
-                secondary_attached
-                    ? arg.substr(kSecondaryPrefix.size())
-                    : require_value(i, ts, arg, ModeAlign);
+                attached ? *attached : require_value(i, ts, arg, ModeAlign);
             if (answer != "yes" && answer != "no")
                 throw UsageError("--secondary must be yes or no");
             opt.output_secondary = answer == "yes";
+            continue;
+        }
+        if (spec->id == OptionId::Dual) {
+            const std::string answer =
+                attached ? *attached : require_value(i, ts, arg, ModeAlign);
+            if (answer != "yes" && answer != "no")
+                throw UsageError("--dual must be yes or no");
+            opt.dual = answer == "yes";
             continue;
         }
         std::string val;
@@ -430,8 +534,7 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
             case OptionId::PafCigar:   opt.paf_cigar = true; break;
             case OptionId::OutputSam:  opt.format = "sam"; break;
             case OptionId::Cs: {
-              const std::string form =
-                  cs_attached ? arg.substr(kCsPrefix.size()) : "short";
+              const std::string form = attached.value_or("short");
               if (form != "short" && form != "long") {
                 throw UsageError(
                     "--cs expects 'short' or 'long' (got '" + form + "')");
@@ -483,10 +586,9 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 if (*opt.vote_seeds < 0)
                     throw UsageError("--vote-seeds must be >= 0");
                 break;
+            // Its range depends on the lane (check_max_cands_range).
             case OptionId::MaxCands:
                 opt.max_cands = parse_int(val, arg);
-                if (*opt.max_cands < 1 || *opt.max_cands > 64)
-                    throw UsageError("--max-cands must be within [1,64]");
                 break;
             case OptionId::Tiles:
                 opt.tiles = parse_int(val, arg);
@@ -551,6 +653,7 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 break;
             }
             case OptionId::Secondary:
+            case OptionId::Dual:
                 // Handled above.
                 break;
             case OptionId::MaxVoteOcc:    opt.max_vote_occ = parse_int(val, arg); break;
@@ -628,6 +731,10 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 break;
         }
     }
+    // Without -x the preset may come from the index: cli/align_command.cpp
+    // checks the range once it is settled.
+    if (opt.preset_source != "builtin")
+        check_max_cands_range(opt);
     // --show-config reads no sequence, so its operands are optional.
     if (positional.size() < 2 && !opt.show_config) {
         throw UsageError(
@@ -690,6 +797,13 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 opt.tile_null_cost || opt.tile_unsupported_cost)) {
         throw UsageError(
             "--tile-score is incompatible with RNA preset '" + opt.preset + "'");
+    }
+    // Without -x the preset may come from the index: cli/align_command.cpp
+    // asks again once it is settled.
+    if (opt.preset_source != "builtin") {
+        if (const auto refusal =
+                option_stage_refusal(opt.given_options, opt.preset))
+            throw UsageError(*refusal);
     }
     if (!rna) {
         if (opt.min_intron) {

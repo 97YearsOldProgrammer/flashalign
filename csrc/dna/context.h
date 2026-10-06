@@ -128,6 +128,8 @@ struct ResolvedDnaOptions {
   int query_tiles = ::fa::cpu::voting::kQueryTileCount;
   // Placement's first tile-ownership rule is AnchorTiles, not Span.
   bool tile_owner_anchors = false;
+  // The all-chains lane (options/dna_profile.h all_chains).
+  bool all_chains = false;
   // The catalogue's candidates per strand (options/dna_profile.h
   // dna_chain_max_candidates).
   int catalogue_lane_bound = ::fa::cpu::voting::kCatalogueLaneBound;
@@ -143,6 +145,15 @@ struct DnaContext {
   // tie_read_seed(read_name_hash, read length), set by map_read before the
   // vote. Every tie-break of the read uses this value.
   std::uint32_t vote_tie_seed = 0;
+  // The all-chains lane with options/dna_profile.h skip_self: the contig that
+  // is the query read itself, set by map_read. A chain takes no anchor on the
+  // read's own exact diagonal there, as minimap2's -D. -1 otherwise.
+  int self_contig = -1;
+  // The all-chains lane under --dual=no (options/dna_profile.h dual): the
+  // read name's rank among the contig names, set by the engine. A candidate
+  // on a contig numbered below it, whose name sorts before the read's, is
+  // not chained. 0 otherwise.
+  int dual_rank = 0;
   // The read's seed density for the inversion probe's local chain, kept by
   // placement (DnaPlacementChainingResult::inversion_gate_seeds) and set by
   // map_read for every realization of the read; null when not kept.

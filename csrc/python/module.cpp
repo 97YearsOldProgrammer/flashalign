@@ -68,7 +68,8 @@ NB_MODULE(_flashalign, module) {
       "\n"
       "Mapping always uses the index's own seeding, so an index built with\n"
       "Index.build_from_fasta for a preset other than 'lr' needs this pair.\n"
-      "ValueError for an unknown preset.");
+      "ValueError for an unknown preset, and for 'ava-ont' and 'ava-hifi',\n"
+      "which the binding refuses.");
 
   nb::register_exception_translator(translate_exception);
 }

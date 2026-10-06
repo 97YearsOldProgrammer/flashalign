@@ -77,7 +77,8 @@ void append(std::ostringstream& out, const char* name,
 #define FA_CONFIG_FIELDS(X)                                                    \
   X(preset,                                                                    \
     "Preset name: 'lr', 'lr:hq', 'splice', 'splice:hq'; experimental "         \
-    "'asm5', 'asm10', 'asm20' [-x / --preset].")                               \
+    "'asm5', 'asm10', 'asm20'. The CLI's experimental 'ava-ont' and "          \
+    "'ava-hifi' are refused [-x / --preset].")                                 \
   X(k, "Seed k-mer length [-k]; mapping always uses the index's.")             \
   X(min_support, "Minimum anchor support [--min-support]. -1 = preset-owned.") \
   X(max_query_seeds,                                                           \

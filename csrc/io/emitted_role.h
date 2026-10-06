@@ -36,10 +36,13 @@ inline char emitted_role_paf_type(EmittedRole role) noexcept {
 // The tp:A type as minimap2's write_tags sets it:
 //   type = r->id == r->parent ? (r->inv? 'I' : 'P') : (r->inv? 'i' : 'S');
 // Only DNA local-inversion records (the mm_align1_inv port) get 'I' or 'i'.
+// An all-chains record is 'S' in any role: minimap2's -P sets no parent.
 inline char emitted_role_paf_type(EmittedRole role,
                                   const AlignResult& result) noexcept {
   if (result.origin == AlignmentOrigin::DnaLocalInversion)
     return emitted_role_is_secondary(role) ? 'i' : 'I';
+  if (result.origin == AlignmentOrigin::DnaAllChains)
+    return 'S';
   return emitted_role_paf_type(role);
 }
 

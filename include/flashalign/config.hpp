@@ -17,7 +17,8 @@ enum class CsMode { None, Short, Long };
  */
 struct Config {
   std::string preset = "lr";    ///< 'lr', 'lr:hq', 'splice', 'splice:hq';
-                                ///< experimental 'asm5', 'asm10', 'asm20' [-x]
+                                ///< experimental 'asm5', 'asm10', 'asm20' [-x];
+                                ///< the CLI's 'ava-ont' and 'ava-hifi' are refused
   int k = -1;                   ///< seed k-mer length [-k]; fixed by a loaded index
   int min_support = -1;         ///< minimum anchor support [--min-support]
   int max_query_seeds = -1;     ///< query seeds kept per strand
@@ -71,7 +72,8 @@ struct Config {
  * The (k, syncmer_s) pair a preset builds its index with. Mapping always uses the seeding
  * stored in the index, so pass this pair to Index::build or Index::build_from_fasta when the
  * index is meant for a preset other than lr.
- * @throws std::invalid_argument for an unknown preset
+ * @throws std::invalid_argument for an unknown preset, and for the CLI's overlap presets
+ *         ava-ont and ava-hifi, which this API refuses
  */
 std::pair<int, int> preset_seeding(const std::string& preset);
 

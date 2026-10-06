@@ -167,6 +167,9 @@ inline GenomeLoad load_fasta_genome(const std::string& path) {
     FastxRecord rec;
     while (reader.next(rec)) {
         if (rec.seq.empty()) continue;
+        if (out.sequences.count(rec.name))
+            throw std::runtime_error(
+                "duplicate sequence name in " + path + ": " + rec.name);
         out.references.push_back({rec.name, static_cast<int64_t>(rec.seq.size())});
         out.sequences.emplace(std::move(rec.name), std::move(rec.seq));
     }

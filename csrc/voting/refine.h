@@ -73,9 +73,10 @@ inline void vote_emit_peaks_batched(const VoteWindowState& st,
         chunk_evidence_hi.assign(chunk_size, std::numeric_limits<int>::min());
         seed_hit.assign(chunk_size, 0);
         for (size_t c = 0; c < chunk_size; ++c) {
-            chunk_ref_starts[c].reserve(
-                static_cast<size_t>(std::max(0, chunk[c].support)));
-            chunk_occurrences[c].reserve(active_seed_count);
+            const size_t support =
+                static_cast<size_t>(std::max(0, chunk[c].support));
+            chunk_ref_starts[c].reserve(support);
+            chunk_occurrences[c].reserve(std::min(active_seed_count, support));
         }
         by_chr_bin.resize(chunk_size);
         for (size_t c = 0; c < chunk_size; ++c) by_chr_bin[c] = c;

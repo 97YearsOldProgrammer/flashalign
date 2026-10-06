@@ -36,6 +36,7 @@
 #include <numeric>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -193,7 +194,11 @@ public:
   // minimap2's mm_tbuf_t.
   //
   // `read_name_hash` is tie_name_hash() of the read name and seeds the tie-break between two
-  // equally good loci; 0 when there is no name.
+  // equally good loci; 0 when there is no name. `self_contig`, where taken, is contig_id()
+  // of the read name, read only where the preset leaves a read out of its own vote
+  // (DnaLongOptions::skip_self); -1 when it is not known. `name_rank`, where taken, is
+  // contig_name_rank() of the read name, read only where the preset prints a pair once
+  // (DnaLongOptions::dual); 0 when it is not known.
   template <class Backend>
   AlignResult align(const std::string &read,
                     std::uint32_t read_name_hash = 0) const {
@@ -204,7 +209,8 @@ public:
   template <class Backend>
   AlignResult align(const std::string &read,
                     typename Backend::WorkerScratch &worker_scratch,
-                    std::uint32_t read_name_hash = 0) const {
+                    std::uint32_t read_name_hash = 0,
+                    int self_contig = -1, int name_rank = 0) const {
     AlignResult out{};
     int read_len = 0;
     if (!::fa::cpu::mapping::checked_size_to_int(read.size(), read_len)) {
@@ -226,7 +232,8 @@ public:
         read.data(), read_len, stream_cfg, fwd_enc, shared_fwd_syncmer_seeds);
     shared_fwd_syncmer_seed_ptr = &shared_fwd_syncmer_seeds;
     return align_encoded<Backend>(read, fwd_enc, worker_scratch,
-                                  shared_fwd_syncmer_seed_ptr, read_name_hash);
+                                  shared_fwd_syncmer_seed_ptr, read_name_hash,
+                                  self_contig, name_rank);
   }
 
   template <class Backend>
@@ -235,7 +242,8 @@ public:
       typename Backend::WorkerScratch &worker_scratch,
       const std::vector<QuerySeed> *precomputed_shared_fwd_syncmer_seeds =
           nullptr,
-      std::uint32_t read_name_hash = 0) const {
+      std::uint32_t read_name_hash = 0, int self_contig = -1,
+      int name_rank = 0) const {
     AlignResult out{};
     int read_len = 0;
     if (!::fa::cpu::mapping::checked_size_to_int(read.size(), read_len)) {
@@ -263,15 +271,18 @@ public:
     std::vector<uint8_t> rc_enc;
     return align_anchor_chain<Backend>(read, fwd_enc, rc_enc, worker_scratch,
                                        shared_fwd_syncmer_seed_ptr,
-                                       read_name_hash);
+                                       read_name_hash, self_contig, name_rank);
   }
 
-  // Maps a batch in parallel. `read_name_hashes` is null or holds one hash per read.
+  // Maps a batch in parallel. `read_name_hashes` is null or holds one hash per read,
+  // `self_contigs` is null or holds one contig_id() per read, and `name_ranks` is null or
+  // holds one contig_name_rank() per read.
   template <class Backend>
   std::vector<AlignResult>
   align_batch(const std::vector<std::string> &reads,
-              const std::vector<std::uint32_t> *read_name_hashes =
-                  nullptr) const {
+              const std::vector<std::uint32_t> *read_name_hashes = nullptr,
+              const std::vector<int> *self_contigs = nullptr,
+              const std::vector<int> *name_ranks = nullptr) const {
     const int n_threads = cfg_.common.num_threads;
     std::vector<AlignResult> out(reads.size());
     std::vector<int> order;
@@ -289,12 +300,39 @@ public:
                   worker_scratch[static_cast<size_t>(tid)],
                   read_name_hashes != nullptr
                       ? (*read_name_hashes)[static_cast<size_t>(i)]
-                      : std::uint32_t{0});
+                      : std::uint32_t{0},
+                  self_contigs != nullptr
+                      ? (*self_contigs)[static_cast<size_t>(i)]
+                      : -1,
+                  name_ranks != nullptr
+                      ? (*name_ranks)[static_cast<size_t>(i)]
+                      : 0);
         });
     return out;
   }
 
   std::vector<std::string> chromosome_names() const { return chr_names_; }
+  // The contig named exactly `name`, or -1. Contigs are numbered in name order.
+  int contig_id(std::string_view name) const {
+    const auto it = std::lower_bound(
+        chr_names_.begin(), chr_names_.end(), name,
+        [](const std::string &contig, std::string_view wanted) {
+          return contig < wanted;
+        });
+    return it != chr_names_.end() && *it == name
+               ? static_cast<int>(it - chr_names_.begin())
+               : -1;
+  }
+  // The number of contigs whose name sorts before `name`, which are the contigs
+  // numbered below it.
+  int contig_name_rank(std::string_view name) const {
+    return static_cast<int>(
+        std::lower_bound(chr_names_.begin(), chr_names_.end(), name,
+                         [](const std::string &contig, std::string_view wanted) {
+                           return contig < wanted;
+                         }) -
+        chr_names_.begin());
+  }
   // Lengths in chromosome_names() order, available even when the bases were not unpacked.
   std::vector<int64_t> chromosome_lengths() const { return chr_lengths_; }
   int get_index_syncmer_s() const { return index_->build_syncmer_s(); }
@@ -385,7 +423,8 @@ private:
         config.is_rna() ? mapping.chain_max_candidates_per_window
                         : ::fa::cpu::lr::dna_chain_max_candidates(mapping);
     ctx.vote_batched_refine =
-        !config.is_rna() && mapping.vote_admission_ratio > 0.0;
+        !config.is_rna() &&
+        (mapping.vote_admission_ratio > 0.0 || mapping.all_chains);
     ctx.tile_rescue_occ = mapping.dna_tile_rescue_occ;
     ctx.chr_names = &chr_names_;
     return ctx;
@@ -590,7 +629,8 @@ private:
       std::vector<uint8_t> &rc_enc,
       typename Backend::WorkerScratch &worker_scratch,
       const std::vector<QuerySeed> *shared_fwd_syncmer_seeds = nullptr,
-      std::uint32_t read_name_hash = 0) const {
+      std::uint32_t read_name_hash = 0, int self_contig = -1,
+      int name_rank = 0) const {
     if constexpr (std::is_same_v<Backend, ::fa::cpu::lr::rna::RnaBackend>) {
       return ::fa::cpu::lr::rna::RnaBackend::map_read(
           rna_ctx_, rna_seed_ctx_, worker_scratch, read, fwd_enc, rc_enc,
@@ -598,8 +638,13 @@ private:
     } else {
       ::fa::cpu::lr::DnaContext dctx = make_dna_context();
       dctx.read_name_hash = read_name_hash;
-      return Backend::map_read(dctx, make_seed_context(), worker_scratch, read,
-                               fwd_enc, rc_enc, shared_fwd_syncmer_seeds);
+      if (cfg_.long_read().all_chains && !cfg_.long_read().dual)
+        dctx.dual_rank = name_rank;
+      LongReadSeedContext seed_ctx = make_seed_context();
+      if (cfg_.long_read().skip_self)
+        seed_ctx.self_contig = self_contig;
+      return Backend::map_read(dctx, seed_ctx, worker_scratch, read, fwd_enc,
+                               rc_enc, shared_fwd_syncmer_seeds);
     }
   }
 
@@ -719,6 +764,7 @@ private:
     dctx.opts.query_partition = mapping.query_partition;
     dctx.opts.query_tiles = mapping.query_tiles;
     dctx.opts.tile_owner_anchors = mapping.tile_owner_anchors;
+    dctx.opts.all_chains = mapping.all_chains;
     dctx.opts.catalogue_lane_bound =
         ::fa::cpu::lr::dna_chain_max_candidates(mapping);
     return dctx;
@@ -752,6 +798,10 @@ public:
     std::vector<int> order;        // LPT position -> original index
     // Empty, or one tie_name_hash() per read.
     std::vector<std::uint32_t> read_name_hashes;
+    // Empty, or one contig_id() per read.
+    std::vector<int> self_contigs;
+    // Empty, or one contig_name_rank() per read.
+    std::vector<int> name_ranks;
   };
 
   // `engine` must outlive the session and must not be reconfigured while it exists.
@@ -770,12 +820,18 @@ public:
   WindowedAlignSession &operator=(const WindowedAlignSession &) = delete;
 
   // Queues a batch and returns at once. Precondition: in_flight() < window().
-  // `read_name_hashes` is empty or holds one hash per read.
+  // `read_name_hashes` is empty or holds one hash per read, `self_contigs` is empty or
+  // holds one contig_id() per read, and `name_ranks` is empty or holds one
+  // contig_name_rank() per read.
   void submit(std::vector<std::string> reads,
-              std::vector<std::uint32_t> read_name_hashes = {}) {
+              std::vector<std::uint32_t> read_name_hashes = {},
+              std::vector<int> self_contigs = {},
+              std::vector<int> name_ranks = {}) {
     std::unique_ptr<Batch> batch(new Batch());
     batch->reads = std::move(reads);
     batch->read_name_hashes = std::move(read_name_hashes);
+    batch->self_contigs = std::move(self_contigs);
+    batch->name_ranks = std::move(name_ranks);
     batch->results.resize(batch->reads.size());
     lpt_read_order(batch->reads, n_threads_, batch->order);
     // The window holds the Batch until collect(), so the pointer stays valid.
@@ -826,7 +882,13 @@ private:
             worker_scratch_[static_cast<size_t>(tid)],
             batch.read_name_hashes.empty()
                 ? std::uint32_t{0}
-                : batch.read_name_hashes[static_cast<size_t>(i)]);
+                : batch.read_name_hashes[static_cast<size_t>(i)],
+            batch.self_contigs.empty()
+                ? -1
+                : batch.self_contigs[static_cast<size_t>(i)],
+            batch.name_ranks.empty()
+                ? 0
+                : batch.name_ranks[static_cast<size_t>(i)]);
   }
 
   const LongReadEngine *engine_;

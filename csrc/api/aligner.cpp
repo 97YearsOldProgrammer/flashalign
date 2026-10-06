@@ -61,6 +61,12 @@ bool is_hifi_preset(std::string_view preset) {
 bool is_assembly_preset(std::string_view preset) {
   return ::fa::cpu::options::is_assembly_preset(preset);
 }
+bool is_overlap_preset(std::string_view preset) {
+  return ::fa::cpu::options::is_overlap_preset(preset);
+}
+bool lane_runs_stage(LaneStage stage, std::string_view preset) {
+  return ::fa::cpu::options::lane_runs_stage(stage, preset);
+}
 bool is_rna_preset(std::string_view preset) {
   return ::fa::cpu::options::is_rna_preset(preset);
 }
@@ -164,13 +170,15 @@ Alignment LongReadAligner::align(const std::string &read,
 std::vector<Alignment>
 LongReadAligner::align_batch(
     const std::vector<std::string> &reads,
-    const std::vector<std::uint32_t> *read_name_hashes) const {
+    const std::vector<std::uint32_t> *read_name_hashes,
+    const std::vector<int> *self_contigs,
+    const std::vector<int> *name_ranks) const {
   return impl_->read([&] {
     return std::visit(
         [&](auto backend) {
           using Backend = decltype(backend);
-          return impl_->a->template align_batch<Backend>(reads,
-                                                         read_name_hashes);
+          return impl_->a->template align_batch<Backend>(
+              reads, read_name_hashes, self_contigs, name_ranks);
         },
         impl_->backend);
   });
@@ -182,7 +190,9 @@ struct WindowedAlignSession::Impl {
   struct Arm {
     virtual ~Arm() = default;
     virtual void submit(std::vector<std::string> reads,
-                        std::vector<std::uint32_t> read_name_hashes) = 0;
+                        std::vector<std::uint32_t> read_name_hashes,
+                        std::vector<int> self_contigs,
+                        std::vector<int> name_ranks) = 0;
     virtual AlignedReadBatch collect() = 0;
     virtual std::size_t in_flight() const = 0;
     virtual bool try_help(int tid) = 0;
@@ -196,8 +206,11 @@ struct WindowedAlignSession::Impl {
         : session(engine, n_threads, window, n_helpers) {}
 
     void submit(std::vector<std::string> reads,
-                std::vector<std::uint32_t> read_name_hashes) override {
-      session.submit(std::move(reads), std::move(read_name_hashes));
+                std::vector<std::uint32_t> read_name_hashes,
+                std::vector<int> self_contigs,
+                std::vector<int> name_ranks) override {
+      session.submit(std::move(reads), std::move(read_name_hashes),
+                     std::move(self_contigs), std::move(name_ranks));
     }
     AlignedReadBatch collect() override {
       auto batch = session.collect();
@@ -232,8 +245,11 @@ WindowedAlignSession::WindowedAlignSession(const LongReadAligner &aligner,
 WindowedAlignSession::~WindowedAlignSession() = default;
 
 void WindowedAlignSession::submit(std::vector<std::string> reads,
-                                  std::vector<std::uint32_t> read_name_hashes) {
-  impl_->arm->submit(std::move(reads), std::move(read_name_hashes));
+                                  std::vector<std::uint32_t> read_name_hashes,
+                                  std::vector<int> self_contigs,
+                                  std::vector<int> name_ranks) {
+  impl_->arm->submit(std::move(reads), std::move(read_name_hashes),
+                     std::move(self_contigs), std::move(name_ranks));
 }
 AlignedReadBatch WindowedAlignSession::collect() {
   return impl_->arm->collect();
@@ -256,6 +272,12 @@ std::vector<std::string> LongReadAligner::chromosome_names() const {
 }
 std::vector<int64_t> LongReadAligner::chromosome_lengths() const {
   return impl_->read([&] { return impl_->a->chromosome_lengths(); });
+}
+int LongReadAligner::contig_id(std::string_view name) const {
+  return impl_->read([&] { return impl_->a->contig_id(name); });
+}
+int LongReadAligner::contig_name_rank(std::string_view name) const {
+  return impl_->read([&] { return impl_->a->contig_name_rank(name); });
 }
 
 } // namespace api
