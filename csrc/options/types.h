@@ -104,8 +104,6 @@ struct UserOverrides {
   std::optional<int> max_cands;
   // --tiles: the query partition's tiles per read, 2..4096. DNA presets only.
   std::optional<int> query_tiles;
-  // --tile-owner: true for anchors, false for span. DNA presets only.
-  std::optional<bool> tile_owner_anchors;
   // --dual: whether an overlap preset prints a pair from both of its reads.
   // Overlap presets only.
   std::optional<bool> dual;

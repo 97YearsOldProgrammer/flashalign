@@ -18,6 +18,7 @@ enum class DnaFamilyFailure : std::uint8_t {
   None,
   InvalidInput,
   PlacementChainRefused,
+  NoOwnerChain,
   NoSelectedFamily,
   NoAnchors,
   InvalidOrderedPath,
@@ -147,6 +148,8 @@ struct DnaFamilyRealizationOutcome {
   std::vector<AlignResult> demoted;
   std::vector<::fa::cpu::voting::CandidateId> demoted_candidates;
   std::vector<int> demoted_positions;
+  // Each demoted record's family.block_parts entry, -1 for none.
+  std::vector<int> demoted_parts;
   bool primary_extended = false;
   AlignResult pre_extension_primary;
 

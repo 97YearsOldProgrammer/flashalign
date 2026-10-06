@@ -749,20 +749,15 @@ private:
     dctx.opts.enable_full_read_cigar =
         cfg_.common.enable_full_read_cigar;
     dctx.opts.cigar_replay_request = cigar_replay_request_for(cfg_.common);
-    dctx.opts.residue_min_interval_bp = mapping.residue_min_interval_bp;
-    dctx.opts.residue_min_anchor_density_per_100bp =
-        mapping.residue_min_anchor_density_per_100bp;
     dctx.opts.postdp_rescoring = mapping.postdp_rescoring;
     dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
     dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
-    dctx.opts.clip_nominate = mapping.dna_clip_nominate;
     dctx.opts.alternative_realize_max = mapping.alternative_realize_max;
     dctx.opts.chain_syncmer_s = cfg_.index.syncmer_s;
     dctx.opts.chain_syncmer_downsample = cfg_.index.syncmer_downsample;
     dctx.opts.vote_admission_ratio = mapping.vote_admission_ratio;
     dctx.opts.query_partition = mapping.query_partition;
     dctx.opts.query_tiles = mapping.query_tiles;
-    dctx.opts.tile_owner_anchors = mapping.tile_owner_anchors;
     dctx.opts.all_chains = mapping.all_chains;
     dctx.opts.catalogue_lane_bound =
         ::fa::cpu::lr::dna_chain_max_candidates(mapping);

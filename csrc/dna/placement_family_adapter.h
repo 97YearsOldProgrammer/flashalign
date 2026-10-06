@@ -22,6 +22,31 @@ struct DnaPlacementCandidate {
   int vote_evidence = 0;
   // Chain score over the screening-pass anchors.
   int screening_chain_score = 0;
+  // The lowest and highest diagonal (oriented r - q) of the screening chain's
+  // anchors, when the screening pass held a chain.
+  bool screening_diagonals = false;
+  int screening_diagonal_low = 0;
+  int screening_diagonal_high = 0;
+};
+
+// The chain a block prints from and its bounds in forward-read bp
+// (dna/chain_ownership.h). path -1 is the candidate's primary, j its
+// sibling_paths[j]; [anchor_begin, anchor_end) in chain order. score and
+// anchors are the block's own; item_score and item_anchors its whole chain's;
+// pool_subsc and pool_n_sub minimap2's subsc and n_sub over the chains of the
+// same candidate attached to the block's owner.
+struct DnaBlockPart {
+  int path = -1;
+  int anchor_begin = 0;
+  int anchor_end = 0;
+  int forward_begin = 0;
+  int forward_end = 0;
+  int score = 0;
+  int anchors = 0;
+  int item_score = 0;
+  int item_anchors = 0;
+  double pool_subsc = 0.0;
+  int pool_n_sub = 0;
 };
 
 struct DnaPlacementFamily {
@@ -37,6 +62,10 @@ struct DnaPlacementFamily {
   std::uint64_t exact_posting_tests = 0;
   std::vector<DnaPlacementCandidate> candidates;
   ::fa::cpu::voting::QueryPartitionResult partition;
+  // Parallel to partition.selected.blocks once the owners are decided on the
+  // dense chains' anchors; empty in a family placed on tiles alone (the
+  // retained alternative, ranks 2..n, a rival placement).
+  std::vector<DnaBlockPart> block_parts;
   // Set when build_dna_placement_family left `partition` unsolved for
   // build_dna_placement_chains to solve.
   bool partition_deferred = false;

@@ -161,8 +161,9 @@ flashalign align -cx asm5 ref.fa asm.fa > aln.paf    # an assembly ~0.1% from th
 are for divergences of about 0.1%, 1% and several percent, and take minimap2's scoring for its
 presets of the same names, one row for the gap fills and the read ends, with `-r1000,100000`,
 `-g10000` and `-S200`. Their placement samples 4,096 vote seeds per strand into a partition of
-2,048 query tiles, each owned by the chain whose anchors fall in it. They map with an index built
-with `lr`'s seeding (`-k21 -s9`) and refuse another.
+2,048 query tiles, and, as on every DNA preset, the chains' anchors decide which chain owns each
+stretch of the query. They map with an index built with `lr`'s seeding (`-k21 -s9`) and refuse
+another.
 
 #### Find overlaps between long reads (experimental)
 

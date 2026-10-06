@@ -79,9 +79,6 @@ struct AlignOptions {
     // --tiles INT: the query partition's tiles per read, 2..4096. DNA
     // presets only.
     std::optional<int> tiles;
-    // --tile-owner span|anchors: placement's first tile-ownership rule,
-    // stored as "span" or "anchors". DNA presets only.
-    std::optional<std::string> tile_owner;
     // -m: minimap2's minimal chain score, >= 1. DNA presets only.
     std::optional<int> min_chain_score;
     // --dual yes|no: whether an overlap preset prints a pair from both of its

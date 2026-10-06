@@ -59,6 +59,7 @@ assemble_dna_record_family(std::vector<DnaSegmentRecord> records) {
 
   family.primary = primary->alignment;
   family.primary_candidate = primary->candidate;
+  family.primary_part = primary->part;
   family.supplementary.reserve(records.size() - 1);
   for (const DnaSegmentRecord& record : records) {
     if (&record != &*primary)

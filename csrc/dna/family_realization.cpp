@@ -34,6 +34,8 @@ namespace realization = ::fa::cpu::lr::realization;
 
 struct BlockPlan {
   ::fa::cpu::voting::CandidateId candidate = ::fa::cpu::voting::kNullCandidate;
+  // The family.block_parts entry, -1 for none.
+  int part = -1;
   int chromosome = -1;
   bool reverse = false;
   int forward_begin = 0;
@@ -78,6 +80,8 @@ struct BlockSplit {
 struct Unit {
   std::vector<std::size_t> blocks;
   ::fa::cpu::voting::CandidateId candidate = ::fa::cpu::voting::kNullCandidate;
+  // The owning block's family.block_parts entry, -1 for none.
+  int part = -1;
   int chromosome = -1;
   bool reverse = false;
   int forward_begin = 0;
@@ -282,6 +286,15 @@ bool materialize_plans(const DnaContext& context,
         block.query_tile_end == family.tile_count
             ? family.read_length
             : query_begin_for_tile(family, block.query_tile_end);
+    // A family with block parts takes the part's bounds.
+    if (!family.block_parts.empty()) {
+      plan.part = static_cast<int>(&block -
+                                   family.partition.selected.blocks.data());
+      const DnaBlockPart& part =
+          family.block_parts[static_cast<std::size_t>(plan.part)];
+      plan.forward_begin = part.forward_begin;
+      plan.forward_end = part.forward_end;
+    }
     // The evidence-only query clip. A single-candidate family's block spans
     // the whole read, so the clip is applied to the plan; everything
     // downstream reads these bounds. A block outside the window fails below.
@@ -369,6 +382,7 @@ bool plan_block_split(const DnaContext& context,
   const int read_length = request.family->read_length;
   BlockPlan& continuation = split.continuation;
   continuation.candidate = plan.candidate;
+  continuation.part = plan.part;
   continuation.chromosome = plan.chromosome;
   continuation.reverse = plan.reverse;
   continuation.split_group = plan.split_group;
@@ -593,6 +607,27 @@ bool acquire_and_realize_block(const DnaContext& context,
   if (plan.split_continuation) {
     // Already deduplicated and counted by the parent segment.
     anchors = std::move(plan.continuation_anchors);
+  } else if (plan.part >= 0) {
+    // The part's chain range inside the bounds; no sibling fallback.
+    const DnaBlockPart& part =
+        request.family->block_parts[static_cast<std::size_t>(plan.part)];
+    const std::vector<chaining::Anchor>* path =
+        part.path < 0 ? &evidence->primary
+        : static_cast<std::size_t>(part.path) < evidence->sibling_paths.size()
+            ? &evidence->sibling_paths[static_cast<std::size_t>(part.path)]
+            : nullptr;
+    if (path != nullptr && part.anchor_begin >= 0 &&
+        static_cast<std::size_t>(part.anchor_end) <= path->size()) {
+      for (int c = part.anchor_begin; c < part.anchor_end; ++c) {
+        const chaining::Anchor& anchor = (*path)[static_cast<std::size_t>(c)];
+        if (anchor.q >= plan.oriented_begin &&
+            anchor.q_end() <= plan.oriented_end)
+          anchors.push_back(anchor);
+      }
+    }
+    deduplicate_exact_anchors(anchors);
+    result.anchor_candidates += evidence->interval_hits;
+    result.anchor_count += static_cast<int>(anchors.size());
   } else {
     anchors.reserve(evidence->primary.size());
     for (const chaining::Anchor& anchor : evidence->primary) {
@@ -731,6 +766,7 @@ Unit unit_from_block(const BlockPlan& block, std::size_t index) {
   Unit unit;
   unit.blocks.push_back(index);
   unit.candidate = block.candidate;
+  unit.part = block.part;
   unit.chromosome = block.chromosome;
   unit.reverse = block.reverse;
   unit.forward_begin = block.forward_begin;
@@ -1159,6 +1195,7 @@ void extend_primary_and_demote(const DnaContext& context,
             static_cast<std::int64_t>(span)) {
       result.demoted.push_back(std::move(other.alignment));
       result.demoted_candidates.push_back(other.candidate);
+      result.demoted_parts.push_back(other.part);
       result.demoted_positions.push_back(static_cast<int>(position));
     } else {
       kept.push_back(std::move(other));
@@ -1472,6 +1509,8 @@ const char* dna_family_failure_name(DnaFamilyFailure failure) noexcept {
     return "invalid_input";
   case DnaFamilyFailure::PlacementChainRefused:
     return "placement_chain_refused";
+  case DnaFamilyFailure::NoOwnerChain:
+    return "no_owner_chain";
   case DnaFamilyFailure::NoSelectedFamily:
     return "no_selected_family";
   case DnaFamilyFailure::NoAnchors:
@@ -1493,7 +1532,10 @@ realize_full_cigar_family(const DnaContext& context,
                           const DnaFamilyRealizationRequest& request) {
   DnaFamilyRealizationOutcome result;
   if (request.placement == nullptr || !request.placement->accepted) {
-    result.failure = DnaFamilyFailure::PlacementChainRefused;
+    result.failure = request.placement != nullptr &&
+                             request.placement->no_owner_chain
+                         ? DnaFamilyFailure::NoOwnerChain
+                         : DnaFamilyFailure::PlacementChainRefused;
     return result;
   }
   if (request.family == nullptr || request.forward_query == nullptr ||
@@ -1582,12 +1624,26 @@ realize_full_cigar_family(const DnaContext& context,
     if (!split_seam && attempt_bridge(context, request, previous, current,
                                       bridge, bridge_score, result)) {
       accept_join(units.back(), current, index, bridge, bridge_score);
-      // With kDnaChainMapqStudyBridgeOwner set, the joined unit takes the
-      // candidate with the higher chain score; otherwise the leftmost
-      // block's candidate keeps it.
-      if ((dna_chain_mapq_study_bits(context.opts.chain_mapq_hifi_margin) &
-           kDnaChainMapqStudyBridgeOwner) != 0 &&
-          request.placement != nullptr) {
+      // With block parts the joined unit takes the candidate and part of the
+      // block whose part has the highest whole chain score, the leftmost on a
+      // tie. Otherwise, with kDnaChainMapqStudyBridgeOwner set, it takes the
+      // candidate with the higher chain score, and else the leftmost block's
+      // candidate keeps it.
+      const std::vector<DnaBlockPart>& parts = request.family->block_parts;
+      const auto in_parts = [&parts](int part) {
+        return part >= 0 && static_cast<std::size_t>(part) < parts.size();
+      };
+      if (in_parts(units.back().part) && in_parts(current.part)) {
+        Unit& joined = units.back();
+        if (parts[static_cast<std::size_t>(current.part)].item_score >
+            parts[static_cast<std::size_t>(joined.part)].item_score) {
+          joined.candidate = current.candidate;
+          joined.part = current.part;
+        }
+      } else if ((dna_chain_mapq_study_bits(
+                      context.opts.chain_mapq_hifi_margin) &
+                  kDnaChainMapqStudyBridgeOwner) != 0 &&
+                 request.placement != nullptr) {
         Unit& joined = units.back();
         const DnaPlacementCandidateChain* incoming =
             request.placement->find(current.candidate);
@@ -1596,8 +1652,10 @@ realize_full_cigar_family(const DnaContext& context,
         const int incoming_score =
             incoming != nullptr ? incoming->chain_score : 0;
         const int owner_score = owner != nullptr ? owner->chain_score : 0;
-        if (incoming_score > owner_score)
+        if (incoming_score > owner_score) {
           joined.candidate = current.candidate;
+          joined.part = current.part;
+        }
       }
     } else {
       units.push_back(unit_from_block(current, index));
@@ -1614,7 +1672,7 @@ realize_full_cigar_family(const DnaContext& context,
     if (!validate_and_commit_unit(context, request, unit, record))
       return false;
     pre_settle_alignments.push_back(record);
-    records.push_back({std::move(record), unit.candidate});
+    records.push_back({std::move(record), unit.candidate, unit.part});
     return true;
   };
   // The pre-settle records decide disjointness, roles and the primary's
@@ -1745,9 +1803,12 @@ realize_full_cigar_family(const DnaContext& context,
   result.primary_candidate = assembled.primary_candidate;
   result.output.supplementary.clear();
   result.output.supplementary_candidates.clear();
+  result.output.primary_part = assembled.primary_part;
   for (DnaSegmentRecord& supplementary : assembled.supplementary) {
     result.output.supplementary.push_back(std::move(supplementary.alignment));
     result.output.supplementary_candidates.push_back(supplementary.candidate);
+    if (assembled.primary_part >= 0)
+      result.output.supplementary_parts.push_back(supplementary.part);
   }
   result.failure = DnaFamilyFailure::None;
   return result;

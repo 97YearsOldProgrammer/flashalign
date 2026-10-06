@@ -595,11 +595,6 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 if (*opt.tiles < 2 || *opt.tiles > 4096)
                     throw UsageError("--tiles must be within [2,4096]");
                 break;
-            case OptionId::TileOwner:
-                if (val != "span" && val != "anchors")
-                    throw UsageError("--tile-owner must be span or anchors");
-                opt.tile_owner = val;
-                break;
             case OptionId::MinChainScore:
                 opt.min_chain_score = parse_int(val, arg);
                 if (*opt.min_chain_score < 1)
@@ -802,8 +797,6 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         throw UsageError("--max-cands is valid only with a DNA preset");
     if (rna && opt.tiles)
         throw UsageError("--tiles is valid only with a DNA preset");
-    if (rna && opt.tile_owner)
-        throw UsageError("--tile-owner is valid only with a DNA preset");
     if (rna && opt.screen_band)
         throw UsageError("--screen-band is valid only with a DNA preset");
     if (rna && (opt.tile_supported_reward || opt.tile_block_open_cost ||

@@ -1,8 +1,9 @@
 // Placement chaining. The whole-read vote catalogue is the only source of
-// candidates; this stage harvests and chains anchors for the candidates the
-// partition selects, maps each exact chain back to the family's forward-query
-// tiles and re-solves the partition. Both map-only projection and CIGAR
-// realization consume the resulting family and anchor paths. No DP runs here.
+// candidates; this stage screens each candidate with a cheap chain, solves the
+// partition on the screening chains, chains its owners over the whole query
+// and decides the read's blocks on those chains' anchors. Both map-only
+// projection and CIGAR realization consume the resulting family and anchor
+// paths. No DP runs here.
 #pragma once
 
 #include "context.h"
@@ -84,22 +85,6 @@ struct DnaPlacementCandidateChain {
   std::int64_t dense_runs = 0;
 };
 
-// Terminal-clip recovery: the terminal query intervals the committed records
-// leave uncovered are searched again, from cached postings only. With no
-// candidate or diagonal to start from, anchors carry their contig and are
-// clustered by a coarse (contig, diagonal) histogram before the colinear DP
-// scores them.
-
-// Diagonal histogram bin width, in reference base pairs.
-inline constexpr int kDnaResidueDiagonalWidth = 256;
-// A histogram cluster is chained only with at least this many anchors, and the
-// same floor gates the cached fine-seed supply of a candidate interval.
-inline constexpr int kDnaResidueMinClusterAnchors = 3;
-// Primary-path anchor floor for admission, an absolute bar.
-inline constexpr int kDnaResidueMinChainAnchors = 10;
-// The chain score floor in exact seed matches, independent of the anchor
-// floor. N exact k-mer matches score at most N * min(seed_length, 255).
-inline constexpr int kDnaResidueScoreFloorMatches = 3;
 // Catalogue rivals chained over the whole query for the MAPQ, per ranking.
 // mm_set_mapq2 reads one best rival and a count; two let the best rival by
 // vote lose to the runner-up on chain score. Under
@@ -108,138 +93,6 @@ inline constexpr int kDnaMapqRivalChains = 2;
 // Only rivals with at least 1/kDnaMapqRivalVoteDenominator of the strongest
 // owner's vote are chained; the rest still enter the MAPQ through their vote.
 inline constexpr int kDnaMapqRivalVoteDenominator = 4;
-
-// Top histogram clusters considered per strand.
-inline constexpr int kDnaResidueMaxClustersPerStrand = 2;
-// Hard bounds. Exceeding the posting budget refuses the whole interval.
-inline constexpr int kDnaResidueMaxIntervalPostings = 65536;
-inline constexpr int kDnaResidueMaxAdmissionsPerRead = 2;
-
-bool dna_residue_posting_budget_allows(std::int64_t used,
-                                       std::uint32_t next) noexcept;
-
-// One posting expanded into an exact anchor, tagged with its contig.
-struct DnaResidueAnchor {
-  int contig = -1;
-  chaining::Anchor anchor;
-};
-
-struct DnaResidueCluster {
-  int contig = -1;
-  // floor((r - q) / kDnaResidueDiagonalWidth) of the modal bin.
-  std::int64_t diagonal_bin = 0;
-  // Median (r - q) over the collected anchors: the cluster's peak diagonal.
-  std::int64_t peak_diagonal = 0;
-  std::vector<chaining::Anchor> anchors;
-};
-
-struct DnaResidueChainOutcome {
-  bool admitted = false;
-  int chain_score = 0;
-  int chain_anchors = 0;
-  // Query bp spanned by the primary path. The anchor-density bar divides by it.
-  int chain_query_span = 0;
-  std::vector<chaining::Anchor> primary;
-};
-
-// The admission bar of one residue chain. The default is the absolute bar; a
-// post-commit pass may scale the floors to the query interval it opened.
-struct DnaResidueAdmissionBar {
-  int min_chain_anchors = kDnaResidueMinChainAnchors;
-  // Negative uses context.opts.residue_min_anchor_density_per_100bp; zero
-  // disables the density test.
-  int min_anchor_density_per_100bp = -1;
-};
-
-// Bins anchors by (contig, floor((r - q) / kDnaResidueDiagonalWidth)), takes
-// the `max_clusters` densest bins (never two adjacent on one contig) and
-// collects each cluster from its bin and both neighbours, so a split at a bin
-// edge loses nothing. Clusters under `min_anchors` are dropped. Ties on count
-// break by the read-seeded hash of (contig, reverse, bin), as minimap2, then
-// by (contig, bin).
-std::vector<DnaResidueCluster>
-dna_residue_diagonal_clusters(const std::vector<DnaResidueAnchor>& anchors,
-                              int max_clusters, int min_anchors,
-                              std::uint32_t tie_seed, bool reverse);
-
-// Sorts and deduplicates the anchors, runs the dense chain with
-// dna_candidate_chain_params at -r's second value and applies the admission
-// bar to the expanded chain: at least bar.min_chain_anchors anchors, a score
-// of at least kDnaResidueScoreFloorMatches * min(seed_length, 255), and the
-// anchor density per 100 query bases.
-DnaResidueChainOutcome dna_residue_chain_cluster(
-    const DnaContext& context, std::vector<chaining::Anchor> anchors,
-    int seed_length, int read_length,
-    const DnaResidueAdmissionBar& bar = DnaResidueAdmissionBar{});
-
-struct DnaResidueAdmission {
-  DnaResidueCluster cluster;
-  bool reverse = false;
-  DnaResidueChainOutcome outcome;
-};
-
-// Helpers for post-commit terminal recovery. They read only the whole-query
-// fine seeds and cached posting views. The supply is counted up to
-// kDnaResidueMinClusterAnchors.
-int dna_residue_cached_supply(const DnaPlacementFamily& family,
-                              const std::vector<RetainedSeedRef>& fine_forward,
-                              const std::vector<RetainedSeedRef>& fine_reverse,
-                              const ChainSeedLookupCache& lookup_cache,
-                              std::uint32_t occurrence_cap, int query_begin_bp,
-                              int query_end_bp);
-
-bool dna_residue_collect_anchors(
-    const DnaContext& context, const DnaPlacementFamily& family,
-    const std::vector<RetainedSeedRef>& fine_forward,
-    const std::vector<RetainedSeedRef>& fine_reverse,
-    const ChainSeedLookupCache& lookup_cache, std::uint32_t occurrence_cap,
-    int query_begin_bp, int query_end_bp,
-    std::vector<DnaResidueAnchor>& forward_anchors,
-    std::vector<DnaResidueAnchor>& reverse_anchors);
-
-// dna_residue_collect_anchors for a higher occurrence ceiling. Seeds are
-// expanded rarest first (ties by key, read position, strand), so a frequent
-// seed cannot use up the budget before a rare one at the true locus, and the
-// walk stops at the posting budget instead of refusing the interval. An
-// uncached key contributes nothing.
-void dna_residue_collect_anchors_rarest_first(
-    const DnaContext& context, const DnaPlacementFamily& family,
-    const std::vector<RetainedSeedRef>& fine_forward,
-    const std::vector<RetainedSeedRef>& fine_reverse,
-    const ChainSeedLookupCache& lookup_cache, std::uint32_t occurrence_cap,
-    int query_begin_bp, int query_end_bp,
-    std::vector<DnaResidueAnchor>& forward_anchors,
-    std::vector<DnaResidueAnchor>& reverse_anchors);
-
-bool dna_residue_best_admission(
-    const DnaContext& context, const DnaPlacementFamily& family,
-    const std::vector<DnaResidueAnchor>& forward,
-    const std::vector<DnaResidueAnchor>& reverse, DnaResidueAdmission& best,
-    const DnaResidueAdmissionBar& bar = DnaResidueAdmissionBar{},
-    int max_clusters_per_strand = kDnaResidueMaxClustersPerStrand);
-
-// The committed chain's anchor density: the primary-path anchors and
-// forward-query span of the exact whole-query chain of the candidate that
-// dominates the stable partition. A length-aware bar scales it by the interval
-// length, so each read is held to its own anchor density. Zero when there is
-// no such chain.
-struct DnaResidueObservedDensity {
-  int anchors = 0;
-  int query_span = 0;
-};
-DnaResidueObservedDensity
-dna_residue_observed_density(const DnaPlacementChainingResult& placement);
-
-struct DnaResidueDetachedChain {
-  DnaPlacementCandidate candidate;
-  DnaPlacementCandidateChain chain;
-};
-
-DnaResidueDetachedChain
-dna_residue_detached_chain(const DnaPlacementFamily& family,
-                           const DnaResidueCluster& cluster, bool reverse,
-                           const DnaResidueChainOutcome& outcome,
-                           ::fa::cpu::voting::CandidateId id);
 
 // A catalogue rival chained over the whole query for the MAPQ; a candidate's
 // own chain partition only sees rivals inside its window. Evidence only: kept
@@ -272,8 +125,6 @@ struct DnaPlacementChainingResult {
   std::vector<DnaRivalExactChain> rival_exact;
   // Whole-query chains built for the MAPQ rivals, reused ones excluded.
   int mapq_rival_chains = 0;
-  std::vector<RetainedSeedRef> residue_fine_forward;
-  std::vector<RetainedSeedRef> residue_fine_reverse;
   // The read's seed density, kept past placement when realization gates the
   // late inversion probe on it (inv_local_chain.h); null otherwise.
   std::shared_ptr<const RetainedSeedDensity> inversion_gate_seeds;
@@ -281,10 +132,9 @@ struct DnaPlacementChainingResult {
   int initial_blocks = 0;
   bool selection_changed = false;
   bool accepted = false;
-  // Some stabilization under DnaTileOwnership::Span gave an accepted owner a
-  // tile beyond its anchor tiles. Only then can a retry under AnchorTiles
-  // produce a different family.
-  bool span_widened = false;
+  // Not accepted because the partition's owners have no whole-query chain
+  // that qualifies to own a block (dna/chain_ownership.h).
+  bool no_owner_chain = false;
 
   const DnaPlacementCandidateChain*
   find(::fa::cpu::voting::CandidateId candidate) const noexcept;
@@ -347,18 +197,6 @@ build_dna_rival_placement(const DnaContext& context,
                           const std::vector<std::uint8_t>& forward_query,
                           const std::vector<std::uint8_t>& reverse_query);
 
-// Which query tiles an accepted whole-query chain owns when stabilization
-// re-solves the partition (see stabilize_selected_family).
-enum class DnaTileOwnership : std::uint8_t {
-  // Its anchor tiles and every tile between its first and last anchor,
-  // except those a rival at the same locus keeps. The first rule by default
-  // (--tile-owner span).
-  Span,
-  // Its anchor tiles alone: the first rule under --tile-owner anchors, and
-  // the retry's when a spanned family fails to realize.
-  AnchorTiles,
-};
-
 DnaPlacementChainingResult build_dna_placement_chains(
     const DnaContext& context, DnaPlacementFamily family,
     const std::vector<std::uint8_t>& forward_query,
@@ -369,7 +207,6 @@ DnaPlacementChainingResult build_dna_placement_chains(
     const std::vector<QuerySeed>* fine_reverse_seeds,
     ChainSeedLookupCache* lookup_cache,
     const std::vector<std::uint32_t>* fine_forward_slots,
-    const std::vector<std::uint32_t>* fine_reverse_slots,
-    DnaTileOwnership ownership);
+    const std::vector<std::uint32_t>* fine_reverse_slots);
 
 } // namespace fa::cpu::lr

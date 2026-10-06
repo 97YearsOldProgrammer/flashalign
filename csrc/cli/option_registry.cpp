@@ -123,12 +123,6 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::Tiles, '\0', "--tiles", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "query tiles in the read's placement partition [128]", "", kPartition},
-        // DNA presets only. span: an accepted chain owns the tiles between
-        // its first and last anchor, except those a same-locus rival keeps;
-        // anchors: only its anchor tiles (dna/placement_chaining.h).
-        {OptionId::TileOwner, '\0', "--tile-owner", kStr, kStable, A,
-         "STR", SEC_PLACEMENT,
-         "tiles a placed chain owns: span or anchors [span]", "", kPartition},
 
         // On lr and lr:hq -A -B -O -E -z --score-N set the DP row of the gap
         // fills between anchors; the read ends keep the preset's own row,

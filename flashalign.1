@@ -448,24 +448,13 @@ tiles. The partition's work grows with
 .IR INT .
 DNA presets only; the splice presets keep 128.
 .TP
-.BI \-\-tile\-owner \ STR
-Which tiles a placed chain owns when the partition is solved again [span;
-anchors on asm5, asm10, asm20]:
-.B span
-gives it every tile between its first and last anchor except those a rival at
-the same locus keeps, and when a CIGAR is realized
-.RB ( \-c ,
-SAM) a read whose widened block cannot be aligned is placed again under the
-anchors rule;
-.B anchors
-gives it only the tiles that hold its anchors, and there is nothing to place
-again. Plain PAF output follows the same rule. DNA presets only.
-.TP
 .B \-\-tile\-score \fIhit\fR=\fIINT\fR,\fIblock\fR=\fIINT\fR,\fInull\fR=\fIINT\fR,\fImiss\fR=\fIINT\fR
 Objective of the exact query partition, which decides for each of the read's
 query tiles
 .RB ( \-\-tiles )
-which candidate owns it [hit=4,block=12,null=1,miss=0].
+which candidate owns it [hit=4,block=12,null=1,miss=0]. Under a DNA preset the
+partition picks the candidates chained over the whole read, and the anchors of
+those chains then decide which chain owns each part of the read.
 .I hit
 rewards an owned tile the seeds support and is at least 1;
 .I block
@@ -867,8 +856,7 @@ Experimental. Align an assembly to a reference that it differs from by about
 .RB ( \-k21
 .B \-s9 \-\-min\-support 3 \-A1 \-B19 \-O39,81 \-E3,1
 .B \-z200,200 \-\-score\-N 1 \-r1000,100000 \-g10000 \-m40 \-p0.8
-.B \-S200 \-\-vote\-seeds 4096 \-\-tiles 2048
-.BR "\-\-tile\-owner anchors" ).
+.BR "\-S200 \-\-vote\-seeds 4096 \-\-tiles 2048" ).
 The gap fills and the read-end extensions use the one scoring row, which
 .BR \-A ", " \-B ", " \-O ", " \-E ", " \-z " and " \-\-score\-N
 set. A
@@ -1031,9 +1019,11 @@ and
 .B s1
 describe the chain a record comes from, the chain
 .B s2
-is compared against; a secondary alignment carries its own chain's. A record
-without a chain, such as the inverted middle of a DNA alignment or a piece
-recovered at a read end, carries none of the three.
+is compared against; a secondary alignment carries its own chain's. Under the
+DNA presets but ava\-ont and ava\-hifi, a primary or supplementary record
+carries the anchor count and score of its own part of that chain. A record
+without a chain, such as the inverted middle of a DNA alignment, carries none
+of the three.
 .PP
 The
 .B cs

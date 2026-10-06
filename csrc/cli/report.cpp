@@ -268,10 +268,6 @@ std::string resolved_config_text(const AlignOptions& opt,
                            fa::cpu::voting::kMaxAdmissionQueryTiles))
             : std::string("none (count admission)"),
         "derived");
-  if (!is_rna)
-    row("partition.tile_owner",
-        mapping.tile_owner_anchors ? "anchors" : "span",
-        src(opt.tile_owner.has_value(), "preset"));
   row("mapq.output_range", "0..60", "fixed");
 
   // On a splice preset, the fine chain's query gap.
@@ -355,10 +351,6 @@ std::string resolved_config_text(const AlignOptions& opt,
   }
 
   if (!is_rna) {
-    row("residue_min_interval", i2s(mapping.residue_min_interval_bp), "preset");
-    row("residue_min_density",
-        i2s(mapping.residue_min_anchor_density_per_100bp), "preset");
-    row("clip_nominate", b2s(mapping.dna_clip_nominate), "builtin");
     row("dense_diag_min_runs", i2s(mapping.dna_dense_diag_min_runs), "builtin");
     row("tandem_window", i2s(mapping.dna_tandem_window), "builtin");
     row("dp_min_ksw_len", i2s(mapping.cigar_dp_min_ksw_len), "builtin");

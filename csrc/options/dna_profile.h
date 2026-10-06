@@ -55,9 +55,7 @@ inline constexpr int kDnaPoolGateOcc = 0;
 //   lr     N = max(200, mm_idx_cal_max_occ(index, 1.81e-4))
 //   lr:hq  N = min(500, max(200, mm_idx_cal_max_occ(index, 1.81e-4)))
 // where 500 is minimap2's map-hifi max_mid_occ. dna_chain_occ_thresholds()
-// hands N to the pool gate (and through it the terminal clip nomination's
-// ceiling, min(4095, gate)) and to the global cap read by the screening pass
-// and terminal-clip recovery.
+// hands N to the pool gate and to the global cap read by the screening pass.
 // --max-vote-occ INT sets N for the vote and the chain alike, and 0 removes
 // every cap; --max-chain-occ INT replaces N on the pool gate only.
 //
@@ -77,9 +75,9 @@ inline constexpr int kDnaHiFiOccCeiling = 500;
 // are not rescued (both constants in seeding/syncmer.h). Placement's screening
 // pass admits a rescued seed past its gate, and the whole-query pool admits
 // exactly the seeds the vote rescued (dna/retained_seed_density.h); the
-// inversion probe and the clip nomination keep their gates. With no cap, or
-// N >= M, nothing is rescued. lr's M is minimap2's max_max_occ, a constant
-// there too; the RNA presets install 0.
+// inversion probe keeps its gate. With no cap, or N >= M, nothing is rescued.
+// lr's M is minimap2's max_max_occ, a constant there too; the RNA presets
+// install 0.
 inline constexpr int kDnaTileRescueOcc = 4095;
 inline constexpr int kDnaHiFiTileRescueOcc = 1024;
 
@@ -97,9 +95,6 @@ struct DnaLongOptions {
   // kMinQueryTiles..kMaxQueryTiles. DNA presets only; the splice presets
   // partition into kQueryTileCount.
   int query_tiles = ::fa::cpu::voting::kQueryTileCount;
-  // --tile-owner anchors: placement's first tile-ownership rule gives an
-  // accepted owner its anchor tiles alone, not its span (DnaTileOwnership).
-  bool tile_owner_anchors = false;
   // A read that is itself in the index, found by its exact name, is left out
   // of its own vote: a seed's occurrence does not count the key's postings on
   // the read's own contig (seeding/context.h vote_seed_occurrence), and the
@@ -112,8 +107,8 @@ struct DnaLongOptions {
   // candidates on each contig and strand share one whole-query chain call and
   // take its chains best first, one each, and each chain at -m or above is
   // printed once, MAPQ 0 and tp:A:S (dna/backend.cpp emit_all_chains). No
-  // tile mask, partition, -p, -N, recovery or MAPQ runs, so its lane bound
-  // (max_cands) may reach kAllChainsLaneBound. Map-only.
+  // tile mask, partition, -p, -N or MAPQ runs, so its lane bound (max_cands)
+  // may reach kAllChainsLaneBound. Map-only.
   bool all_chains = false;
   // In the all-chains lane, whether a pair prints from both of its reads.
   // When false (--dual=no) a candidate whose contig name sorts before the
@@ -210,12 +205,6 @@ struct DnaLongOptions {
   int dna_dense_diag_min_runs = kDnaDenseDiagMinRuns;
   // Tandem release half-window (kDnaTandemWindow); 0 on RNA presets.
   int dna_tandem_window = kDnaTandemWindow;
-  // Minimum query length in base pairs of a terminal clip that terminal-clip
-  // recovery's regular attempt searches.
-  int residue_min_interval_bp = 200;
-  // Minimum anchor density of an admitted chain, in anchors per 100 query bp:
-  // chain_anchors * 100 >= D * chain_query_span.
-  int residue_min_anchor_density_per_100bp = 9;
   // HiFi only (dna/postdp_scoring.h): the MAPQ's dp1/dp2 come from the
   // log-gap CIGAR sweep rescored by minibwa's b2 formula, with its clip term
   // when the two primary records' query spans compete, instead of the raw DP
@@ -230,16 +219,6 @@ struct DnaLongOptions {
   // piece runs only where the read's opposite-lane fine seeds in the drop
   // window chain to kDnaInvLocalMinAnchors anchors. Bridges keep their probe.
   bool inversion_probe_local_gate = false;
-  // Terminal clip nomination: a terminal clip of at least
-  // kDnaClipNominateMinIntervalBp unclaimed query gets a second recovery
-  // attempt after the production one declines, with an interval-scaled
-  // anchor floor, no absolute density bar, a wider per-strand cluster budget,
-  // a higher occurrence ceiling when the production cap finds nothing, and
-  // cross-contig, cross-strand geometry. It recovers split records whose
-  // second locus the whole-read vote never nominates, such as the far
-  // breakend of a translocation. A read still gains at most
-  // kDnaResidueMaxAdmissionsPerRead records.
-  bool dna_clip_nominate = true;
   // Pool occurrence gate (--max-chain-occ); 0 is ungated. DNA presets
   // install kDnaPoolGateVoteCap.
   int dna_pool_gate_occ = kDnaPoolGateOcc;

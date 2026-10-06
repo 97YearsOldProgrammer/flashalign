@@ -23,6 +23,7 @@ bool dna_project_chained_block(
 enum class DnaProjectionFallbackReason : std::uint8_t {
   None,
   ChainingUnavailableOrRefused,
+  NoOwnerChain,
   NoProjectedRecords,
   MissingOrInvalidSelectedChain,
   InvalidBlockGeometry,
@@ -46,6 +47,8 @@ struct DnaJoinPiece {
   chaining::Anchor last;
   int walk_matches = 0;
   int walk_length = 0;
+  // The family.block_parts entry, -1 for none.
+  int part = -1;
 };
 
 struct DnaFamilyProjectionResult {
@@ -75,8 +78,8 @@ DnaFamilyProjectionResult project_map_only_placement_family(
 // Joins consecutive block records of the committed map-only family, in
 // forward-query order, into one record wherever the -c lane would bridge them:
 // its seam test (no duplicate seam anchor, then plan_dna_family_join) with the
-// centers of the records' corner anchors as the cuts. A terminal-clip record
-// never joins. The joined record spans both, its columns 10 and 11 are the
+// centers of the records' corner anchors as the cuts. A record that owns no
+// block never joins. The joined record spans both, its columns 10 and 11 are the
 // walk over both anchor runs, and it is owned as the -c lane owns a bridged
 // unit. No DP and no reference base. `realized` and `primary_candidate`
 // change only when two records join.

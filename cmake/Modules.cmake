@@ -53,6 +53,7 @@ target_link_libraries(flashalign_dp PRIVATE
 add_library(flashalign_dna STATIC
     csrc/dna/alternative_hypothesis.cpp
     csrc/dna/chain_mapq.cpp
+    csrc/dna/chain_ownership.cpp
     csrc/dna/postdp_scoring.cpp
     csrc/dna/mapq_routing.cpp
     csrc/dna/retained_seed_density.cpp
@@ -63,8 +64,6 @@ add_library(flashalign_dna STATIC
     csrc/dna/record_family.cpp
     csrc/dna/family_projection.cpp
     csrc/dna/family_realization.cpp
-    csrc/dna/residue_emission.cpp
-    csrc/dna/residue_trigger.cpp
     csrc/dna/dp_runner.cpp
     csrc/dna/realization_controller.cpp
     csrc/dna/ordered_anchor_path.cpp

@@ -420,7 +420,8 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   // mm_set_parent, a rival counts toward n_sub once if it meets the anchor
   // rule or the DP rule; the DP rule applies to the seat, on its own pair.
   int f2 = evidence.sib_f2;
-  int n_sub = 0;
+  // A record priced on its block part starts from the part's own n_sub.
+  int n_sub = evidence.part_priced ? evidence.part_n_sub : 0;
   int admissible_rivals = 0;
   int shadow_rivals = 0;
   int tie_rivals = 0;
@@ -491,6 +492,16 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   double pen_cm =
       evidence.cnt > 10 ? 1.0 : 0.1 * static_cast<double>(evidence.cnt);
   pen_cm = std::min(pen_s1, pen_cm);
+  // A record priced on its block part: minimap2's pen on the part's score and
+  // anchors, as mm_set_mapq2 prices a split chain.
+  if (evidence.part_priced)
+    pen_cm = std::min(
+        evidence.part_score > 100
+            ? 1.0
+            : 0.01 * static_cast<double>(evidence.part_score),
+        evidence.part_anchors > 10
+            ? 1.0
+            : 0.1 * static_cast<double>(evidence.part_anchors));
   // R3: the margin rule's pen has no vote floor.
   const double pen_margin = pen_cm;
   const double w_abs = static_cast<double>(std::max(0, effective_vote));
@@ -537,6 +548,10 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     // Aligned, but no rival DP score.
     mapq = truncate_to_int(evidence.identity * pen_cm * kDnaChainMapqCoef *
                            (1.0 - x) * std::log(dp1 / match_sc));
+  } else if (evidence.part_priced) {
+    // Map-only, on the block part's own score.
+    mapq = truncate_to_int(pen_cm * kDnaChainMapqCoef * (1.0 - x) *
+                           std::log(static_cast<double>(evidence.part_score)));
   } else {
     // Map-only: scored on the chain alone.
     mapq =

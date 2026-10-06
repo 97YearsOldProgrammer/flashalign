@@ -50,11 +50,14 @@ int slice_score(const DnaPlacementCandidateChain& chain, int sibling,
   return static_cast<int>(chain.sibling_scores[which] * share + .499);
 }
 
+// With `part` the record's bounds, anchors and score are the part's: no tile
+// test and no sibling fallback.
 bool project_chained_block_impl(
     const DnaContext& context, const DnaPlacementFamily& family,
     const DnaPlacementCandidateChain& chain,
     const ::fa::cpu::voting::QueryBlock& block,
-    AlignResult& output, DnaJoinPiece* piece = nullptr) {
+    AlignResult& output, DnaJoinPiece* piece = nullptr,
+    const DnaBlockPart* part = nullptr) {
   const DnaPlacementCandidate* candidate = family.find(block.candidate);
   if (candidate == nullptr ||
       chain.status != DnaPlacementChainStatus::Accepted ||
@@ -69,12 +72,26 @@ bool project_chained_block_impl(
     return false;
   if (block.supporting_tiles < kDnaPostCommitRecordMinBlockTiles)
     return false;
+  const std::vector<chaining::Anchor>* part_path =
+      part == nullptr       ? nullptr
+      : part->path < 0      ? &chain.primary
+      : static_cast<std::size_t>(part->path) < chain.sibling_paths.size()
+          ? &chain.sibling_paths[static_cast<std::size_t>(part->path)]
+          : nullptr;
+  if (part != nullptr &&
+      (part_path == nullptr || part->anchor_begin < 0 ||
+       part->anchor_end <= part->anchor_begin ||
+       static_cast<std::size_t>(part->anchor_end) > part_path->size()))
+    return false;
 
-  const int forward_begin = ::fa::cpu::voting::query_tile_begin(
-      block.query_tile_begin, family.read_length, family.seed_length,
-      family.tile_count);
+  const int forward_begin =
+      part != nullptr ? part->forward_begin
+                      : ::fa::cpu::voting::query_tile_begin(
+                            block.query_tile_begin, family.read_length,
+                            family.seed_length, family.tile_count);
   const int forward_end =
-      block.query_tile_end == family.tile_count
+      part != nullptr ? part->forward_end
+      : block.query_tile_end == family.tile_count
           ? family.read_length
           : ::fa::cpu::voting::query_tile_begin(
                 block.query_tile_end, family.read_length,
@@ -92,19 +109,24 @@ bool project_chained_block_impl(
 
   std::vector<const chaining::Anchor*> anchors;
   anchors.reserve(chain.primary.size());
-  for (const chaining::Anchor& anchor : chain.primary) {
-    const int tile = dna_forward_query_tile(
-        anchor.q, candidate->peak.is_rc, family.read_length,
-        family.seed_length, family.tile_count);
-    if (tile >= block.query_tile_begin && tile < block.query_tile_end)
-      anchors.push_back(&anchor);
+  if (part != nullptr) {
+    for (int c = part->anchor_begin; c < part->anchor_end; ++c)
+      anchors.push_back(&(*part_path)[static_cast<std::size_t>(c)]);
+  } else {
+    for (const chaining::Anchor& anchor : chain.primary) {
+      const int tile = dna_forward_query_tile(
+          anchor.q, candidate->peak.is_rc, family.read_length,
+          family.seed_length, family.tile_count);
+      if (tile >= block.query_tile_begin && tile < block.query_tile_end)
+        anchors.push_back(&anchor);
+    }
   }
   // A block that holds none of the primary's anchors is projected from a
   // sibling path, as realization does (dna_selected_sibling_path); the record
   // then carries the slice's share of that sibling's chain score.
   std::vector<chaining::Anchor> sibling_slice;
   int sibling = -1;
-  if (anchors.empty()) {
+  if (anchors.empty() && part == nullptr) {
     sibling_slice = dna_selected_sibling_path(chain, oriented_begin,
                                               oriented_end, &sibling);
     for (const chaining::Anchor& anchor : sibling_slice)
@@ -157,8 +179,9 @@ bool project_chained_block_impl(
   output.is_reverse = candidate->peak.is_rc;
   // A block from the owner's own chain keeps the whole chain score.
   output.score = std::max(
-      1, sibling < 0 ? chain.chain_score
-                     : slice_score(chain, sibling, sibling_slice.size()));
+      1, part != nullptr ? part->score
+         : sibling < 0   ? chain.chain_score
+                         : slice_score(chain, sibling, sibling_slice.size()));
   output.matches = fuzzy_matches;
   output.block_len = fuzzy_block_length;
   output.mapq = 0;
@@ -203,6 +226,8 @@ const char* dna_projection_fallback_name(
       return "none";
     case DnaProjectionFallbackReason::ChainingUnavailableOrRefused:
       return "chaining_unavailable_or_refused";
+    case DnaProjectionFallbackReason::NoOwnerChain:
+      return "no_owner_chain";
     case DnaProjectionFallbackReason::NoProjectedRecords:
       return "no_projected_records";
     case DnaProjectionFallbackReason::MissingOrInvalidSelectedChain:
@@ -227,9 +252,10 @@ DnaFamilyProjectionResult project_map_only_placement_family(
   result.output = incumbent;
   const DnaPlacementFamily& family = placement.family;
   if (!placement.accepted) {
-    refuse(
-        result,
-        DnaProjectionFallbackReason::ChainingUnavailableOrRefused);
+    refuse(result,
+           placement.no_owner_chain
+               ? DnaProjectionFallbackReason::NoOwnerChain
+               : DnaProjectionFallbackReason::ChainingUnavailableOrRefused);
     return result;
   }
   if (!family.valid) {
@@ -244,8 +270,13 @@ DnaFamilyProjectionResult project_map_only_placement_family(
   }
 
   std::vector<DnaSegmentRecord> records;
+  const bool parted = !family.block_parts.empty();
   for (const auto& block : family.partition.selected.blocks) {
     if (block.candidate == ::fa::cpu::voting::kNullCandidate) continue;
+    const int part =
+        parted ? static_cast<int>(&block -
+                                  family.partition.selected.blocks.data())
+               : -1;
     const DnaPlacementCandidateChain* chain =
         placement.find(block.candidate);
     AlignResult projected;
@@ -259,12 +290,15 @@ DnaFamilyProjectionResult project_map_only_placement_family(
     }
     DnaJoinPiece piece;
     if (!project_chained_block_impl(
-            context, family, *chain, block, projected, &piece)) {
+            context, family, *chain, block, projected, &piece,
+            parted ? &family.block_parts[static_cast<std::size_t>(part)]
+                   : nullptr)) {
       refuse(result, DnaProjectionFallbackReason::InvalidBlockGeometry);
       return result;
     }
+    piece.part = part;
     result.pieces.push_back(std::move(piece));
-    records.push_back({std::move(projected), block.candidate});
+    records.push_back({std::move(projected), block.candidate, part});
   }
   if (records.empty()) {
     refuse(result, DnaProjectionFallbackReason::NoProjectedRecords);
@@ -283,9 +317,12 @@ DnaFamilyProjectionResult project_map_only_placement_family(
   result.output.mapq = incumbent.mapq;
   result.output.supplementary.clear();
   result.output.supplementary_candidates.clear();
+  result.output.primary_part = assembled.primary_part;
+  result.output.supplementary_parts.clear();
   for (DnaSegmentRecord& record : assembled.supplementary) {
     result.output.supplementary.push_back(std::move(record.alignment));
     result.output.supplementary_candidates.push_back(record.candidate);
+    if (parted) result.output.supplementary_parts.push_back(record.part);
   }
   result.committed = true;
   return result;
@@ -388,8 +425,8 @@ void dna_join_map_only_family(
   namespace voting = ::fa::cpu::voting;
   if (pieces.size() < 2 || !realized.mapped())
     return;
-  // Forward-query order. The terminal-clip records sort in after the blocks,
-  // so a pair joins only when no clip record lies between them.
+  // Forward-query order. Records that own no block sort in after the blocks,
+  // so a pair joins only when no such record lies between them.
   std::vector<std::pair<int, std::size_t>> order;
   for (std::size_t index = 0; index < pieces.size(); ++index)
     order.emplace_back(pieces[index].record.query_start, index);
@@ -406,6 +443,13 @@ void dna_join_map_only_family(
     const DnaPlacementCandidateChain* chain = placement.find(id);
     return chain == nullptr ? 0 : chain->chain_score;
   };
+  // A piece's whole chain score, -1 without a part.
+  const std::vector<DnaBlockPart>& parts = placement.family.block_parts;
+  const auto item_score = [&parts](int part) {
+    return part >= 0 && static_cast<std::size_t>(part) < parts.size()
+               ? parts[static_cast<std::size_t>(part)].item_score
+               : -1;
+  };
   // The first piece of each joined record, which accumulates the rest.
   std::vector<std::size_t> runs;
   for (std::size_t at = 0; at < order.size(); ++at) {
@@ -418,12 +462,18 @@ void dna_join_map_only_family(
         seam_joins(context, pieces[before], current)) {
       DnaJoinPiece& into = pieces[runs.back()];
       if (merge_pieces(into, current)) {
-        // The -c lane's owner of a bridged unit: the leftmost block's, or
-        // under the HiFi rule the higher chain score. AS is the owner's.
-        if (bridge_owner &&
-            chain_score(current.candidate) > chain_score(into.candidate)) {
+        // The -c lane's owner of a bridged unit: with block parts the piece
+        // of the highest whole chain score, the leftmost on a tie; otherwise
+        // the leftmost block's, or under the HiFi rule the higher chain
+        // score. AS is the owner's.
+        const bool parted =
+            item_score(into.part) >= 0 && item_score(current.part) >= 0;
+        if (parted ? item_score(current.part) > item_score(into.part)
+                   : bridge_owner && chain_score(current.candidate) >
+                                         chain_score(into.candidate)) {
           into.candidate = current.candidate;
           into.record.score = current.record.score;
+          into.part = current.part;
         }
         continue;
       }
@@ -436,8 +486,8 @@ void dna_join_map_only_family(
   std::vector<DnaSegmentRecord> records;
   records.reserve(runs.size());
   for (const std::size_t index : runs)
-    records.push_back(
-        {std::move(pieces[index].record), pieces[index].candidate});
+    records.push_back({std::move(pieces[index].record),
+                       pieces[index].candidate, pieces[index].part});
   std::vector<AlignResult> clips;
   for (std::size_t index = 0; index < realized.supplementary.size(); ++index)
     if (realized.supplementary_candidates[index] == voting::kNullCandidate)
@@ -450,15 +500,20 @@ void dna_join_map_only_family(
   realized.secondary = std::move(secondary);
   realized.supplementary.clear();
   realized.supplementary_candidates.clear();
+  const bool parted = realized.primary_part >= 0;
+  realized.supplementary_parts.clear();
   for (DnaSegmentRecord& record : assembled.supplementary) {
     realized.supplementary.push_back(std::move(record.alignment));
     realized.supplementary_candidates.push_back(record.candidate);
+    if (parted) realized.supplementary_parts.push_back(record.part);
   }
   for (AlignResult& clip : clips) {
     realized.supplementary.push_back(std::move(clip));
     realized.supplementary_candidates.push_back(voting::kNullCandidate);
+    if (parted) realized.supplementary_parts.push_back(-1);
   }
   primary_candidate = assembled.primary_candidate;
+  if (parted) realized.primary_part = assembled.primary_part;
 }
 
 }  // namespace fa::cpu::lr

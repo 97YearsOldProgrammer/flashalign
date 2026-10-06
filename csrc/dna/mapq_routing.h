@@ -11,8 +11,8 @@ namespace fa::cpu::lr {
 
 // `supplementary_mapq` is parallel to realized.supplementary: an entry >= 0 is
 // that record's own MAPQ, -1 inherits the primary's (records that own no
-// block, such as terminal clips). Secondaries get 0, and an inversion middle
-// gets min of its flanks' MAPQs, as minimap2's mm_set_inv_mapq.
+// block). Secondaries get 0, and an inversion middle gets min of its flanks'
+// MAPQs, as minimap2's mm_set_inv_mapq.
 void route_dna_mapq(const DnaPlacementFamily& catalogue,
                     ::fa::cpu::voting::CandidateId primary_candidate, int mapq,
                     const std::vector<int>& supplementary_mapq,

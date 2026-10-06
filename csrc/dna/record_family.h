@@ -10,12 +10,15 @@ namespace fa::cpu::lr {
 struct DnaSegmentRecord {
   AlignResult alignment;
   ::fa::cpu::voting::CandidateId candidate = ::fa::cpu::voting::kNullCandidate;
+  // The family.block_parts entry, -1 for none.
+  int part = -1;
 };
 
 struct DnaRecordFamily {
   AlignResult primary;
   ::fa::cpu::voting::CandidateId primary_candidate =
       ::fa::cpu::voting::kNullCandidate;
+  int primary_part = -1;
   // Each supplementary keeps the candidate whose block it came from, because
   // MAPQ is scored per block owner.
   std::vector<DnaSegmentRecord> supplementary;

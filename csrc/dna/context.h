@@ -16,8 +16,8 @@ namespace fa {
 namespace cpu {
 namespace lr {
 
-// A post-commit terminal-clip record may own a single tile once it clears its
-// absolute anchor and span floors; stable partition blocks need two.
+// Projection and realization refuse a block with fewer supporting tiles; the
+// partition's own blocks need two.
 inline constexpr int kDnaPostCommitRecordMinBlockTiles = 1;
 
 // minimap2's default opt->min_chain_score (-m), which map-ont and map-hifi
@@ -35,9 +35,9 @@ struct ResolvedDnaOptions {
   // The screening chain's diagonal band; the dense chains take
   // cigar_dp_bw_long.
   int screen_diag_band = 20000;
-  // Global occurrence cap: the screening pass's pool gate and terminal-clip
-  // recovery. Set to the vote's resolved cap (INT_MAX when it has none); 200
-  // is the vote's cap on a human index.
+  // Global occurrence cap: the screening pass's pool gate. Set to the vote's
+  // resolved cap (INT_MAX when it has none); 200 is the vote's cap on a human
+  // index.
   int cigar_local_global_occ = 200;
   // Run count at or above which the dense chain uses the diagonal-keyed
   // predecessor search instead of the linear scan. Both are exact; 0 always
@@ -96,9 +96,6 @@ struct ResolvedDnaOptions {
   bool enable_full_read_cigar = true;
   // Optional cs:Z / MD:Z output (minimap2 --cs / --MD); empty by default.
   ::fa::cpu::output::CigarReplayRequest cigar_replay_request;
-  // Preset bounds for terminal-clip recovery from cached fine-seed postings.
-  int residue_min_interval_bp = 200;
-  int residue_min_anchor_density_per_100bp = 9;
   // Post-DP rescoring (postdp_scoring.h) supplies the MAPQ's dp1 / dp2. HiFi
   // presets only.
   bool postdp_rescoring = false;
@@ -109,9 +106,6 @@ struct ResolvedDnaOptions {
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (inv_local_chain.h).
   bool inversion_probe_local_gate = false;
-  // Off by default: nominate a second locus from the read's unclaimed
-  // terminal query.
-  bool clip_nominate = false;
   // -N n: alternatives realized per read. Rank 1 is the retained alternative;
   // ranks 2..n are output-only secondaries.
   int alternative_realize_max = 1;
@@ -129,8 +123,6 @@ struct ResolvedDnaOptions {
   ::fa::cpu::voting::QueryPartitionParameters query_partition;
   // The query partition's tiles per read, kMinQueryTiles..kMaxQueryTiles.
   int query_tiles = ::fa::cpu::voting::kQueryTileCount;
-  // Placement's first tile-ownership rule is AnchorTiles, not Span.
-  bool tile_owner_anchors = false;
   // The all-chains lane (options/dna_profile.h all_chains).
   bool all_chains = false;
   // The catalogue's candidates per strand (options/dna_profile.h

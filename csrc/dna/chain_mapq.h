@@ -347,6 +347,14 @@ struct DnaChainMapqEvidence {
   // (multi-block families), read by R1 under hifi_margin_rule only.
   DnaChainMapqRealizedRival sibling;
   DnaChainMapqRealizedRival block_rival;
+  // The record prints from a block part (DnaBlockPart). f1 and cnt are then
+  // its whole chain's and sib_f2 the part's same-candidate subsc; pen_cm and
+  // the map-only logarithm read part_score and part_anchors (minimap2's score
+  // and cnt against score0), and n_sub starts at the part's pool_n_sub.
+  bool part_priced = false;
+  int part_score = 0;
+  int part_anchors = 0;
+  int part_n_sub = 0;
 };
 
 // The formula's verdict on one rival, for the caller.

@@ -195,8 +195,6 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.max_cands = *opt.max_cands;
   if (opt.tiles)
     u.query_tiles = *opt.tiles;
-  if (opt.tile_owner)
-    u.tile_owner_anchors = *opt.tile_owner == "anchors";
   if (opt.min_chain_score)
     u.min_chain_score = *opt.min_chain_score;
   if (opt.dual)

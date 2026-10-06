@@ -178,12 +178,6 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
           std::to_string(::fa::cpu::voting::kMaxQueryTiles) + "]");
     mapping.query_tiles = *user.query_tiles;
   }
-  if (user.tile_owner_anchors) {
-    if (rna_mode)
-      throw std::invalid_argument(
-          "--tile-owner is valid only with a DNA preset");
-    mapping.tile_owner_anchors = *user.tile_owner_anchors;
-  }
   // 1 <= s <= k; s == k is legal, like minimap2's -w 1.
   if (user.k && *user.k < 1)
     throw std::invalid_argument("-k must be at least 1");
