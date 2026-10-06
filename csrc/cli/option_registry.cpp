@@ -277,8 +277,8 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::ScreenBand, '\0', "--screen-band", kSize, kDev, A, "",
          HIDDEN, "", STUDY_FLASH_NATIVE, kPartition},
         // --dual yes|no, also --dual=yes|no: the overlap presets only. no
-        // prints a pair once, from the read whose name sorts first, as
-        // minimap2's --dual=no.
+        // prints a pair once, from its shorter read, ties broken by name
+        // (options/dna_profile.h dual).
         {OptionId::Dual, '\0', "--dual", kStr, kDev, A, "", HIDDEN, "",
          STUDY_CLI_MANUAL, LaneStage::OverlapPairs},
 

@@ -276,8 +276,9 @@ std::vector<int64_t> LongReadAligner::chromosome_lengths() const {
 int LongReadAligner::contig_id(std::string_view name) const {
   return impl_->read([&] { return impl_->a->contig_id(name); });
 }
-int LongReadAligner::contig_name_rank(std::string_view name) const {
-  return impl_->read([&] { return impl_->a->contig_name_rank(name); });
+int LongReadAligner::contig_dual_rank(std::string_view name,
+                                      std::int64_t length) const {
+  return impl_->read([&] { return impl_->a->contig_dual_rank(name, length); });
 }
 
 } // namespace api

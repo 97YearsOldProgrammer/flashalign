@@ -14,8 +14,9 @@ namespace fa::cpu::lr {
 // partition. The candidates on one target, a contig and strand, are chained in
 // one call, over the union of their pools, and take its chains best score
 // first, in catalogue order, one each. A candidate that receives no chain
-// keeps the refusing status, and one on a contig below DnaContext::dual_rank
-// is not chained (NotSelected). Empty when the read's seeds cannot be indexed.
+// keeps the refusing status, and one on a contig ranked below the read
+// (DnaContext::dual_rank) is not chained (NotSelected). Empty when the read's
+// seeds cannot be indexed.
 std::vector<DnaPlacementCandidateChain> build_dna_target_chains(
     const DnaContext& context, const DnaPlacementFamily& family,
     const std::vector<std::uint8_t>& forward_query,

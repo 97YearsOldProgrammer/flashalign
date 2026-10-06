@@ -91,10 +91,13 @@ void assign_targets(const DnaContext& context,
   out.last_contig = 0;
   for (std::size_t index = 0; index < family.candidates.size(); ++index) {
     const VotePeak& peak = family.candidates[index].peak;
-    // --dual=no: a candidate on a contig below the read's rank is not chained,
-    // so the pair prints from the read whose name sorts first.
-    if (peak.chr < context.dual_rank || peak.chr < 0 ||
-        static_cast<std::size_t>(peak.chr) >= contigs)
+    if (peak.chr < 0 || static_cast<std::size_t>(peak.chr) >= contigs)
+      continue;
+    // --dual=no: a candidate on a contig ranked below the read is not chained,
+    // so the pair prints from the read ranked first.
+    if (context.dual_contig_rank != nullptr &&
+        (*context.dual_contig_rank)[static_cast<std::size_t>(peak.chr)] <
+            context.dual_rank)
       continue;
     const std::uint32_t contig = static_cast<std::uint32_t>(peak.chr);
     const int lane = peak.is_rc ? 1 : 0;

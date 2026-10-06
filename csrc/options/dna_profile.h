@@ -111,10 +111,10 @@ struct DnaLongOptions {
   // may reach kAllChainsLaneBound. Map-only.
   bool all_chains = false;
   // In the all-chains lane, whether a pair prints from both of its reads.
-  // When false (--dual=no) a candidate whose contig name sorts before the
-  // read's name is not chained, so a pair prints once, from the read whose
-  // name sorts first, as minimap2's --dual=no (dna/context.h
-  // DnaContext::dual_rank).
+  // When false (--dual=no) the reads are ordered by length, then name, and a
+  // candidate on a contig ordered before the read is not chained, so a pair
+  // prints once, from its shorter read (engine/aligner.h bind_dual_order,
+  // dna/context.h DnaContext::dual_rank).
   bool dual = true;
   // --max-cands: the lane bound, 1..kMaxCatalogueLaneBound, or
   // 1..kAllChainsLaneBound in the all-chains lane; 0 leaves it to the

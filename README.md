@@ -176,8 +176,8 @@ flashalign align -x ava-hifi reads.fq reads.fq > ovl.paf    # PacBio HiFi read o
 read set against itself and print every overlap as a map-only PAF record in minimap2's manner:
 mapping quality 0 and the tags `tp:A:S`, `cm:i` and `s1:i`, with columns 10 and 11 approximate.
 Each read is found in the target by its name and left out of its own mapping, so read names must
-be unique. As in minimap2, an overlap is printed once, from the read whose name sorts first;
-`--dual=yes` prints it from each read that finds it, which on Nanopore reads finds a little more.
+be unique. An overlap is printed once, from the shorter of its two reads (minimap2 prints it from the
+read whose name sorts first); `--dual=yes` prints it from each read that finds it.
 Base-level alignment is not available: `-a`, `-c`, `--cs`, `--MD` and the options that only shape
 an alignment are refused, and so are both presets in the Python module.
 
@@ -185,7 +185,8 @@ The seeding is `-k17 -s9` under `ava-ont` and `-k21 -s5` under `ava-hifi`; `flas
 ava-ont -k INT -s INT reads.fq reads.faix` builds another, and `flashalign align reads.faix
 reads.fq` maps on it. The whole read set is one index in memory unless it is built in parts with
 `flashalign index -I NUM` ([Multi-part index](#multi-part-index)). On simulated Nanopore reads
-`ava-ont` still finds slightly fewer overlaps than minimap2 `ava-ont`.
+`ava-ont` finds 99.8 to 99.9% of the overlaps of 2 kb or more where minimap2 `ava-ont` finds 99.96 to
+99.99%, printing a third to two thirds of its false pairs.
 
 ### Output
 

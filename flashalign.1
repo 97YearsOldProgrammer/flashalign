@@ -709,13 +709,14 @@ Don't output the SAM header.
 With an overlap preset, whether an overlap is printed from each of its reads
 that finds it
 .RB ( yes )
-or once, from the read whose name sorts first
+or once, from the shorter read, ties going to the read whose name sorts first
 .RB ( no ),
-as minimap2's
+minimap2's
 .B \-\-dual
-[no]. With
+[no] (minimap2 prints from the read whose name sorts first). With
 .B no
-a read is not compared with a target read whose name sorts before its own.
+a read is not compared with a target read shorter than itself, or as long and
+earlier by name.
 Refused with any other preset.
 .TP
 .BR \-\-secondary = yes | no
@@ -893,7 +894,7 @@ Experimental. All-vs-all overlap of noisy long reads: map a read set against
 itself, or against an index of the same reads built with
 .B flashalign index \-x ava\-ont
 .RB ( \-k17
-.B \-s9 \-\-min\-support 3 \-\-vote\-seeds 256 \-\-vote\-ratio 0
+.B \-s9 \-\-min\-support 2 \-\-vote\-seeds 256 \-\-vote\-ratio 0
 .B \-\-dw\-slope\-den 64 \-\-max\-cands 16383
 .B \-m100
 .BR \-\-dual=no ).
@@ -906,7 +907,7 @@ minimap2's overlap record without
 .B dv
 and
 .BR rl .
-An overlap is printed once, from the read whose name sorts first
+An overlap is printed once, from the shorter read
 .RB ( \-\-dual ).
 The output is map-only PAF:
 .BR \-a ", " \-c ", " \-\-cs " and " \-\-MD
@@ -924,8 +925,8 @@ Experimental. As
 for accurate long reads such as PacBio HiFi, on the seeding of
 .B lr:hq
 .RB ( \-k21
-.B \-s5 \-\-vote\-seeds 128 \-\-vote\-ratio 0 \-\-max\-cands 16383
-.B \-m40
+.B \-s5 \-\-min\-support 3 \-\-vote\-seeds 128 \-\-vote\-ratio 0 \-\-max\-cands 16383
+.B \-m100
 .BR \-\-dual=no ).
 .RE
 .IP

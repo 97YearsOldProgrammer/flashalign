@@ -33,25 +33,26 @@ inline constexpr DnaPlacementDefaults kOntOverlapPlacement{
     256, ::fa::cpu::voting::kQueryTileCount};
 
 // An all-vs-all overlap row turns on both of its mechanisms (dna_profile.h
-// skip_self, all_chains) and replaces --max-cands and --vote-ratio, and -m
-// where min_chain_score is positive. Off on every other row.
+// skip_self, all_chains) and replaces --max-cands and --vote-ratio, and -m and
+// --min-support where positive. Off on every other row.
 struct DnaOverlapDefaults {
   bool on;
   int max_cands;
   double vote_ratio;
   int min_chain_score;
+  int min_support;
   // --dual's default (dna_profile.h dual).
   bool dual;
 };
 
-inline constexpr DnaOverlapDefaults kNoOverlap{false, 0, 0.0, 0, true};
-// The all-chains lane's widest bound and count admission, and minimap2's
-// --dual=no.
+inline constexpr DnaOverlapDefaults kNoOverlap{false, 0, 0.0, 0, 0, true};
+// The all-chains lane's widest bound and count admission, minimap2's ava -m100
+// and --dual=no.
 inline constexpr DnaOverlapDefaults kHiFiOverlap{
-    true, ::fa::cpu::voting::kAllChainsLaneBound, 0.0, 0, false};
-// The same with minimap2's ava -m100.
+    true, ::fa::cpu::voting::kAllChainsLaneBound, 0.0, 100, 0, false};
+// The same with --min-support 2.
 inline constexpr DnaOverlapDefaults kOntOverlap{
-    true, ::fa::cpu::voting::kAllChainsLaneBound, 0.0, 100, false};
+    true, ::fa::cpu::voting::kAllChainsLaneBound, 0.0, 100, 2, false};
 
 struct DnaPresetProfile {
   std::string_view name;
@@ -173,6 +174,7 @@ inline void set_dna_long_platform_fields(
     mapping.query_partition = profile.query_partition;
     mapping.query_tiles = profile.placement.query_tiles;
     mapping.vote_admission_ratio = lr::kDnaProductionVoteAdmissionRatio;
+    common.min_support = 3;
     if (profile.overlap.on) {
       mapping.skip_self = true;
       mapping.all_chains = true;
@@ -180,6 +182,8 @@ inline void set_dna_long_platform_fields(
       mapping.vote_admission_ratio = profile.overlap.vote_ratio;
       if (profile.overlap.min_chain_score > 0)
         mapping.min_chain_score = profile.overlap.min_chain_score;
+      if (profile.overlap.min_support > 0)
+        common.min_support = profile.overlap.min_support;
       mapping.dual = profile.overlap.dual;
     }
     mapping.dna_tandem_window = lr::kDnaTandemWindow;
@@ -201,7 +205,6 @@ inline void set_dna_long_platform_fields(
     // HiFi only: the late inversion probe's local-chain gate
     // (dna/inv_local_chain.h).
     mapping.inversion_probe_local_gate = profile.kind == DnaPresetKind::HiFi;
-    common.min_support = 3;
     common.max_query_seeds_per_strand = profile.placement.vote_seeds;
     mapping.cigar_dp_match = profile.cigar_dp_match;
     mapping.cigar_dp_mismatch = profile.cigar_dp_mismatch;

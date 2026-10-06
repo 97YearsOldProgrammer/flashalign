@@ -197,7 +197,7 @@ public:
   // equally good loci; 0 when there is no name. `self_contig`, where taken, is contig_id()
   // of the read name, read only where the preset leaves a read out of its own vote
   // (DnaLongOptions::skip_self); -1 when it is not known. `name_rank`, where taken, is
-  // contig_name_rank() of the read name, read only where the preset prints a pair once
+  // contig_dual_rank() of the read, read only where the preset prints a pair once
   // (DnaLongOptions::dual); 0 when it is not known.
   template <class Backend>
   AlignResult align(const std::string &read,
@@ -276,7 +276,7 @@ public:
 
   // Maps a batch in parallel. `read_name_hashes` is null or holds one hash per read,
   // `self_contigs` is null or holds one contig_id() per read, and `name_ranks` is null or
-  // holds one contig_name_rank() per read.
+  // holds one contig_dual_rank() per read.
   template <class Backend>
   std::vector<AlignResult>
   align_batch(const std::vector<std::string> &reads,
@@ -323,15 +323,15 @@ public:
                ? static_cast<int>(it - chr_names_.begin())
                : -1;
   }
-  // The number of contigs whose name sorts before `name`, which are the contigs
-  // numbered below it.
-  int contig_name_rank(std::string_view name) const {
+  // A read's rank in the --dual=no pair order (bind_dual_order): the number of
+  // contigs ordered before a read of this name and length. 0 outside that lane.
+  int contig_dual_rank(std::string_view name, std::int64_t length) const {
     return static_cast<int>(
-        std::lower_bound(chr_names_.begin(), chr_names_.end(), name,
-                         [](const std::string &contig, std::string_view wanted) {
-                           return contig < wanted;
-                         }) -
-        chr_names_.begin());
+        std::partition_point(dual_order_.begin(), dual_order_.end(),
+                             [&](int contig) {
+                               return dual_before(contig, name, length);
+                             }) -
+        dual_order_.begin());
   }
   // Lengths in chromosome_names() order, available even when the bases were not unpacked.
   std::vector<int64_t> chromosome_lengths() const { return chr_lengths_; }
@@ -597,6 +597,7 @@ private:
     cfg_ = std::move(next_config);
     rna_ctx_ = std::move(next_rna_ctx);
     rna_seed_ctx_ = std::move(next_rna_seed_ctx);
+    bind_dual_order();
   }
 
   void compose_rna_runtime() {
@@ -637,8 +638,10 @@ private:
     } else {
       ::fa::cpu::lr::DnaContext dctx = make_dna_context();
       dctx.read_name_hash = read_name_hash;
-      if (cfg_.long_read().all_chains && !cfg_.long_read().dual)
+      if (cfg_.long_read().all_chains && !cfg_.long_read().dual) {
         dctx.dual_rank = name_rank;
+        dctx.dual_contig_rank = &dual_contig_rank_;
+      }
       LongReadSeedContext seed_ctx = make_seed_context();
       if (cfg_.long_read().skip_self)
         seed_ctx.self_contig = self_contig;
@@ -682,6 +685,38 @@ private:
     chr_lengths_.reserve(count);
     for (std::size_t i = 0; i < count; ++i)
       chr_lengths_.push_back(static_cast<int64_t>(offsets[i + 1] - offsets[i]));
+  }
+
+  // Whether `contig` comes before a read of this name and length in the
+  // --dual=no pair order: by length, then name.
+  bool dual_before(int contig, std::string_view name,
+                   std::int64_t length) const {
+    const std::size_t at = static_cast<std::size_t>(contig);
+    if (chr_lengths_[at] != length)
+      return chr_lengths_[at] < length;
+    return chr_names_[at] < name;
+  }
+
+  // The all-chains lane's --dual=no pair order: dual_order_ lists the contigs
+  // in it, dual_contig_rank_ gives each contig's place. Empty outside that
+  // lane.
+  void bind_dual_order() {
+    dual_order_.clear();
+    dual_contig_rank_.clear();
+    if (!cfg_.long_read().all_chains || cfg_.long_read().dual)
+      return;
+    dual_order_.resize(chr_names_.size());
+    std::iota(dual_order_.begin(), dual_order_.end(), 0);
+    std::stable_sort(dual_order_.begin(), dual_order_.end(),
+                     [&](int a, int b) {
+                       return dual_before(
+                           a, chr_names_[static_cast<std::size_t>(b)],
+                           chr_lengths_[static_cast<std::size_t>(b)]);
+                     });
+    dual_contig_rank_.resize(dual_order_.size());
+    for (std::size_t rank = 0; rank < dual_order_.size(); ++rank)
+      dual_contig_rank_[static_cast<std::size_t>(dual_order_[rank])] =
+          static_cast<int>(rank);
   }
 
   // The DNA backend's per-read context: the options it reads and views of the reference.
@@ -768,6 +803,9 @@ private:
   std::vector<std::vector<uint8_t>> chr_encs_;
   // Always filled; chr_encs_ is empty when the run needs no reference bases.
   std::vector<int64_t> chr_lengths_;
+  // bind_dual_order(); read-only while mapping.
+  std::vector<int> dual_order_;
+  std::vector<int> dual_contig_rank_;
   std::shared_ptr<SeedIndex> index_ = std::make_shared<SeedIndex>();
   // Occurrence distribution of the attached index, computed once per index.
   std::shared_ptr<const ::fa::cpu::FaixOccDistribution> occ_dist_;
@@ -793,7 +831,7 @@ public:
     std::vector<std::uint32_t> read_name_hashes;
     // Empty, or one contig_id() per read.
     std::vector<int> self_contigs;
-    // Empty, or one contig_name_rank() per read.
+    // Empty, or one contig_dual_rank() per read.
     std::vector<int> name_ranks;
   };
 
@@ -815,7 +853,7 @@ public:
   // Queues a batch and returns at once. Precondition: in_flight() < window().
   // `read_name_hashes` is empty or holds one hash per read, `self_contigs` is empty or
   // holds one contig_id() per read, and `name_ranks` is empty or holds one
-  // contig_name_rank() per read.
+  // contig_dual_rank() per read.
   void submit(std::vector<std::string> reads,
               std::vector<std::uint32_t> read_name_hashes = {},
               std::vector<int> self_contigs = {},

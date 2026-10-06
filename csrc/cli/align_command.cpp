@@ -627,18 +627,21 @@ int run_align(const AlignOptions& cli_options) {
           contigs.push_back(dna_aligner->contig_id(record.name));
         return contigs;
       };
-  // Where the preset prints a pair once (--dual=no): each read name's rank
-  // among the contigs of the index part being mapped. Empty otherwise.
+  // Where the preset prints a pair once (--dual=no): each read's rank in the
+  // pair order among the contigs of the index part being mapped, from its name
+  // and the length of its sequence in `seqs`. Empty otherwise.
   const bool skip_dual = resolved->resolved().long_read().all_chains &&
                          !resolved->resolved().long_read().dual;
   const auto read_name_ranks =
-      [&](const std::vector<fa::cpu::io::FastxRecord>& records) {
+      [&](const std::vector<fa::cpu::io::FastxRecord>& records,
+          const std::vector<std::string>& seqs) {
         std::vector<int> ranks;
         if (!skip_dual)
           return ranks;
         ranks.reserve(records.size());
-        for (const fa::cpu::io::FastxRecord& record : records)
-          ranks.push_back(dna_aligner->contig_name_rank(record.name));
+        for (std::size_t i = 0; i < records.size(); ++i)
+          ranks.push_back(dna_aligner->contig_dual_rank(
+              records[i].name, static_cast<std::int64_t>(seqs[i].size())));
         return ranks;
       };
 
@@ -651,7 +654,7 @@ int run_align(const AlignOptions& cli_options) {
     AlignedBatch done;
     done.results = align_batch(seqs, read_name_hashes(in.records),
                                read_self_contigs(in.records),
-                               read_name_ranks(in.records));
+                               read_name_ranks(in.records, seqs));
     for (size_t i = 0; i < seqs.size(); ++i)
       in.records[i].seq = std::move(seqs[i]);
     done.records = std::move(in.records);
@@ -682,7 +685,7 @@ int run_align(const AlignOptions& cli_options) {
       seqs.push_back(std::move(rec.seq));
     std::vector<std::uint32_t> name_hashes = read_name_hashes(in.records);
     std::vector<int> self_contigs = read_self_contigs(in.records);
-    std::vector<int> name_ranks = read_name_ranks(in.records);
+    std::vector<int> name_ranks = read_name_ranks(in.records, seqs);
     windowed_records.push_back(std::move(in.records));
     session->submit(std::move(seqs), std::move(name_hashes),
                     std::move(self_contigs), std::move(name_ranks));

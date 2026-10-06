@@ -140,7 +140,7 @@ public:
                   std::uint32_t read_name_hash = 0) const;
   // `read_name_hashes` is null or holds one hash per read. `self_contigs` is null or holds
   // one contig_id() per read, read only where the preset leaves a read out of its own vote.
-  // `name_ranks` is null or holds one contig_name_rank() per read, read only where the
+  // `name_ranks` is null or holds one contig_dual_rank() per read, read only where the
   // preset prints a pair once (--dual=no).
   std::vector<Alignment>
   align_batch(const std::vector<std::string> &reads,
@@ -161,8 +161,10 @@ public:
   // The reference sequence named exactly `name`, as its index in chromosome_names(); -1
   // when there is none.
   int contig_id(std::string_view name) const;
-  // The number of reference sequences whose name sorts before `name`, by strcmp.
-  int contig_name_rank(std::string_view name) const;
+  // A read's rank in the overlap presets' --dual=no pair order: the number of
+  // reference sequences ordered before a read of this name and length, by
+  // length, then name (strcmp). 0 outside that lane.
+  int contig_dual_rank(std::string_view name, std::int64_t length) const;
 
 private:
   friend class WindowedAlignSession;
@@ -182,7 +184,7 @@ public:
 
   // `read_name_hashes` is empty or holds one hash per read, `self_contigs` is empty or
   // holds one LongReadAligner::contig_id() per read, and `name_ranks` is empty or holds
-  // one LongReadAligner::contig_name_rank() per read.
+  // one LongReadAligner::contig_dual_rank() per read.
   void submit(std::vector<std::string> reads,
               std::vector<std::uint32_t> read_name_hashes = {},
               std::vector<int> self_contigs = {},

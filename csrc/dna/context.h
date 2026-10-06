@@ -11,6 +11,7 @@
 #include "../voting/query_partition.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace fa {
 namespace cpu {
@@ -143,10 +144,11 @@ struct DnaContext {
   // read's own exact diagonal there, as minimap2's -D. -1 otherwise.
   int self_contig = -1;
   // The all-chains lane under --dual=no (options/dna_profile.h dual): the
-  // read name's rank among the contig names, set by the engine. A candidate
-  // on a contig numbered below it, whose name sorts before the read's, is
-  // not chained. 0 otherwise.
+  // read's rank in the pair order and each contig's rank in it, set by the
+  // engine (engine/aligner.h bind_dual_order). A candidate on a contig ranked
+  // below the read is not chained. 0 and null otherwise.
   int dual_rank = 0;
+  const std::vector<int>* dual_contig_rank = nullptr;
   // The read's seed density for the inversion probe's local chain, kept by
   // placement (DnaPlacementChainingResult::inversion_gate_seeds) and set by
   // map_read for every realization of the read; null when not kept.

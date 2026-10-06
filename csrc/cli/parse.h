@@ -81,8 +81,8 @@ struct AlignOptions {
     // -m: minimap2's minimal chain score, >= 1. DNA presets only.
     std::optional<int> min_chain_score;
     // --dual yes|no: whether an overlap preset prints a pair from both of its
-    // reads or, with no, only from the read whose name sorts first. Unset, the
-    // preset's value. Overlap presets only.
+    // reads or, with no, only from its shorter read, ties broken by name.
+    // Unset, the preset's value. Overlap presets only.
     std::optional<bool> dual;
     std::optional<int> tile_supported_reward;
     std::optional<int> tile_block_open_cost;
