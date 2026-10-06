@@ -29,16 +29,9 @@
 //
 // HiFi margin rule (hifi_margin_rule, HiFi presets only). At HiFi accuracy the
 // ratio form 1 - x*x cannot tell a rival one substitution worse from a tie, so
-// the raw ksw2 margin over a realized rival is read against the scoring row:
-//   R1 The seat. The realized rivals are the competing alternative, the
-//      winner's realized sibling chain (single-block families) and the block's
-//      realized catalogue rival (multi-block families). Each has a raw margin
-//      dp1_raw - dp2_raw and, where the two records' query spans intersect,
-//      a margin m_in over the intersection. The effective margin m_eff is
-//      min(raw, m_in) for a whole-read hypothesis and m_in alone for a block
-//      rival, which is realized clipped to the block's span. The rival with
-//      the smallest m_eff takes the dp2 seat; the others lost by more and
-//      enter neither x nor x_other.
+// the DP margin over the rival that owns dp2 is read against the scoring row:
+//   R1 The seat: the rival that owns dp2, when it competes. Its margin m_eff
+//      is dp1 - dp2.
 //   R2 The guard. The margin decides when m_eff >= A + B and the seat is
 //      chained, not a tie, has fewer anchors than the winner, and every other
 //      competing rival is weaker than the winner (x_other < 1).
@@ -48,15 +41,13 @@
 //      n_sub term and the clamp.
 //   R4 The never-Q0 promotion needs a seat beaten by at least A + B and
 //      x_other < 1.
-//   R5 Otherwise minimap2's ratio form, with the seat's own score pair as
-//      dp1 / dp2 and mapq_alt bounded by m_eff.
+//   R5 Otherwise minimap2's ratio form on dp1 / dp2, with its mapq_alt on
+//      m_eff.
 //   R6 On a block record of a multi-block family the MAPQ is capped at
 //      kDnaChainMapqHifiSplitCapMapq when (a) there is no seat and a competing
 //      rival reaches kDnaChainMapqHifiSplitRivalStrength, or (b) the record's
 //      own divergence is substitution-dominated: HiFi errors are mostly
 //      indels, a wrong repeat copy's differences are not.
-// The sibling and block rivals are realized like the alternative into a
-// local outcome that only the MAPQ reads; nothing is emitted from them.
 //
 // The kDnaChainMapqStudy* bits, on under the HiFi presets only, adapt these
 // rules to real reads, which carry sample variants and SVs:
@@ -64,14 +55,8 @@
 //       family's cleanest record's, by the divergence contrast's z test.
 //   8   The committed record vouches for a chained rival when both ends of
 //       the rival's chain lie on the record's alignment (record_shadow).
-//   16  A bridged unit belongs to the block whose candidate has the best
-//       chain.
-//   32  A realized block rival the shadow rule calls the winner's own locus
-//       does not take the seat.
 //   64  Any record of the family, or two records jointly (an SV's flanks),
 //       can vouch as in bit 8.
-//   128 The block-rival path skips a candidate the own-locus verdict accepts,
-//       before realizing it.
 //   256 Each block of a multi-block family also chains its own top rivals, so
 //       a smaller flank is compared against the rivals of its own span.
 #pragma once
@@ -120,8 +105,7 @@ inline constexpr double kDnaChainMapqHifiRivalStrengthMax = 1.0;
 inline constexpr int kDnaChainMapqHifiSingleEventMapq = 9;
 // R6: the split-read cap; (a) the rival strength that triggers it; (b) the
 // minimum event count (mismatches + indel events) and mismatch share. (b)
-// applies with or without a seat, since a realized block rival need not be
-// the true copy.
+// applies with or without a seat.
 inline constexpr int kDnaChainMapqHifiSplitCapMapq = 3;
 inline constexpr double kDnaChainMapqHifiSplitRivalStrength = 0.4;
 inline constexpr int kDnaChainMapqHifiSubstitutionEvents = 20;
@@ -146,29 +130,17 @@ inline constexpr int kDnaChainMapqChainShadowFraction = 5;
 // the alternative hypothesis's shadow test.
 inline constexpr int kDnaChainMapqPeakShadowFloorBp = 2000;
 inline constexpr int kDnaChainMapqPeakShadowFraction = 10;
-// The winner's sibling chain is realized only when
-// max(sib_f2, min_chain_score) / f1 reaches this; below it the
-// ratio form is flat and the DP would change nothing.
-inline constexpr double kDnaChainMapqSiblingRealizeMin = 0.5;
-// At most this many block-rival realizations per read, blocks taken by query
-// length descending, then owner id; the rest record Capped.
-inline constexpr int kDnaChainMapqBlockRivalMax = 3;
 // The rule bits (header comment).
 inline constexpr int kDnaChainMapqStudyRelativeShareCap = 2;
 inline constexpr int kDnaChainMapqStudyRecordShadow = 8;
-inline constexpr int kDnaChainMapqStudyBridgeOwner = 16;
-inline constexpr int kDnaChainMapqStudyNoShadowSeat = 32;
 inline constexpr int kDnaChainMapqStudyFamilyVouch = 64;
-inline constexpr int kDnaChainMapqStudyLaneVerdict = 128;
 inline constexpr int kDnaChainMapqStudyBlockRivals = 256;
 
 // The bits in force under the HiFi presets.
 inline constexpr int kDnaChainMapqStudy =
     kDnaChainMapqStudyRelativeShareCap | kDnaChainMapqStudyRecordShadow |
-    kDnaChainMapqStudyBridgeOwner | kDnaChainMapqStudyNoShadowSeat |
-    kDnaChainMapqStudyFamilyVouch | kDnaChainMapqStudyLaneVerdict |
-    kDnaChainMapqStudyBlockRivals;
-static_assert(kDnaChainMapqStudy == 506, "the HiFi MAPQ rule set");
+    kDnaChainMapqStudyFamilyVouch | kDnaChainMapqStudyBlockRivals;
+static_assert(kDnaChainMapqStudy == 330, "the HiFi MAPQ rule set");
 
 // The rule bits for a run: kDnaChainMapqStudy under the HiFi presets, else 0.
 inline constexpr int dna_chain_mapq_study_bits(bool hifi_margin_rule) noexcept {
@@ -208,73 +180,6 @@ struct DnaChainMapqRival {
   int vouch = 0;
 };
 
-// Why a rival was not realized; None means it was. (B) codes are the sibling
-// path's, (A) codes the block-rival path's.
-enum class DnaChainMapqRealizeRefusal : std::uint8_t {
-  None = 0,
-  NotAttempted = 1,
-  NoSibling = 2,         // (B) the winner chain binds no rival sibling
-  WeakSibling = 3,       // (B) the sibling floor is under the realize floor
-  NoRival = 4,           // (A) no catalogue candidate outside the family
-  Unchained = 5,         // (A) rivals exist, none has a whole-query chain
-  Inadmissible = 6,      // (A) chained rivals are all disjoint / shadow /
-                         //     incredible for this block
-  Capped = 7,            // (A) an admissible rival lost to the per-read cap
-  RealizationFailed = 8, // the fixpoint or the realizer refused it
-  OwnLocus = 9,          // (A) judged the read's own locus (bit 128)
-};
-
-// One realized rival: its DP result, geometry, divergence and its
-// interval-matched score against the record it rivals. R1 reads realized,
-// dp2_raw, chain_score, chain_anchors and the im_* fields. Fields are -1 / 0
-// when not realized.
-struct DnaChainMapqRealizedRival {
-  bool realized = false;
-  DnaChainMapqRealizeRefusal refusal = DnaChainMapqRealizeRefusal::NotAttempted;
-  int candidate = -1; // catalogue id of the realized rival
-  // The realization's raw ksw2 decision score, and the realized primary
-  // record's own score, which differs by end accounting.
-  double dp2_raw = 0.0;
-  int rec_score = -1;
-  // The realized primary record's forward-query span, contig, strand and
-  // contig-local reference span.
-  int q_begin = -1;
-  int q_end = -1;
-  int contig = -1;
-  bool reverse = false;
-  int ref_begin = -1;
-  int ref_end = -1;
-  // The realized rival chain's score and anchors.
-  int chain_score = 0;
-  int chain_anchors = 0;
-  // Start diagonal of the rival chain minus that of the rivaled record, in
-  // the rival's strand frame; 0 across contigs or strands.
-  std::int64_t diag_shift = 0;
-  // The realized record's mismatches (-1 without accounting) and its CIGAR
-  // event and aligned-column counts.
-  int mismatches = -1;
-  int ins_events = -1;
-  int del_events = -1;
-  int aligned_bases = -1;
-  // Dual-affine scores (affine_score_over_query_interval) over [im_lo, im_hi),
-  // the forward-query intersection of the two records' spans (im_hi < im_lo
-  // means disjoint): im_a_* for the rivaled record inside / outside, im_b_*
-  // for the rival.
-  int im_lo = -1;
-  int im_hi = -1;
-  long long im_a_inside = -1;
-  long long im_a_outside = -1;
-  long long im_b_inside = -1;
-  long long im_b_outside = -1;
-  // Block rivals: 1 = realized clipped to the block record's query span; 2 =
-  // the clipped realization failed and the whole-query one stands in. 0
-  // otherwise.
-  int clip_arm = 0;
-  // What the realization cost, accepted or not; both attempts when clip_arm is 2.
-  int ksw2_attempts = 0;
-  long long estimated_cells = 0;
-};
-
 struct DnaChainMapqEvidence {
   // minimap2's min_chain_score (-m): a rival scoring under it counts as it.
   int min_chain_score = kDnaMinChainScore;
@@ -303,8 +208,8 @@ struct DnaChainMapqEvidence {
   // accounting (map-only), which makes the identity factor inert.
   double identity = 1.0;
   int match_sc = 1; // minimap2 opt->a
-  // minimap2's opt->a * 2 + opt->b: a realized rival within this of dp1
-  // counts toward n_sub (mm_set_parent).
+  // minimap2's opt->a * 2 + opt->b: the dp2 owner within this of dp1 counts
+  // toward n_sub (mm_set_parent).
   int sub_diff = 0;
   // mm_set_parent's `ri->cnt >= rp->cnt` clause: a chained rival with at
   // least the winner's anchors counts toward n_sub.
@@ -317,19 +222,12 @@ struct DnaChainMapqEvidence {
   //   chain_shadow_read_slack: see dna_chain_mapq_chain_shadow_slack.
   bool shadow_vote_credit = false;
   bool chain_shadow_read_slack = false;
-  // HiFi margin rule (header comment), HiFi presets only. dp1_raw / dp2_raw
-  // are the raw ksw2 decision scores (dp1 / dp2 above may be post-DP
-  // prices), read against the scoring row below.
+  // HiFi margin rule (header comment), HiFi presets only: the margin
+  // dp1 - dp2 is read against the scoring row below.
   bool hifi_margin_rule = false;
-  double dp1_raw = 0.0;
-  double dp2_raw = 0.0;
   int substitution_cost = 0; // A + B
   int gap_open1 = 0;         // O1
   int gap_extend1 = 0;       // E1
-  // R1: the alternative's interval margin, winner minus rival after any
-  // promotion swap. Valid only when the primaries' query spans intersect.
-  bool alternative_im_valid = false;
-  double alternative_im_margin = 0.0;
   // R6: the family's block-owning records, and this record's mismatches (-1
   // without accounting) and indel events (-1 without a CIGAR).
   int family_blocks = 1;
@@ -343,10 +241,6 @@ struct DnaChainMapqEvidence {
   int record_aligned_bases = -1;
   int family_min_mismatches = -1;
   int family_min_aligned = -1;
-  // The realized sibling (single-block families) and block rival
-  // (multi-block families), read by R1 under hifi_margin_rule only.
-  DnaChainMapqRealizedRival sibling;
-  DnaChainMapqRealizedRival block_rival;
   // The record prints from a block part (DnaBlockPart). f1 and cnt are then
   // its whole chain's and sib_f2 the part's same-candidate subsc; pen_cm and
   // the map-only logarithm read part_score and part_anchors (minimap2's score
@@ -396,13 +290,10 @@ struct DnaChainMapqBreakdown {
   double x_other = 0.0;
   bool hifi_margin_applied = false;
   int hifi_margin_mapq = -1;
-  // The seat (0 none, 1 alternative, 2 sibling, 3 block rival) and its R1
-  // margins, the pen the margin rule uses, and the split-read cap applied
-  // (0 none, 1 rival strength, 2 substitution share, 3 both).
+  // The seat (0 none, 1 the dp2 owner) and its R1 margin, the pen the margin
+  // rule uses, and the split-read cap applied (0 none, 1 rival strength, 2
+  // substitution share, 3 both).
   int seat_kind = 0;
-  double seat_raw_margin = 0.0;
-  bool seat_in_valid = false;
-  double seat_in_margin = 0.0;
   double seat_m_eff = 0.0;
   double hifi_pen = 0.0;
   int split_cap = 0;
@@ -437,12 +328,6 @@ DnaChainMapqChainShadow dna_chain_mapq_chain_shadow(
     int winner_q_end, bool winner_reverse, int rival_ref_begin,
     int rival_ref_end, int rival_q_begin, int rival_q_end, bool rival_reverse,
     int read_len, std::int64_t slack) noexcept;
-
-// The mask_level test on two forward-query spans, in integer form: they
-// compete when they overlap over more than half the shorter. Unlike
-// dna_chain_mapq_admissible, a missing span never competes.
-bool dna_chain_mapq_spans_compete(int a_begin, int a_end, int b_begin,
-                                  int b_end) noexcept;
 
 // The per-rival verdict, without the parts that depend on the whole
 // evidence: the DP factor of `strength`, the DP rule of `counted` and the

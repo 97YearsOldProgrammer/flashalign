@@ -290,9 +290,10 @@ and
 .B XA
 report, and is a record of its own under
 .BR \-\-secondary=yes .
-Under a DNA preset it decides which alternative loci are aligned beside the
-primary, and which rival a piece of a split read is weighed against in the
-mapping quality: one whose chain scores at least
+Under a DNA preset it decides which alternative loci enter the ownership
+selection, which chains attached to an owner are aligned beside it and kept as
+secondary alignments, and which rival a piece of a split read is weighed against
+in the mapping quality: one whose chain scores at least
 .I FLOAT
 times the primary's, or within 2\fIk\fR of it.
 .TP
@@ -312,8 +313,14 @@ of them are realized for
 .B XA:Z
 and
 .BR md:i .
-On the DNA presets the best alternative is weighed in the mapping quality and
-may become primary; the others are printed with mapping quality 0.
+On the DNA presets, with
+.BR \-\-secondary=yes ,
+the chains of up to
+.I INT
+alternative loci enter the ownership selection (without it, of one); with a
+CIGAR at most 5 secondary alignments are kept per read, a number
+.B \-N
+does not set.
 .B \-N0
 turns secondary output off, as
 .BR \-\-secondary=no .
@@ -731,12 +738,11 @@ but no
 .B SA
 or
 .BR XA .
-Under a DNA preset the primary record of a read aligned in several pieces is
-first extended toward the read ends, and a piece it then covers by at least
-half of that piece's span is a secondary, not a supplementary; it is listed on
-the primary's
-.B XA
-either way.
+Under a DNA preset the secondary alignments are those of the chains aligned
+beside an owner that, after alignment, overlap a primary record by more than
+half of the shorter, at most 5 per read; they are listed on the primary's
+.BR XA .
+Without a CIGAR a DNA preset writes no secondary alignment.
 The value may also be given as a separate word
 .RB ( "\-\-secondary yes" );
 typed twice, the last one wins.

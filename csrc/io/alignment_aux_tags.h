@@ -32,14 +32,12 @@ inline AlignmentAuxiliaryTags alignment_auxiliary_tags(
     tags.ambiguities = result.ambiguities;
   }
   // md is minibwa's margin: this record's ms minus the best ms among its
-  // mapped alternatives (0 when there are none), output-only ones aside. It
-  // may be negative.
+  // mapped alternatives (0 when there are none). It may be negative.
   if (result.dp_max_segment >= 0) {
     tags.max_segment_score = result.dp_max_segment;
     int best_alternative = 0;
     for (const AlignResult& alternative : result.secondary) {
-      if (!alternative.mapped() || alternative.output_only ||
-          alternative.dp_max_segment < 0)
+      if (!alternative.mapped() || alternative.dp_max_segment < 0)
         continue;
       best_alternative = std::max(best_alternative, alternative.dp_max_segment);
     }

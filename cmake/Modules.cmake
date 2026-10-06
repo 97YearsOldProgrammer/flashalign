@@ -64,6 +64,7 @@ add_library(flashalign_dna STATIC
     csrc/dna/record_family.cpp
     csrc/dna/family_projection.cpp
     csrc/dna/family_realization.cpp
+    csrc/dna/region_realization.cpp
     csrc/dna/dp_runner.cpp
     csrc/dna/realization_controller.cpp
     csrc/dna/ordered_anchor_path.cpp

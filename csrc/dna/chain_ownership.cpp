@@ -116,7 +116,8 @@ int boundary(const std::vector<int>& fa, const std::vector<int>& fb, int ob,
 
 DnaOwnershipSelection select_chain_owners(
     int read_length, int seed_length, int min_chain_score,
-    const std::vector<DnaOwnershipPath>& paths) {
+    const std::vector<DnaOwnershipPath>& paths,
+    std::vector<DnaOwnershipRole>& roles) {
   DnaOwnershipSelection out;
   const int L = read_length;
   const int k = seed_length;
@@ -167,6 +168,10 @@ DnaOwnershipSelection select_chain_owners(
     int unit = 0;
     double pool_subsc = 0.0;
     int pool_n_sub = 0;
+    // For `roles` only.
+    double subsc = 0.0;
+    int n_sub = 0;
+    std::size_t role = 0;
   };
   std::vector<Owner> owners;
   std::vector<std::pair<int, int>> cover;
@@ -271,6 +276,8 @@ DnaOwnershipSelection select_chain_owners(
     if (parent < 0) {
       settle();
       owners.push_back({u});
+      owners.back().role = roles.size();
+      roles.push_back({unit.item, unit.item});
       hold(u, static_cast<int>(owners.size()) - 1, true);
       continue;
     }
@@ -290,6 +297,16 @@ DnaOwnershipSelection select_chain_owners(
           std::max(owner.pool_subsc, static_cast<double>(unit.score));
       if (unit.n >= head.n) ++owner.pool_n_sub;
     }
+    owner.subsc = std::max(owner.subsc, static_cast<double>(unit.score));
+    if (unit.n >= head.n) ++owner.n_sub;
+    roles.push_back({unit.item, head.item});
+  }
+  for (const Owner& owner : owners) {
+    DnaOwnershipRole& role = roles[owner.role];
+    role.subsc = owner.subsc;
+    role.n_sub = owner.n_sub;
+    role.pool_subsc = owner.pool_subsc;
+    role.pool_n_sub = owner.pool_n_sub;
   }
 
   // Disjoint owners: a later owner containing an earlier one gets a hole

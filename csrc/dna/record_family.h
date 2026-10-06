@@ -25,12 +25,6 @@ struct DnaRecordFamily {
   bool valid = false;
 };
 
-// Strict-weak ordering whose greatest element is the primary: widest query
-// span, then higher score, then the smallest (query_start, chromosome, pos,
-// is_reverse). Shared with the emission floor's promotion.
-bool dna_primary_precedence_less(const AlignResult& left,
-                                 const AlignResult& right);
-
 // Orders records by query, rejects any query overlap, picks the primary and
 // orders the supplementaries. Changes no geometry and assigns no MAPQ.
 DnaRecordFamily

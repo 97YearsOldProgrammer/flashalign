@@ -9,18 +9,11 @@ namespace {
 
 using RecordIterator = std::vector<DnaSegmentRecord>::iterator;
 
-RecordIterator widest_primary(std::vector<DnaSegmentRecord>& records) {
-  return std::max_element(
-      records.begin(), records.end(),
-      [](const DnaSegmentRecord& left, const DnaSegmentRecord& right) {
-        return dna_primary_precedence_less(left.alignment, right.alignment);
-      });
-}
-
-} // namespace
-
-bool dna_primary_precedence_less(const AlignResult& left,
-                                 const AlignResult& right) {
+// Strict-weak ordering whose greatest element is the primary: widest query
+// span, then higher score, then the smallest (query_start, chromosome, pos,
+// is_reverse).
+bool primary_precedence_less(const AlignResult& left,
+                             const AlignResult& right) {
   const int left_span = left.query_end - left.query_start;
   const int right_span = right.query_end - right.query_start;
   if (left_span != right_span)
@@ -32,6 +25,16 @@ bool dna_primary_precedence_less(const AlignResult& left,
                                               right.chromosome, right.pos,
                                               right.is_reverse);
 }
+
+RecordIterator widest_primary(std::vector<DnaSegmentRecord>& records) {
+  return std::max_element(
+      records.begin(), records.end(),
+      [](const DnaSegmentRecord& left, const DnaSegmentRecord& right) {
+        return primary_precedence_less(left.alignment, right.alignment);
+      });
+}
+
+} // namespace
 
 DnaRecordFamily
 assemble_dna_record_family(std::vector<DnaSegmentRecord> records) {

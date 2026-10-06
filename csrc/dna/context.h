@@ -69,7 +69,8 @@ struct ResolvedDnaOptions {
   // minimap2 opt->zdrop_inv, for the local-inversion probe (mm_test_zdrop).
   int cigar_dp_inversion_zdrop = 200;
   // minimap2 opt->pri_ratio (-p): the credibility ratio of the alternative
-  // and of a block's rival (alternative_hypothesis.h).
+  // (alternative_hypothesis.h) and of the -c lane's secondary records
+  // (region_realization.h).
   double pri_ratio = 0.8;
   // minimap2 opt->min_chain_score (-m): the emission floor, the MAPQ's subsc
   // floor and the minimum size of an inversion middle.
@@ -96,18 +97,15 @@ struct ResolvedDnaOptions {
   bool enable_full_read_cigar = true;
   // Optional cs:Z / MD:Z output (minimap2 --cs / --MD); empty by default.
   ::fa::cpu::output::CigarReplayRequest cigar_replay_request;
-  // Post-DP rescoring (postdp_scoring.h) supplies the MAPQ's dp1 / dp2. HiFi
-  // presets only.
-  bool postdp_rescoring = false;
-  // Chain MAPQ, HiFi presets only: on the DP branch the raw ksw2 margin
-  // replaces the ratio form.
+  // Chain MAPQ, HiFi presets only: on the DP branch the margin dp_max -
+  // dp_max2 over the dp2 owner replaces the ratio form.
   bool chain_mapq_hifi_margin = false;
   // HiFi presets only: a seam's or piece's late inversion probe runs only
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (inv_local_chain.h).
   bool inversion_probe_local_gate = false;
-  // -N n: alternatives realized per read. Rank 1 is the retained alternative;
-  // ranks 2..n are output-only secondaries.
+  // -N n: the alternatives whose whole-query chains enter the ownership
+  // selection, best first (placement_chaining.cpp).
   int alternative_realize_max = 1;
   // Chain MAPQ own-locus rules, both on: a chained shadow's vote counts for
   // the winner, and the chained shadow window grows with read length. No

@@ -749,7 +749,6 @@ private:
     dctx.opts.enable_full_read_cigar =
         cfg_.common.enable_full_read_cigar;
     dctx.opts.cigar_replay_request = cigar_replay_request_for(cfg_.common);
-    dctx.opts.postdp_rescoring = mapping.postdp_rescoring;
     dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
     dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
     dctx.opts.alternative_realize_max = mapping.alternative_realize_max;

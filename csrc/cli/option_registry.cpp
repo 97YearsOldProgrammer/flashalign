@@ -68,11 +68,12 @@ const std::vector<OptionSpec>& specs_table() {
          "FLOAT", SEC_PLACEMENT,
          "min secondary-to-primary score ratio [0.8]", "", kSelection},
         // As in minimap2: -N 5 keeps the best locus and at most five rivals,
-        // and -N 0 is --secondary no. Both realize up to INT rivals; the
-        // DNA presets default to 1.
+        // and -N 0 is --secondary no. On a splice preset up to INT rivals are
+        // realized; on a DNA preset, with secondary output, up to INT
+        // alternatives' chains enter the ownership selection (default 1).
         {OptionId::SpliceMaxLoci, 'N', "", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "retain at most INT secondary alignments [1]", "", kSelection},
+         "retain at most INT secondary alignments (effective with -xsplice); on a DNA preset with --secondary=yes, chain at most INT alternative placements [1]", "", kSelection},
         {OptionId::MinSupport, '\0', "--min-support", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "minimal number of seeds on a vote peak [3]"},
@@ -207,8 +208,7 @@ const std::vector<OptionSpec>& specs_table() {
          "in PAF, output unmapped queries; the strand and the reference name fields are set to '*'"},
         // Also --secondary yes, the value as a separate word. yes emits one
         // record per mapped alternative (FLAG 0x100, tp:A:S, MAPQ 0, no SEQ); either
-        // way the alternatives appear on the primary's XA:Z, md:i and s2:i,
-        // output-only DNA secondaries (-N >= 2) aside.
+        // way the alternatives appear on the primary's XA:Z, md:i and s2:i.
         {OptionId::Secondary, '\0', "--secondary", kStr, kStable, A,
          "=yes|no", SEC_IO,
          "whether to output secondary alignments [no]", "", kSelection},

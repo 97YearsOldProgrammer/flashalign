@@ -43,8 +43,7 @@ struct AlignOptions {
     // verbatim. uBAM input has no comment.
     bool copy_comment = false;
     // --secondary yes|no: emit one record per mapped alternative (FLAG 0x100,
-    // tp:A:S) in every format. The primary's XA:Z lists them either way,
-    // output-only DNA secondaries (-N >= 2) aside.
+    // tp:A:S) in every format. The primary's XA:Z lists them either way.
     bool output_secondary = false;
     // -R/--rg: the unescaped @RG header line and its ID; empty when not given.
     std::string read_group_line;
@@ -111,8 +110,8 @@ struct AlignOptions {
     // depth (-N + 1), which also sets the realization budget.
     std::optional<int> rna_rival_min_diff;
     std::optional<int> rna_max_loci;
-    // DNA: -N's count of alternatives realized per read; unset without
-    // secondary output.
+    // DNA: -N's count of alternatives whose whole-query chains enter the
+    // ownership selection; unset without secondary output.
     std::optional<int> dna_alternative_realize_max;
     // --vote-ratio: admit vote peaks by their ratio to the read's best vote,
     // in [0,1]; 0 admits by count. DNA presets only.

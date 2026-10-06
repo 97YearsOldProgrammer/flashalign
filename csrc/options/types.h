@@ -83,14 +83,15 @@ struct UserOverrides {
   std::optional<int> rna_strand;
   std::optional<std::string> rna_junction_bed;
   std::optional<int> rna_junction_bonus;
-  // -p: on a DNA preset the credibility ratio of the alternative and of a
-  // block's rival, on a splice preset the rival retention ratio.
+  // -p: on a DNA preset the credibility ratio of the alternative and of the
+  // -c lane's secondary records, on a splice preset the rival retention ratio.
   std::optional<double> pri_ratio;
   // RNA rival retention band (--rival-min-diff) and catalogue depth (-N + 1),
   // which also sets the realization budget to one fewer.
   std::optional<int> rna_rival_min_diff;
   std::optional<int> rna_max_loci; // >= 1
-  // -N on a DNA preset: alternatives realized per read, >= 1.
+  // -N on a DNA preset: the alternatives whose whole-query chains enter the
+  // ownership selection, >= 1.
   std::optional<int> dna_alternative_realize_max;
   // --vote-ratio: admit vote peaks by ratio to the read's best vote, in
   // [0,1]; 0 admits by count. DNA presets only.

@@ -1,5 +1,6 @@
 #include "placement_chaining.h"
 #include "placement_chaining_internal.h"
+#include "chain_mapq.h" // kDnaChainMapqStudyBlockRivals
 #include "chain_ownership.h"
 
 #include "../chaining/colinear_chain.h"
@@ -569,9 +570,11 @@ bool stabilize_selected_family(
 // the tile owners: each block becomes one block of partition.selected, in
 // query order, with its chain range and bounds in family.block_parts, and a
 // tile goes to the block holding its middle. False, with the partition left
-// as it is, when no chain qualifies to own.
+// as it is, when no chain qualifies to own. `kept` receives the selection's
+// items and roles.
 bool select_block_owners(const DnaContext& context, DnaPlacementFamily& family,
-                         const DnaPlacementChainingResult& result) {
+                         const DnaPlacementChainingResult& result,
+                         DnaKeptSelection& kept) {
   namespace voting = ::fa::cpu::voting;
   std::vector<DnaOwnershipPath> paths;
   for (const DnaPlacementCandidateChain& record : result.candidates) {
@@ -590,9 +593,15 @@ bool select_block_owners(const DnaContext& context, DnaPlacementFamily& family,
                            ? record.sibling_scores[j]
                            : 0});
   }
+  std::vector<DnaOwnershipRole> roles;
   const DnaOwnershipSelection selection =
       select_chain_owners(family.read_length, family.seed_length,
-                          context.opts.min_chain_score, paths);
+                          context.opts.min_chain_score, paths, roles);
+  kept.items.clear();
+  for (const DnaOwnershipPath& item : selection.items)
+    kept.items.push_back(
+        {item.candidate, item.path, item.contig, item.reverse, item.score});
+  kept.roles = std::move(roles);
   if (selection.blocks.empty()) return false;
   const int read_length = family.read_length;
   const int seed_length = family.seed_length;
@@ -662,7 +671,7 @@ bool select_block_owners(const DnaContext& context, DnaPlacementFamily& family,
 // Chains the top kDnaMapqRivalChains catalogue rivals of the committed family
 // over the whole query, into result.rival_exact; only the MAPQ reads them.
 // Rivals own no selected block; they are ranked by vote, then catalogue rank.
-// An existing whole-query chain (the retained alternative, or an owner of the
+// An existing whole-query chain (the alternative, or an owner of the
 // tile partition that owns no block) is reused.
 void chain_mapq_rivals(
     const DnaContext& context, const DnaPlacementFamily& family,
@@ -897,41 +906,16 @@ const DnaPlacementCandidateChain* DnaPlacementChainingResult::whole_query_chain(
   return record != nullptr && record->exact ? record : nullptr;
 }
 
-DnaPlacementCandidateChain
-dna_sibling_rival_chain(const DnaPlacementCandidateChain& winner, bool reverse,
-                        int read_length, int seed_length, int tile_count) {
-  DnaPlacementCandidateChain sibling;
-  sibling.candidate = winner.candidate;
-  if (winner.rival_sibling < 0 ||
-      static_cast<std::size_t>(winner.rival_sibling) >=
-          winner.sibling_paths.size() ||
-      static_cast<std::size_t>(winner.rival_sibling) >=
-          winner.sibling_scores.size())
-    return sibling;
-  const std::size_t which = static_cast<std::size_t>(winner.rival_sibling);
-  sibling.primary = winner.sibling_paths[which];
-  if (sibling.primary.empty()) return sibling;
-  sibling.chain_score = winner.sibling_scores[which];
-  sibling.chain_anchors = static_cast<int>(sibling.primary.size());
-  for (const chaining::Anchor& anchor : sibling.primary)
-    sibling.dense_support.set(dna_forward_query_tile(
-        anchor.q, reverse, read_length, seed_length, tile_count));
-  sibling.exact = true;
-  sibling.status = DnaPlacementChainStatus::Accepted;
-  set_spans(sibling, reverse, read_length);
-  return sibling;
-}
-
-const DnaPlacementCandidateChain* dna_committed_winner_chain(
-    const DnaPlacementChainingResult* stable,
-    const DnaPlacementChainingResult* promoted_alternative,
-    ::fa::cpu::voting::CandidateId primary_candidate,
-    bool primary_is_alternative) noexcept {
-  if (primary_is_alternative && promoted_alternative != nullptr &&
-      promoted_alternative->family.original_candidate_id == primary_candidate)
-    // The restricted family's only candidate has solver id 0.
-    return promoted_alternative->find(0);
-  return stable == nullptr ? nullptr : stable->find(primary_candidate);
+const std::vector<chaining::Anchor>*
+DnaPlacementChainingResult::selection_anchors(
+    const DnaSelectionItem& item) const noexcept {
+  const DnaPlacementCandidateChain* record =
+      find(static_cast<::fa::cpu::voting::CandidateId>(item.candidate));
+  if (record == nullptr) return nullptr;
+  if (item.path < 0) return &record->primary;
+  return static_cast<std::size_t>(item.path) < record->sibling_paths.size()
+             ? &record->sibling_paths[static_cast<std::size_t>(item.path)]
+             : nullptr;
 }
 
 DnaPlacementChainingResult build_dna_placement_chains(
@@ -1041,7 +1025,7 @@ DnaPlacementChainingResult build_dna_placement_chains(
                     return block.candidate !=
                            ::fa::cpu::voting::kNullCandidate;
                   }) &&
-      !select_block_owners(context, family, result)) {
+      !select_block_owners(context, family, result, result.kept_selection)) {
     result.accepted = false;
     result.no_owner_chain = true;
   }
@@ -1060,87 +1044,47 @@ DnaPlacementChainingResult build_dna_placement_chains(
     result.alternative.candidate = ::fa::cpu::voting::kNullCandidate;
     result.alternative_exact = {};
   }
-  // After the alternative restore: the family is final, seed_index is alive
-  // and the alternative's chain can be reused.
-  chain_mapq_rivals(context, family, result, seed_index, forward_query,
-                    reverse_query);
-  // Ranks 2..n, after everything that decides the read, so that they
-  // change none of it.
-  if (context.opts.alternative_realize_max >= 2) {
+  // Every candidate the alternative ranking restores (the alternative, and
+  // ranks 2..n under -N n) takes its whole-query chain into its own record,
+  // as an owner of the partition does, and the ownership selection runs
+  // again with those chains as items.
+  std::vector<::fa::cpu::voting::CandidateId> entered;
+  if (result.accepted &&
+      result.alternative.refusal == DnaAlternativeRefusal::None) {
     const std::vector<::fa::cpu::voting::CandidateId> ranked =
         rank_dna_alternative_hypotheses(
             context, family, result,
             static_cast<std::size_t>(context.opts.alternative_realize_max));
-    for (std::size_t rank = 1; rank < ranked.size(); ++rank) {
-      DnaRankedAlternative alternative;
-      alternative.candidate = ranked[rank];
-      if (restore_alternative_exact(context, family, result, seed_index,
-                                    forward_query, reverse_query,
-                                    alternative.candidate, alternative.exact))
-        result.ranked_alternatives.push_back(std::move(alternative));
+    for (const ::fa::cpu::voting::CandidateId id : ranked) {
+      const auto record = std::find_if(
+          result.candidates.begin(), result.candidates.end(),
+          [id](const DnaPlacementCandidateChain& chain) {
+            return chain.candidate == id;
+          });
+      if (record == result.candidates.end() || record->exact) continue;
+      DnaPlacementCandidateChain exact;
+      if (id == result.alternative.candidate)
+        exact = result.alternative_exact;
+      else if (!restore_alternative_exact(context, family, result, seed_index,
+                                          forward_query, reverse_query, id,
+                                          exact))
+        continue;
+      copy_chain_call(exact, true, *record);
+      entered.push_back(id);
+    }
+    if (!entered.empty()) {
+      select_block_owners(context, family, result, result.kept_selection);
+      for (DnaPlacementCandidateChain& record : result.candidates)
+        record.final_selected_tiles =
+            selected_tiles(family.partition.selected, record.candidate);
     }
   }
+  // After the alternative restore: the family is final, seed_index is alive
+  // and the alternative's chain can be reused.
+  chain_mapq_rivals(context, family, result, seed_index, forward_query,
+                    reverse_query);
   result.selection_changed =
       initial_assignment != family.partition.selected.assignment;
-  result.family = std::move(family);
-  return result;
-}
-
-DnaPlacementChainingResult build_dna_alternative_placement(
-    const DnaContext& context, const DnaPlacementFamily& stable_family,
-    const DnaPlacementChainingResult& stable,
-    const std::vector<std::uint8_t>& forward_query,
-    const std::vector<std::uint8_t>& reverse_query) {
-  if (stable.alternative.refusal != DnaAlternativeRefusal::None)
-    return DnaPlacementChainingResult();
-  return build_dna_rival_placement(context, stable_family,
-                                   stable.alternative.candidate,
-                                   stable.alternative_exact, forward_query,
-                                   reverse_query);
-}
-
-DnaPlacementChainingResult build_dna_rival_placement(
-    const DnaContext& context, const DnaPlacementFamily& stable_family,
-    ::fa::cpu::voting::CandidateId original,
-    const DnaPlacementCandidateChain& exact_chain,
-    const std::vector<std::uint8_t>& forward_query,
-    const std::vector<std::uint8_t>& reverse_query) {
-  DnaPlacementChainingResult result;
-  const DnaPlacementCandidate* source = stable_family.find(original);
-  if (original == ::fa::cpu::voting::kNullCandidate || source == nullptr ||
-      !stable_family.valid || exact_chain.primary.empty() ||
-      context.ref.index == nullptr || context.ref.encoded == nullptr)
-    return result;
-  // The chain is given, so the seed index stays empty: nothing is rescanned.
-  RetainedSeedDensity seed_index;
-
-  DnaPlacementFamily family;
-  family.read_length = stable_family.read_length;
-  family.seed_length = stable_family.seed_length;
-  family.tile_count = stable_family.tile_count;
-  family.original_candidate_id = original;
-  DnaPlacementCandidate only = *source;
-  only.id = 0;
-  only.catalogue_rank = 0;
-  only.support = exact_chain.dense_support;
-  if (only.peak.is_rc) family.reverse_candidates = 1;
-  else family.forward_candidates = 1;
-  family.candidates.push_back(std::move(only));
-  family.valid = true;
-
-  result.candidates.push_back(exact_chain);
-  result.candidates.back().candidate = 0;
-  family.partition = repartition(context, family);
-  // The only candidate is already exact, so nothing is chained.
-  if (!stabilize_selected_family(context, family, result, seed_index,
-                                 forward_query, reverse_query))
-    result.accepted = false;
-  const int non_null_blocks = static_cast<int>(std::count_if(
-      family.partition.selected.blocks.begin(),
-      family.partition.selected.blocks.end(), [](const auto& block) {
-        return block.candidate != ::fa::cpu::voting::kNullCandidate;
-      }));
-  if (non_null_blocks != 1) result.accepted = false;
   result.family = std::move(family);
   return result;
 }

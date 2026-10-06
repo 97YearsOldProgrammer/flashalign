@@ -178,8 +178,9 @@ struct DnaLongOptions {
   int fill_dp_tail_zdrop = 800;
   int fill_dp_inversion_zdrop = 200;
   int fill_dp_min_dp_max = 160;
-  // minimap2's -p (pri_ratio): the alternative and a block's rival are
-  // credible at p times the owner's chain score, or within 2k of it.
+  // minimap2's -p (pri_ratio): the alternative and the -c lane's secondary
+  // records are credible at p times the owner's chain score, or within 2k of
+  // it.
   double pri_ratio = 0.8;
   // minimap2's -m (min_chain_score): the DNA emission floor, the MAPQ's subsc
   // floor and the minimum size of an inversion middle. DNA presets only.
@@ -205,19 +206,14 @@ struct DnaLongOptions {
   int dna_dense_diag_min_runs = kDnaDenseDiagMinRuns;
   // Tandem release half-window (kDnaTandemWindow); 0 on RNA presets.
   int dna_tandem_window = kDnaTandemWindow;
-  // HiFi only (dna/postdp_scoring.h): the MAPQ's dp1/dp2 come from the
-  // log-gap CIGAR sweep rescored by minibwa's b2 formula, with its clip term
-  // when the two primary records' query spans compete, instead of the raw DP
-  // scores.
-  bool postdp_rescoring = false;
-  // HiFi only (dna/chain_mapq.h): when the realized rival has fewer chain
-  // anchors than the winner and no other rival is within 5 % of it, MAPQ is
-  // BWA-MEM's margin Phred on the raw ksw2 margin. The full guard is in
+  // HiFi only (dna/chain_mapq.h): when the rival that owns dp2 has fewer
+  // chain anchors than the winner and no other rival is within 5 % of it, MAPQ is
+  // BWA-MEM's margin Phred on dp_max - dp_max2. The full guard is in
   // chain_mapq.h.
   bool chain_mapq_hifi_margin = false;
   // HiFi only (dna/inv_local_chain.h): the late inversion probe of a seam or
   // piece runs only where the read's opposite-lane fine seeds in the drop
-  // window chain to kDnaInvLocalMinAnchors anchors. Bridges keep their probe.
+  // window chain to kDnaInvLocalMinAnchors anchors.
   bool inversion_probe_local_gate = false;
   // Pool occurrence gate (--max-chain-occ); 0 is ungated. DNA presets
   // install kDnaPoolGateVoteCap.
@@ -225,8 +221,8 @@ struct DnaLongOptions {
   // The vote's empty-tile rescue M (kDnaTileRescueOcc); 0 is none. DNA
   // presets install it; not settable.
   int dna_tile_rescue_occ = 0;
-  // -N: alternatives realized per read, the first the MAPQ's retained
-  // alternative and the rest output-only secondaries (dna/backend.cpp).
+  // -N: the alternatives whose whole-query chains enter the ownership
+  // selection (dna/placement_chaining.cpp).
   int alternative_realize_max = 1;
 };
 

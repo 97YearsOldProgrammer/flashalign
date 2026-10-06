@@ -38,6 +38,20 @@ struct DnaOwnershipBlock {
   int pool_n_sub = 0;
 };
 
+// The parent walk's outcome in its order: a chain that became an owner
+// (owner_item == item) or was attached to one. An owner's row carries
+// minimap2's subsc and n_sub over the chains attached to it, and the same two
+// over those of its own candidate, as they stand at the end; an attachment's
+// are 0. Items index DnaOwnershipSelection::items.
+struct DnaOwnershipRole {
+  int item = 0;
+  int owner_item = 0;
+  double subsc = 0.0;
+  int n_sub = 0;
+  double pool_subsc = 0.0;
+  int pool_n_sub = 0;
+};
+
 struct DnaOwnershipSelection {
   // The paths past the floors (at least kDnaOwnerMinAnchors anchors, score
   // >= min_chain_score), input order; DnaOwnershipBlock::item indexes it.
@@ -47,9 +61,10 @@ struct DnaOwnershipSelection {
 };
 
 // `paths` in catalogue order, each candidate's primary first, then its
-// siblings by index.
+// siblings by index. `roles` receives the parent walk's roles.
 DnaOwnershipSelection select_chain_owners(
     int read_length, int seed_length, int min_chain_score,
-    const std::vector<DnaOwnershipPath>& paths);
+    const std::vector<DnaOwnershipPath>& paths,
+    std::vector<DnaOwnershipRole>& roles);
 
 }  // namespace fa::cpu::lr

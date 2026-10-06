@@ -11,7 +11,7 @@
 #include "postdp_scoring.h"
 #include "query_seed_pool.h"
 #include "record_divergence.h"
-#include "record_family.h"
+#include "region_realization.h"
 #include "target_chaining.h"
 #include "worker_scratch.h"
 #include "../core/cigar.h"
@@ -48,12 +48,6 @@ namespace cpu {
 namespace lr {
 
 namespace dna {
-
-void zero_hypothesis_mapq(AlignResult& hypothesis) {
-  hypothesis.mapq = 0;
-  for (AlignResult& supplementary : hypothesis.supplementary)
-    supplementary.mapq = 0;
-}
 
 namespace {
 
@@ -112,7 +106,7 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
     const DnaPlacementCandidateChain* winner_chain,
     ::fa::cpu::voting::CandidateId winner_candidate,
     ::fa::cpu::voting::CandidateId dp2_owner, double dp1, double dp2,
-    double dp1_raw, double dp2_raw, double identity, int read_len) {
+    double identity, int read_len) {
   DnaChainMapqEvidence evidence;
   evidence.min_chain_score = dctx.opts.min_chain_score;
   evidence.read_len = read_len;
@@ -123,10 +117,8 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
   evidence.dp1 = dp1;
   evidence.dp2 = dp2;
   evidence.identity = identity;
-  // HiFi margin rule: raw scores and the scoring row they are read against.
+  // HiFi margin rule: the scoring row its margin is read against.
   evidence.hifi_margin_rule = dctx.opts.chain_mapq_hifi_margin;
-  evidence.dp1_raw = dp1_raw;
-  evidence.dp2_raw = dp2_raw;
   evidence.substitution_cost =
       dctx.opts.cigar_dp_match + dctx.opts.cigar_dp_mismatch;
   evidence.gap_open1 = dctx.opts.cigar_dp_gap_open1;
@@ -174,8 +166,8 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
       continue;
     ids.push_back(candidate.id);
   }
-  // The realized rival always competes, even when it owns a block: after a
-  // promotion it is the demoted incumbent, and its DP score is dp2.
+  // The dp2 owner always competes, even when it owns a block: the candidate
+  // of the record dp_max2 came from.
   if (dp2_owner != ::fa::cpu::voting::kNullCandidate &&
       dp2_owner != winner_candidate &&
       std::find(ids.begin(), ids.end(), dp2_owner) == ids.end())
@@ -243,196 +235,6 @@ bool record_event_divergence(const AlignResult& record, double& divergence,
 
 bool clears_dna_emission_floor(const AlignResult& record, int min_chain_score,
                                int min_dp_max);
-
-// Extend-then-demote changes records, not MAPQ: the MAPQ is scored and routed
-// on the family as realized before the extension, since a merged read would
-// otherwise escape R6's split-read cap. For the MAPQ stage the pre-extension
-// family stands in: copies of the demoted records return to their slots and
-// the primary's alignment fields are swapped with its pre-extension record
-// (install_mapq_stand_in); after routing both are undone
-// (remove_mapq_stand_in). The demoted records become secondaries with MAPQ 0.
-
-// Swaps the alignment fields of two records (locus, CIGAR, spans, score,
-// accounting), leaving the per-read fields (family vectors, MAPQ, cm, s1, s2,
-// median occurrence, read length) in place.
-void exchange_alignment_fields(AlignResult& left, AlignResult& right) {
-  using std::swap;
-  swap(left.score, right.score);
-  swap(left.chromosome, right.chromosome);
-  swap(left.pos, right.pos);
-  swap(left.is_reverse, right.is_reverse);
-  swap(left.origin, right.origin);
-  swap(left.cigar, right.cigar);
-  swap(left.target_regions, right.target_regions);
-  swap(left.query_start, right.query_start);
-  swap(left.query_end, right.query_end);
-  swap(left.target_end, right.target_end);
-  swap(left.matches, right.matches);
-  swap(left.mismatches, right.mismatches);
-  swap(left.insertions, right.insertions);
-  swap(left.deletions, right.deletions);
-  swap(left.ambiguities, right.ambiguities);
-  swap(left.edit_distance, right.edit_distance);
-  swap(left.block_len, right.block_len);
-  swap(left.alignment_accounting_valid, right.alignment_accounting_valid);
-  swap(left.cs, right.cs);
-  swap(left.md, right.md);
-}
-
-// cm:i and s1:i on a secondary hypothesis's records, each from its own chain,
-// as a primary family's records carry them: the head from `head_chain`,
-// supplementary i from the chain of `owners[i]` in `placement` (none past the
-// end of `owners`). s2:i stays off. A record printed from a block part
-// (`head_part`, `parts` parallel to `owners`, entries of `block_parts`) takes
-// the part's score and anchors.
-void stamp_secondary_chain_tags(
-    AlignResult& head, const DnaPlacementCandidateChain* head_chain,
-    const std::vector<::fa::cpu::voting::CandidateId>& owners,
-    const DnaPlacementChainingResult* placement, int head_part = -1,
-    const std::vector<int>* parts = nullptr,
-    const std::vector<DnaBlockPart>* block_parts = nullptr) {
-  const auto stamp = [block_parts](AlignResult& record,
-                                   const DnaPlacementCandidateChain* chain,
-                                   int part) {
-    if (chain == nullptr || chain->chain_score <= 0)
-      return;
-    if (part >= 0 && block_parts != nullptr &&
-        static_cast<std::size_t>(part) < block_parts->size()) {
-      const DnaBlockPart& block_part =
-          (*block_parts)[static_cast<std::size_t>(part)];
-      record.chain_anchors = block_part.anchors;
-      record.chain_score = block_part.score;
-      return;
-    }
-    record.chain_anchors = chain->chain_anchors;
-    record.chain_score = chain->chain_score;
-  };
-  stamp(head, head_chain, head_part);
-  if (placement == nullptr)
-    return;
-  for (std::size_t index = 0;
-       index < head.supplementary.size() && index < owners.size(); ++index)
-    if (owners[index] != ::fa::cpu::voting::kNullCandidate)
-      stamp(head.supplementary[index], placement->find(owners[index]),
-            parts != nullptr && index < parts->size() ? (*parts)[index] : -1);
-}
-
-// Drops each output-only secondary that shares contig and strand with a
-// record of `read` and overlaps its reference span: the primary, a
-// supplementary, any other secondary family, or an output-only one kept
-// before it.
-void drop_duplicate_output_only(dna::Result& read) {
-  std::vector<AlignResult>& secondaries = read.secondary;
-  std::vector<bool> dropped(secondaries.size(), false);
-  for (std::size_t index = 0; index < secondaries.size(); ++index) {
-    const AlignResult& record = secondaries[index];
-    if (!record.output_only) continue;
-    const auto same_locus = [&record](const AlignResult& other) {
-      return other.mapped() && other.chromosome == record.chromosome &&
-             other.is_reverse == record.is_reverse &&
-             other.pos < record.target_end && record.pos < other.target_end;
-    };
-    const auto any_in = [&same_locus](const AlignResult& head) {
-      if (same_locus(head)) return true;
-      for (const AlignResult& part : head.supplementary)
-        if (same_locus(part)) return true;
-      return false;
-    };
-    bool duplicate = any_in(read);
-    for (std::size_t other = 0; !duplicate && other < secondaries.size();
-         ++other) {
-      if (other == index || dropped[other] ||
-          (other > index && secondaries[other].output_only))
-        continue;
-      duplicate = any_in(secondaries[other]);
-    }
-    dropped[index] = duplicate;
-  }
-  std::size_t kept = 0;
-  for (std::size_t index = 0; index < secondaries.size(); ++index) {
-    if (dropped[index]) continue;
-    if (kept != index) secondaries[kept] = std::move(secondaries[index]);
-    ++kept;
-  }
-  secondaries.erase(secondaries.begin() + static_cast<std::ptrdiff_t>(kept),
-                    secondaries.end());
-}
-
-// The demoted block records with their owners and former slots, and the
-// primary's pre-extension record (see DnaFamilyRealizationOutcome).
-struct DnaDemotedBlocks {
-  std::vector<AlignResult> records;
-  std::vector<::fa::cpu::voting::CandidateId> candidates;
-  std::vector<int> positions;
-  // Parallel to `records`: each one's block part, -1 for none.
-  std::vector<int> parts;
-  bool primary_extended = false;
-  AlignResult pre_extension_primary;
-};
-
-// Reinserts copies of the demoted records into their slots, in ascending
-// order, and swaps in the pre-extension primary. Returns the slots filled.
-std::vector<std::size_t> install_mapq_stand_in(DnaDemotedBlocks& demoted,
-                                               dna::Result& realized) {
-  std::vector<std::size_t> slots;
-  if (!demoted.records.empty() &&
-      demoted.candidates.size() == demoted.records.size() &&
-      demoted.positions.size() == demoted.records.size()) {
-    std::vector<std::size_t> order(demoted.records.size());
-    for (std::size_t k = 0; k < order.size(); ++k)
-      order[k] = k;
-    std::sort(order.begin(), order.end(),
-              [&demoted](std::size_t left, std::size_t right) {
-                return demoted.positions[left] < demoted.positions[right];
-              });
-    for (const std::size_t k : order) {
-      if (demoted.positions[k] < 0)
-        continue;
-      const std::size_t slot = static_cast<std::size_t>(demoted.positions[k]);
-      if (slot > realized.supplementary.size() ||
-          slot > realized.supplementary_candidates.size())
-        continue;
-      realized.supplementary.insert(
-          realized.supplementary.begin() + static_cast<std::ptrdiff_t>(slot),
-          demoted.records[k]);
-      realized.supplementary_candidates.insert(
-          realized.supplementary_candidates.begin() +
-              static_cast<std::ptrdiff_t>(slot),
-          demoted.candidates[k]);
-      if (realized.primary_part >= 0 &&
-          slot <= realized.supplementary_parts.size())
-        realized.supplementary_parts.insert(
-            realized.supplementary_parts.begin() +
-                static_cast<std::ptrdiff_t>(slot),
-            k < demoted.parts.size() ? demoted.parts[k] : -1);
-      slots.push_back(slot);
-    }
-  }
-  if (demoted.primary_extended)
-    exchange_alignment_fields(realized, demoted.pre_extension_primary);
-  return slots;
-}
-
-// Undoes install_mapq_stand_in; the MAPQ routed to a copy leaves with it.
-void remove_mapq_stand_in(DnaDemotedBlocks& demoted,
-                          const std::vector<std::size_t>& slots,
-                          dna::Result& realized) {
-  std::vector<std::size_t> descending = slots;
-  std::sort(descending.begin(), descending.end(),
-            [](std::size_t left, std::size_t right) { return left > right; });
-  for (const std::size_t slot : descending) {
-    const auto at = static_cast<std::ptrdiff_t>(slot);
-    realized.supplementary.erase(realized.supplementary.begin() + at);
-    realized.supplementary_candidates.erase(
-        realized.supplementary_candidates.begin() + at);
-    if (realized.primary_part >= 0 &&
-        slot < realized.supplementary_parts.size())
-      realized.supplementary_parts.erase(
-          realized.supplementary_parts.begin() + at);
-  }
-  if (demoted.primary_extended)
-    exchange_alignment_fields(realized, demoted.pre_extension_primary);
-}
 
 // Collects each record's divergence for the divergence contrast (index 0 the
 // primary, i + 1 the i-th supplementary) and runs it. Inversion middles and
@@ -509,47 +311,6 @@ DnaChainMapqRecordCensus chain_mapq_record_census(const AlignResult& record) {
     census.ambiguous = record.ambiguities;
   }
   return census;
-}
-
-// The scoring the interval-matched scorer reads.
-DpScoringParams chain_mapq_dp_params(const DnaContext& dctx) {
-  DpScoringParams dp;
-  dp.match = dctx.opts.cigar_dp_match;
-  dp.mismatch = dctx.opts.cigar_dp_mismatch;
-  dp.ambi = dctx.opts.cigar_dp_ambi;
-  dp.gap_open1 = dctx.opts.cigar_dp_gap_open1;
-  dp.gap_extend1 = dctx.opts.cigar_dp_gap_extend1;
-  dp.gap_open2 = dctx.opts.cigar_dp_gap_open2;
-  dp.gap_extend2 = dctx.opts.cigar_dp_gap_extend2;
-  return dp;
-}
-
-// A record's dual-affine score split by the forward-query interval [lo, hi)
-// (affine_score_over_query_interval); zero without a CIGAR, contig or
-// encoded reference.
-AffineIntervalScore chain_mapq_interval_score(
-    const DnaContext& dctx, const AlignResult& record, int contig,
-    const std::vector<uint8_t>& fwd, const std::vector<uint8_t>& rc,
-    int read_len, int lo, int hi, const DpScoringParams& dp) {
-  AffineIntervalScore score;
-  if (dctx.ref.encoded == nullptr || contig < 0 ||
-      static_cast<std::size_t>(contig) >= dctx.ref.encoded->size() ||
-      record.pos < 0 || record.cigar.empty())
-    return score;
-  const std::vector<uint8_t>& reference =
-      (*dctx.ref.encoded)[static_cast<std::size_t>(contig)];
-  const std::vector<uint8_t>& query = record.is_reverse ? rc : fwd;
-  return affine_score_over_query_interval(
-      ::fa::cpu::output::parse_cigar_ops(record.cigar), query.data(),
-      reference.data() + record.pos, read_len, record.is_reverse, lo, hi, dp);
-}
-
-// A record's start diagonal: reference start minus oriented query start.
-std::int64_t chain_mapq_record_diagonal(const AlignResult& record,
-                                        int read_len) {
-  const std::int64_t oriented =
-      record.is_reverse ? read_len - record.query_end : record.query_start;
-  return static_cast<std::int64_t>(record.pos) - oriented;
 }
 
 // The contig index of a name, or -1 when unknown.
@@ -662,19 +423,6 @@ chain_mapq_rival_geometry(const DnaChainMapqRival& rival) {
   chain.ref_begin = rival.ref_begin;
   chain.ref_end = rival.ref_end;
   return chain;
-}
-
-DnaChainMapqChainGeometry
-chain_mapq_chain_geometry(const DnaPlacementCandidateChain& chain, int contig,
-                          bool reverse) {
-  DnaChainMapqChainGeometry out;
-  out.contig = contig;
-  out.reverse = reverse;
-  out.q_begin = chain.forward_query_begin;
-  out.q_end = chain.forward_query_end;
-  out.ref_begin = chain.reference_begin;
-  out.ref_end = chain.reference_end;
-  return out;
 }
 
 // Whether one committed record explains a chain: both chain ends lie on the
@@ -876,345 +624,139 @@ void mark_chain_mapq_record_shadows(
         });
 }
 
-// The interval-matched scores of the incumbent and the alternative (R1), read
-// before the commit changes either family. [lo, hi)
-// is the intersection of the two primaries' forward-query spans (hi < lo
-// means disjoint). a_* sums the incumbent's primary and block-owning
-// supplementaries inside / outside it; b_* is the alternative primary's.
-struct DnaChainMapqAlternativeInterval {
-  bool scored = false;
-  int lo = -1;
-  int hi = -1;
-  long long a_inside = 0;
-  long long a_outside = 0;
-  long long b_inside = 0;
-  long long b_outside = 0;
-};
-
-DnaChainMapqAlternativeInterval chain_mapq_alternative_interval(
-    const DnaContext& dctx, const DnaFamilyRealizationOutcome& incumbent,
-    const DnaFamilyRealizationOutcome& alternative,
-    const std::vector<uint8_t>& fwd, const std::vector<uint8_t>& rc,
-    int read_len) {
-  DnaChainMapqAlternativeInterval interval;
-  const AlignResult& win = incumbent.output;
-  const AlignResult& alt = alternative.output;
-  interval.scored = true;
-  interval.lo = std::max(win.query_start, alt.query_start);
-  interval.hi = std::min(win.query_end, alt.query_end);
-  const DpScoringParams dp = chain_mapq_dp_params(dctx);
-  const auto score_record = [&](const AlignResult& record) {
-    return chain_mapq_interval_score(
-        dctx, record, chain_mapq_contig_index(dctx, record.chromosome), fwd,
-        rc, read_len, interval.lo, interval.hi, dp);
+// The MAPQ of the records region_realization.h emits, through the router:
+// each primary record on its own chain with dp1 its dp_max and dp2 its
+// dp_max2 (owned by the record that gave it, when that is another catalogue
+// candidate's). The region stands in for the block part (price_block_part):
+// f1 and cnt its whole chain's, score and cnt its own, sib_f2 and n_sub
+// mm_set_parent's over the secondaries from its own candidate's chains. An
+// inversion middle takes its flanks' MAPQ.
+void price_dna_regions(const DnaContext& dctx,
+                       const DnaPlacementFamily& family,
+                       const DnaPlacementChainingResult& placement,
+                       const std::vector<DnaRegionPrice>& prices, int read_len,
+                       dna::Result& realized) {
+  const std::size_t count = 1 + realized.supplementary.size();
+  if (prices.size() != count)
+    return;
+  const auto member = [&realized](std::size_t index) -> AlignResult& {
+    return index == 0 ? static_cast<AlignResult&>(realized)
+                      : realized.supplementary[index - 1];
   };
-  // Records that own no block (inversion middles) are left out.
-  AffineIntervalScore a = score_record(win);
-  for (std::size_t index = 0; index < win.supplementary.size(); ++index) {
-    if (index < incumbent.output.supplementary_candidates.size() &&
-        incumbent.output.supplementary_candidates[index] ==
-            ::fa::cpu::voting::kNullCandidate)
-      continue;
-    const AffineIntervalScore part = score_record(win.supplementary[index]);
-    a.inside += part.inside;
-    a.outside += part.outside;
+  const bool family_map_wanted = dctx.opts.chain_mapq_hifi_margin;
+  const ::fa::cpu::voting::CandidateId primary_candidate =
+      prices[0].candidate >= 0
+          ? static_cast<::fa::cpu::voting::CandidateId>(prices[0].candidate)
+          : ::fa::cpu::voting::kNullCandidate;
+  DnaChainMapqFamilyMap family_map;
+  if (family_map_wanted)
+    family_map = chain_mapq_family_map(dctx, realized, primary_candidate);
+  int family_blocks = 0;
+  for (const DnaRegionPrice& price : prices)
+    if (!price.inversion)
+      ++family_blocks;
+  const bool census_wanted =
+      dctx.opts.chain_mapq_hifi_margin && family_blocks >= 2;
+  std::vector<std::pair<int, int>> family_mismatch_pairs;
+  if ((chain_mapq_study_bits(dctx) & kDnaChainMapqStudyRelativeShareCap) !=
+          0 &&
+      census_wanted) {
+    family_mismatch_pairs.assign(count, std::pair<int, int>(-1, -1));
+    for (std::size_t index = 0; index < count; ++index) {
+      const AlignResult& record = member(index);
+      if (record.origin == AlignmentOrigin::DnaLocalInversion ||
+          !record.alignment_accounting_valid ||
+          !clears_dna_emission_floor(record, dctx.opts.min_chain_score,
+                                     dctx.opts.cigar_dp_min_dp_max))
+        continue;
+      const DnaChainMapqRecordCensus census = chain_mapq_record_census(record);
+      if (census.mismatches < 0 || census.aligned_bases <= 0)
+        continue;
+      family_mismatch_pairs[index] = {census.mismatches, census.aligned_bases};
+    }
   }
-  const AffineIntervalScore b = score_record(alt);
-  interval.a_inside = a.inside;
-  interval.a_outside = a.outside;
-  interval.b_inside = b.inside;
-  interval.b_outside = b.outside;
-  return interval;
-}
-
-// The realized rivals (R1), HiFi presets only, run once placement,
-// realization and the commit are final. Each rival
-// goes through build_dna_rival_placement and realize_full_cigar_family into a
-// local outcome; nothing from it is emitted. The results reach the formula as
-// DnaChainMapqEvidence::sibling / block_rival.
-
-// Realizes one rival chain of candidate `original` and measures it against
-// `against`, the emitted record it competes with. The cost is recorded
-// either way; returns whether the realization was accepted.
-// [clip_begin, clip_end) confines it to a forward-query window (none when
-// clip_end <= clip_begin); block rivals are clipped to their block's span, so
-// their dp2_raw and record counts describe the clipped alignment.
-bool realize_chain_mapq_rival(
-    const DnaContext& dctx, const DnaPlacementFamily& catalogue,
-    ::fa::cpu::voting::CandidateId original,
-    const DnaPlacementCandidateChain& chain, const std::vector<uint8_t>& fwd,
-    const std::vector<uint8_t>& rc, int read_len, const AlignResult& against,
-    int against_contig, int rival_contig, DnaChainMapqRealizedRival& into,
-    int clip_begin = 0, int clip_end = 0) {
-  into.candidate = original;
-  into.chain_score = chain.chain_score;
-  into.chain_anchors = chain.chain_anchors;
-  into.refusal = DnaChainMapqRealizeRefusal::RealizationFailed;
-  const DnaPlacementChainingResult placement = build_dna_rival_placement(
-      dctx, catalogue, original, chain, fwd, rc);
-  if (!placement.accepted || !placement.family.valid ||
-      !placement.family.original_candidate_id)
-    return false;
-  DnaFamilyRealizationRequest request;
-  request.family = &placement.family;
-  request.placement = &placement;
-  request.forward_query = &fwd;
-  request.reverse_query = &rc;
-  request.clip_forward_begin = clip_begin;
-  request.clip_forward_end = clip_end;
-  const DnaFamilyRealizationOutcome outcome =
-      realize_full_cigar_family(dctx, request);
-  into.ksw2_attempts = outcome.ksw2_attempts;
-  into.estimated_cells = outcome.estimated_cells;
-  if (!outcome.accepted())
-    return false;
-  const AlignResult& rival = outcome.output;
-  into.realized = true;
-  into.refusal = DnaChainMapqRealizeRefusal::None;
-  into.dp2_raw = static_cast<double>(outcome.decision_score);
-  into.rec_score = rival.score;
-  into.q_begin = rival.query_start;
-  into.q_end = rival.query_end;
-  into.contig = rival_contig;
-  into.reverse = rival.is_reverse;
-  into.ref_begin = rival.pos;
-  into.ref_end = rival.target_end;
-  if (rival_contig == against_contig && rival.is_reverse == against.is_reverse)
-    into.diag_shift = chain_mapq_record_diagonal(rival, read_len) -
-                      chain_mapq_record_diagonal(against, read_len);
-  const DnaChainMapqRecordCensus census = chain_mapq_record_census(rival);
-  into.mismatches = census.mismatches;
-  into.ins_events = census.ins_events;
-  into.del_events = census.del_events;
-  into.aligned_bases = census.aligned_bases;
-  // The intersection of the two forward spans; im_hi < im_lo means disjoint.
-  into.im_lo = std::max(against.query_start, rival.query_start);
-  into.im_hi = std::min(against.query_end, rival.query_end);
-  const DpScoringParams dp = chain_mapq_dp_params(dctx);
-  const AffineIntervalScore a = chain_mapq_interval_score(
-      dctx, against, against_contig, fwd, rc, read_len, into.im_lo, into.im_hi,
-      dp);
-  const AffineIntervalScore b = chain_mapq_interval_score(
-      dctx, rival, rival_contig, fwd, rc, read_len, into.im_lo, into.im_hi, dp);
-  into.im_a_inside = a.inside;
-  into.im_a_outside = a.outside;
-  into.im_b_inside = b.inside;
-  into.im_b_outside = b.outside;
-  return true;
-}
-
-// What was realized for one read: the winner's sibling (single-block
-// families) or one rival per block (index 0 the primary, i + 1 the i-th
-// supplementary), and the total cost.
-struct DnaChainMapqEvidenceRealizations {
-  DnaChainMapqRealizedRival sibling;
-  std::vector<DnaChainMapqRealizedRival> block_rivals;
-  int ksw2_attempts = 0;
-  std::int64_t estimated_cells = 0;
-};
-
-// Selects and realizes the rivals of one read.
-//   (B) One block: the winner's rival sibling, when
-//       max(sib_f2, min_chain_score) / f1 reaches
-//       kDnaChainMapqSiblingRealizeMin, realized against the primary.
-//   (A) Several blocks: for each block-owning record, its best rival
-//       (select_dna_block_rival), realized clipped to the record's query
-//       span, or unclipped if the clipped realization fails. At most
-//       kDnaChainMapqBlockRivalMax per read, longest blocks first.
-// `winner_chain` is the committed primary's whole-query chain; `family_map`
-// feeds the own-locus verdict under kDnaChainMapqStudyLaneVerdict.
-DnaChainMapqEvidenceRealizations realize_chain_mapq_evidence(
-    const DnaContext& dctx, const DnaPlacementFamily& catalogue,
-    const DnaPlacementChainingResult& placement,
-    const DnaChainMapqFamilyMap& family_map,
-    const DnaPlacementCandidateChain* winner_chain,
-    ::fa::cpu::voting::CandidateId primary_candidate,
-    const dna::Result& realized, const std::vector<uint8_t>& fwd,
-    const std::vector<uint8_t>& rc, int read_len) {
-  DnaChainMapqEvidenceRealizations out;
-  out.block_rivals.assign(1 + realized.supplementary.size(),
-                          DnaChainMapqRealizedRival());
-  const auto charge = [&out](const DnaChainMapqRealizedRival& rival) {
-    out.ksw2_attempts += rival.ksw2_attempts;
-    out.estimated_cells += rival.estimated_cells;
-  };
-  struct Block {
-    std::size_t record_index;
-    ::fa::cpu::voting::CandidateId owner;
-    const DnaPlacementCandidateChain* chain;
-    const AlignResult* record;
-  };
-  std::vector<Block> blocks;
-  blocks.push_back({0, primary_candidate, winner_chain,
-                    &static_cast<const AlignResult&>(realized)});
-  for (std::size_t index = 0; index < realized.supplementary.size(); ++index) {
+  std::vector<int> mapqs(count, -1);
+  for (std::size_t index = 0; index < count; ++index) {
+    const DnaRegionPrice& price = prices[index];
+    if (price.inversion)
+      continue;
+    AlignResult& record = member(index);
     const ::fa::cpu::voting::CandidateId owner =
-        index < realized.supplementary_candidates.size()
-            ? realized.supplementary_candidates[index]
+        price.candidate >= 0
+            ? static_cast<::fa::cpu::voting::CandidateId>(price.candidate)
             : ::fa::cpu::voting::kNullCandidate;
-    if (owner == ::fa::cpu::voting::kNullCandidate)
-      continue;
-    blocks.push_back({index + 1, owner, placement.find(owner),
-                      &realized.supplementary[index]});
+    const ::fa::cpu::voting::CandidateId dp2_owner =
+        price.dp_max2_candidate >= 0 &&
+                price.dp_max2_candidate != price.candidate
+            ? static_cast<::fa::cpu::voting::CandidateId>(
+                  price.dp_max2_candidate)
+            : ::fa::cpu::voting::kNullCandidate;
+    const double identity =
+        record.alignment_accounting_valid && record.block_len > 0
+            ? record.identity()
+            : 1.0;
+    const double dp1 = static_cast<double>(price.dp_max);
+    const double dp2 = static_cast<double>(price.dp_max2);
+    DnaChainMapqEvidence evidence = build_chain_mapq_evidence(
+        dctx, family, placement, true,
+        owner != ::fa::cpu::voting::kNullCandidate ? placement.find(owner)
+                                                   : nullptr,
+        owner, dp2_owner, dp1, dp2, identity, read_len);
+    evidence.winner_q_begin = price.chain_q_begin;
+    evidence.winner_q_end = price.chain_q_end;
+    evidence.winner_ref_begin = price.chain_ref_begin;
+    evidence.winner_ref_end = price.chain_ref_end;
+    if (family_map_wanted)
+      mark_chain_mapq_record_shadows(dctx, family, placement, family_map, index,
+                                     owner, read_len, evidence);
+    evidence.f1 = price.score0;
+    evidence.cnt = price.anchors0;
+    evidence.part_priced = true;
+    evidence.part_score = price.score;
+    evidence.part_anchors = price.cnt;
+    evidence.sib_f2 = static_cast<int>(price.pool_subsc + .499);
+    evidence.part_n_sub = price.pool_n_sub;
+    const DnaChainMapqRecordCensus census =
+        census_wanted ? chain_mapq_record_census(record)
+                      : DnaChainMapqRecordCensus();
+    evidence.family_blocks = family_blocks;
+    evidence.record_mismatches = census.mismatches;
+    evidence.record_ins_events = census.ins_events;
+    evidence.record_del_events = census.del_events;
+    evidence.record_aligned_bases = census.aligned_bases;
+    for (std::size_t other = 0; other < family_mismatch_pairs.size(); ++other) {
+      if (other == index || family_mismatch_pairs[other].second <= 0)
+        continue;
+      const bool cleaner =
+          evidence.family_min_aligned <= 0 ||
+          static_cast<double>(family_mismatch_pairs[other].first) *
+                  static_cast<double>(evidence.family_min_aligned) <
+              static_cast<double>(evidence.family_min_mismatches) *
+                  static_cast<double>(family_mismatch_pairs[other].second);
+      if (cleaner) {
+        evidence.family_min_mismatches = family_mismatch_pairs[other].first;
+        evidence.family_min_aligned = family_mismatch_pairs[other].second;
+      }
+    }
+    DnaChainMapqBreakdown breakdown;
+    mapqs[index] = dna_chain_mapq(evidence, &breakdown, nullptr);
+    if (evidence.f1 > 0) {
+      record.chain_anchors = price.cnt;
+      record.chain_score = price.score;
+      record.secondary_chain_score = breakdown.f2;
+    }
   }
-  if (blocks.size() == 1) {
-    // (B) the sibling path.
-    DnaChainMapqRealizedRival& sibling = out.sibling;
-    const DnaPlacementCandidate* winner = catalogue.find(primary_candidate);
-    if (winner_chain == nullptr || winner == nullptr ||
-        winner_chain->chain_score <= 0 || winner_chain->rival_sibling < 0) {
-      sibling.refusal = DnaChainMapqRealizeRefusal::NoSibling;
-      return out;
-    }
-    const double floor = static_cast<double>(
-        std::max(winner_chain->rival_chain_score, dctx.opts.min_chain_score));
-    if (floor < kDnaChainMapqSiblingRealizeMin *
-                    static_cast<double>(winner_chain->chain_score)) {
-      sibling.refusal = DnaChainMapqRealizeRefusal::WeakSibling;
-      return out;
-    }
-    const DnaPlacementCandidateChain sibling_chain =
-        dna_sibling_rival_chain(*winner_chain, winner->peak.is_rc, read_len,
-                                catalogue.seed_length, catalogue.tile_count);
-    if (sibling_chain.primary.empty()) {
-      sibling.refusal = DnaChainMapqRealizeRefusal::NoSibling;
-      return out;
-    }
-    realize_chain_mapq_rival(dctx, catalogue, primary_candidate, sibling_chain,
-                             fwd, rc, read_len, realized, winner->peak.chr,
-                             winner->peak.chr, sibling);
-    charge(sibling);
-    return out;
+  const DnaFamilyDivergence divergence = divergence_contrast(
+      realized, dctx.opts.min_chain_score, dctx.opts.cigar_dp_min_dp_max);
+  for (std::size_t index = 0; index < count; ++index) {
+    if (!divergence.records[index].divergent)
+      continue;
+    const int carried = mapqs[index] >= 0 ? mapqs[index] : mapqs[0];
+    mapqs[index] = std::min(carried, kDnaChainMapqDivergentRecordMapq);
   }
-  // (A) the per-block path.
-  struct Planned {
-    std::size_t block;
-    DnaBlockRivalSelection selection;
-    int query_len;
-    ::fa::cpu::voting::CandidateId owner;
-  };
-  // Bit 128: a candidate that is this read's own placement is skipped before
-  // it is realized. The slack is the evidence's chained shadow slack.
-  const int study_bits = chain_mapq_study_bits(dctx);
-  const bool lane_verdict =
-      (study_bits & kDnaChainMapqStudyLaneVerdict) != 0;
-  DnaChainMapqEvidence slack_frame;
-  slack_frame.read_len = read_len;
-  slack_frame.shadow_slack_bp =
-      dctx.opts.cigar_local_interval_anchor_interval_pad;
-  slack_frame.chain_shadow_read_slack =
-      dctx.opts.dna_chain_mapq_chain_shadow_read_slack;
-  const std::int64_t verdict_slack =
-      dna_chain_mapq_chain_shadow_slack(slack_frame);
-  std::vector<Planned> planned;
-  for (std::size_t which = 0; which < blocks.size(); ++which) {
-    const Block& block = blocks[which];
-    DnaChainMapqRealizedRival& into = out.block_rivals[block.record_index];
-    const DnaPlacementCandidate* owner = catalogue.find(block.owner);
-    if (block.chain == nullptr || owner == nullptr) {
-      into.refusal = DnaChainMapqRealizeRefusal::NotAttempted;
-      continue;
-    }
-    const AlignResult& record = *block.record;
-    // Own locus: a chain shadow of the block owner's chain on the same
-    // contig and strand, or explained by the record / family (bits 8, 64).
-    const std::size_t record_index = block.record_index;
-    const int owner_contig = owner->peak.chr;
-    const bool owner_reverse = owner->peak.is_rc;
-    const DnaPlacementCandidateChain& owner_chain = *block.chain;
-    std::function<bool(::fa::cpu::voting::CandidateId,
-                       const DnaPlacementCandidateChain&)>
-        own_locus;
-    if (lane_verdict)
-      own_locus = [&catalogue, &family_map, &owner_chain, owner_contig,
-                   owner_reverse, record_index, read_len, verdict_slack,
-                   study_bits](::fa::cpu::voting::CandidateId id,
-                               const DnaPlacementCandidateChain& chain) {
-        const DnaPlacementCandidate* rival = catalogue.find(id);
-        if (rival == nullptr)
-          return false;
-        if (rival->peak.chr == owner_contig &&
-            rival->peak.is_rc == owner_reverse &&
-            dna_chain_mapq_chain_shadow(
-                owner_chain.reference_begin, owner_chain.reference_end,
-                owner_chain.forward_query_begin,
-                owner_chain.forward_query_end, owner_reverse,
-                chain.reference_begin, chain.reference_end,
-                chain.forward_query_begin, chain.forward_query_end,
-                rival->peak.is_rc, read_len, verdict_slack)
-                .shadow)
-          return true;
-        const DnaChainMapqChainGeometry geometry = chain_mapq_chain_geometry(
-            chain, rival->peak.chr, rival->peak.is_rc);
-        if ((study_bits & kDnaChainMapqStudyRecordShadow) != 0 &&
-            family_map.explains_by_record(record_index, geometry, read_len,
-                                          verdict_slack))
-          return true;
-        if ((study_bits & kDnaChainMapqStudyFamilyVouch) == 0 ||
-            !family_map.explains_by_family(geometry, read_len, verdict_slack,
-                                           id))
-          return false;
-        return true;
-      };
-    Planned plan;
-    plan.block = which;
-    plan.selection = select_dna_block_rival(
-        dctx, catalogue, placement, block.chain->chain_score,
-        record.query_start, record.query_end, owner->peak.chr,
-        owner->peak.is_rc, chain_mapq_record_diagonal(record, read_len),
-        own_locus ? &own_locus : nullptr);
-    into.refusal = plan.selection.refusal;
-    if (plan.selection.candidate == ::fa::cpu::voting::kNullCandidate ||
-        plan.selection.chain == nullptr)
-      continue;
-    plan.query_len = std::max(0, record.query_end - record.query_start);
-    plan.owner = block.owner;
-    planned.push_back(plan);
-  }
-  std::stable_sort(planned.begin(), planned.end(),
-                   [](const Planned& a, const Planned& b) {
-                     return std::tie(b.query_len, a.owner) <
-                            std::tie(a.query_len, b.owner);
-                   });
-  for (std::size_t rank = 0; rank < planned.size(); ++rank) {
-    const Planned& plan = planned[rank];
-    const Block& block = blocks[plan.block];
-    DnaChainMapqRealizedRival& into = out.block_rivals[block.record_index];
-    if (rank >= static_cast<std::size_t>(kDnaChainMapqBlockRivalMax)) {
-      into.refusal = DnaChainMapqRealizeRefusal::Capped;
-      into.candidate = plan.selection.candidate;
-      continue;
-    }
-    const DnaPlacementCandidate* owner = catalogue.find(block.owner);
-    const DnaPlacementCandidate* rival =
-        catalogue.find(plan.selection.candidate);
-    if (owner == nullptr || rival == nullptr) {
-      into.refusal = DnaChainMapqRealizeRefusal::RealizationFailed;
-      continue;
-    }
-    // Realize over the block's query span, the only interval the rule
-    // compares; if that fails (short blocks run out of anchors), realize the
-    // whole chain instead. Both attempts are charged.
-    if (!realize_chain_mapq_rival(
-            dctx, catalogue, plan.selection.candidate, *plan.selection.chain,
-            fwd, rc, read_len, *block.record, owner->peak.chr,
-            rival->peak.chr, into, block.record->query_start,
-            block.record->query_end)) {
-      const int refused_attempts = into.ksw2_attempts;
-      const long long refused_cells = into.estimated_cells;
-      if (realize_chain_mapq_rival(dctx, catalogue, plan.selection.candidate,
-                                   *plan.selection.chain, fwd, rc, read_len,
-                                   *block.record, owner->peak.chr,
-                                   rival->peak.chr, into))
-        into.clip_arm = 2;
-      into.ksw2_attempts += refused_attempts;
-      into.estimated_cells += refused_cells;
-    } else {
-      into.clip_arm = 1;
-    }
-    charge(into);
-  }
-  return out;
+  const int mapq = std::max(0, mapqs[0]);
+  mapqs.erase(mapqs.begin());
+  route_dna_mapq(family, primary_candidate, mapq, mapqs, realized);
 }
 
 // minimap2's emission floor (mm_filter_regs): no record with matched bases
@@ -1227,140 +769,32 @@ bool clears_dna_emission_floor(const AlignResult& record, int min_chain_score,
   return min_dp_max <= 0 || record.score >= min_dp_max;
 }
 
-// Applies the floor to one record family in place. Failing supplementaries are
-// erased, since the writers emit every element regardless of mapped().
-// `candidates`, when given, is kept parallel to the records, and so are
-// `parts` with `head_part`. Returns false when nothing in the family clears
-// the floor.
-bool filter_dna_record_family(
-    AlignResult& primary, std::vector<AlignResult>& supplementary,
-    std::vector<::fa::cpu::voting::CandidateId>* candidates,
-    int min_chain_score, int min_dp_max, std::vector<int>* parts = nullptr,
-    int* head_part = nullptr) {
-  std::size_t kept = 0;
-  for (std::size_t index = 0; index < supplementary.size(); ++index) {
-    if (!clears_dna_emission_floor(supplementary[index], min_chain_score,
-                                   min_dp_max))
-      continue;
-    if (kept != index) {
-      supplementary[kept] = std::move(supplementary[index]);
-      if (candidates != nullptr && index < candidates->size())
-        (*candidates)[kept] = (*candidates)[index];
-      if (parts != nullptr && index < parts->size())
-        (*parts)[kept] = (*parts)[index];
-    }
-    ++kept;
-  }
-  supplementary.erase(supplementary.begin() + static_cast<std::ptrdiff_t>(kept),
-                      supplementary.end());
-  if (candidates != nullptr && candidates->size() > kept)
-    candidates->resize(kept);
-  if (parts != nullptr && parts->size() > kept)
-    parts->resize(kept);
-  if (clears_dna_emission_floor(primary, min_chain_score, min_dp_max))
-    return true;
-  if (supplementary.empty())
-    return false;
-  // The primary failed but supplementaries remain: promote the one family
-  // assembly would have named primary.
-  const std::vector<AlignResult>::iterator promoted = std::max_element(
-      supplementary.begin(), supplementary.end(), dna_primary_precedence_less);
-  const std::size_t promoted_index =
-      static_cast<std::size_t>(promoted - supplementary.begin());
-  AlignResult carried = std::move(*promoted);
-  supplementary.erase(promoted);
-  if (candidates != nullptr && promoted_index < candidates->size())
-    candidates->erase(candidates->begin() +
-                      static_cast<std::ptrdiff_t>(promoted_index));
-  if (parts != nullptr && promoted_index < parts->size()) {
-    if (head_part != nullptr)
-      *head_part = (*parts)[promoted_index];
-    parts->erase(parts->begin() + static_cast<std::ptrdiff_t>(promoted_index));
-  }
-  // Read-level fields carry over; the promoted record keeps its own MAPQ.
-  carried.read_len = primary.read_len;
-  carried.median_occurrence = primary.median_occurrence;
-  // Move the survivors and secondaries out first: `supplementary` aliases
-  // primary.supplementary.
-  std::vector<AlignResult> survivors = std::move(supplementary);
-  std::vector<AlignResult> secondaries = std::move(primary.secondary);
-  primary = std::move(carried);
-  primary.supplementary = std::move(survivors);
-  primary.secondary = std::move(secondaries);
-  return true;
-}
-
-// Applies the emission floor to a read. Only a read left with no record at
-// all is marked unmapped.
-void apply_dna_emission_floor(int min_chain_score, int min_dp_max,
-                              dna::Result& realized) {
-  for (std::vector<AlignResult>::iterator it = realized.secondary.begin();
-       it != realized.secondary.end();) {
-    if (filter_dna_record_family(*it, it->supplementary, nullptr,
-                                 min_chain_score, min_dp_max))
-      ++it;
-    else
-      it = realized.secondary.erase(it);
-  }
-  if (filter_dna_record_family(
-          static_cast<AlignResult&>(realized), realized.supplementary,
-          &realized.supplementary_candidates, min_chain_score, min_dp_max,
-          realized.primary_part >= 0 ? &realized.supplementary_parts : nullptr,
-          &realized.primary_part))
-    return;
-  demote_unmapped(realized);
-  realized.supplementary.clear();
-  realized.supplementary_candidates.clear();
-  realized.supplementary_parts.clear();
-  realized.secondary.clear();
-}
-
 // Map-only's floor. minimap2 keeps no chain under
 // min_chain_score (mm_chain_dp) and does not test again what it splits off
-// one (mm_split_reg), so a block record is judged by the whole-query chain
-// its MAPQ is scored on, which a sibling slice prints only a share of. A
-// record the MAPQ scores on no chain (an inversion middle, a secondary) is
-// judged by its AS. The others print as before: a failing head gives its place to
-// the next record. `owners`, when given, is parallel to `rest`, and so are
-// `parts` with `head_part`: a record printed from a part is judged by the
-// part's score. Returns false when no record is left.
+// one (mm_split_reg), so each record is judged by the score of the block part
+// it prints from. A failing head gives its place to the next record. `owners`
+// and `parts` are parallel to `rest`, `head_part` is the head's part. Returns
+// false when no record is left.
 bool keep_dna_min_chain_score(
     AlignResult& head, int head_chain_score, std::vector<AlignResult>& rest,
-    std::vector<::fa::cpu::voting::CandidateId>* owners,
-    const DnaPlacementChainingResult* placement, int min_chain_score,
-    std::vector<int>* parts = nullptr, int* head_part = nullptr) {
+    std::vector<::fa::cpu::voting::CandidateId>& owners,
+    const DnaPlacementFamily& family, int min_chain_score,
+    std::vector<int>& parts, int& head_part) {
   std::size_t kept = 0;
   for (std::size_t index = 0; index < rest.size(); ++index) {
-    const DnaPlacementCandidateChain* chain =
-        owners != nullptr && placement != nullptr &&
-                (*owners)[index] != ::fa::cpu::voting::kNullCandidate
-            ? placement->find((*owners)[index])
-            : nullptr;
-    const int part =
-        parts != nullptr && index < parts->size() ? (*parts)[index] : -1;
-    if (chain != nullptr && part >= 0 &&
-        static_cast<std::size_t>(part) < placement->family.block_parts.size()) {
-      if (placement->family.block_parts[static_cast<std::size_t>(part)].score <
-          min_chain_score)
-        continue;
-    } else if ((chain != nullptr ? chain->chain_score : rest[index].score) <
-               min_chain_score) {
+    if (family.block_parts[static_cast<std::size_t>(parts[index])].score <
+        min_chain_score)
       continue;
-    }
     if (kept != index) {
       rest[kept] = std::move(rest[index]);
-      if (owners != nullptr)
-        (*owners)[kept] = (*owners)[index];
-      if (parts != nullptr && index < parts->size())
-        (*parts)[kept] = (*parts)[index];
+      owners[kept] = owners[index];
+      parts[kept] = parts[index];
     }
     ++kept;
   }
   rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(kept), rest.end());
-  if (owners != nullptr)
-    owners->resize(kept);
-  if (parts != nullptr && parts->size() > kept)
-    parts->resize(kept);
+  owners.resize(kept);
+  parts.resize(kept);
   if (head_chain_score >= min_chain_score)
     return true;
   if (rest.empty())
@@ -1370,13 +804,9 @@ bool keep_dna_min_chain_score(
   std::vector<AlignResult> secondaries = std::move(head.secondary);
   AlignResult next = std::move(survivors.front());
   survivors.erase(survivors.begin());
-  if (owners != nullptr)
-    owners->erase(owners->begin());
-  if (parts != nullptr && !parts->empty()) {
-    if (head_part != nullptr)
-      *head_part = parts->front();
-    parts->erase(parts->begin());
-  }
+  owners.erase(owners.begin());
+  head_part = parts.front();
+  parts.erase(parts.begin());
   // Read-level fields carry over; the record keeps its own MAPQ.
   next.read_len = head.read_len;
   next.median_occurrence = head.median_occurrence;
@@ -1386,36 +816,16 @@ bool keep_dna_min_chain_score(
   return true;
 }
 
-// Applies it to a read, whose head the MAPQ scores on `winner_chain`. Only a
-// read left with no record is unmapped.
-void apply_dna_min_chain_score(const DnaPlacementCandidateChain* winner_chain,
-                               const DnaPlacementChainingResult* placement,
+// Applies it to a map-only read. Only a read left with no record is unmapped.
+void apply_dna_min_chain_score(const DnaPlacementFamily& family,
                                int min_chain_score, dna::Result& realized) {
-  for (std::vector<AlignResult>::iterator it = realized.secondary.begin();
-       it != realized.secondary.end();) {
-    if (keep_dna_min_chain_score(*it, it->score, it->supplementary, nullptr,
-                                 nullptr, min_chain_score))
-      ++it;
-    else
-      it = realized.secondary.erase(it);
-  }
-  int head_chain_score =
-      winner_chain != nullptr ? winner_chain->chain_score : realized.score;
-  // A head printed from a block part is judged by the part.
-  if (winner_chain != nullptr && placement != nullptr &&
-      realized.primary_part >= 0 &&
-      static_cast<std::size_t>(realized.primary_part) <
-          placement->family.block_parts.size())
-    head_chain_score =
-        placement->family
-            .block_parts[static_cast<std::size_t>(realized.primary_part)]
-            .score;
   if (keep_dna_min_chain_score(
-          static_cast<AlignResult&>(realized), head_chain_score,
-          realized.supplementary, &realized.supplementary_candidates,
-          placement, min_chain_score,
-          realized.primary_part >= 0 ? &realized.supplementary_parts : nullptr,
-          &realized.primary_part))
+          static_cast<AlignResult&>(realized),
+          family.block_parts[static_cast<std::size_t>(realized.primary_part)]
+              .score,
+          realized.supplementary, realized.supplementary_candidates, family,
+          min_chain_score, realized.supplementary_parts,
+          realized.primary_part))
     return;
   demote_unmapped(realized);
   realized.supplementary.clear();
@@ -1472,78 +882,6 @@ void vote_slope_widen_winner(const LongReadSeedContext& seed_ctx,
       std::max<std::int64_t>(0, winner->raw_ref_start - fit.a));
   winner->harvest_above = static_cast<std::int32_t>(
       std::max<std::int64_t>(0, line_end - winner->raw_ref_start));
-}
-
-// Map-only's alternative commit. The retained alternative, projected as the
-// incumbent is, is promoted when its exact whole-query chain is strictly above
-// the committed owner's, through the -c lane's
-// commit_dna_alternative_hypothesis; otherwise it is the incumbent's MAPQ-0
-// secondary.
-struct DnaMapOnlyCommit {
-  dna::Result primary;
-  ::fa::cpu::voting::CandidateId primary_candidate =
-      ::fa::cpu::voting::kNullCandidate;
-  bool promoted = false;
-  // The promoted record's pieces, for the map-only join.
-  std::vector<DnaJoinPiece> pieces;
-};
-
-// `incumbent` is mapped and projected from `placement`.
-DnaMapOnlyCommit commit_map_only_hypothesis(
-    const DnaContext& dctx, const DnaPlacementChainingResult& placement,
-    const DnaPlacementChainingResult& alternative_chaining,
-    dna::Result incumbent,
-    ::fa::cpu::voting::CandidateId incumbent_candidate) {
-  DnaMapOnlyCommit out;
-  out.primary_candidate = incumbent_candidate;
-  if (alternative_chaining.accepted && alternative_chaining.family.valid &&
-      alternative_chaining.family.original_candidate_id) {
-    DnaFamilyProjectionResult projection =
-        project_map_only_placement_family(dctx, alternative_chaining,
-                                          incumbent);
-    if (projection.committed && projection.output.mapped() &&
-        projection.output.supplementary.empty()) {
-      std::vector<DnaJoinPiece> pieces = std::move(projection.pieces);
-      dna::Result alternative =
-          settle_map_only_projection(std::move(projection));
-      const DnaPlacementCandidateChain* incumbent_chain =
-          placement.find(incumbent_candidate);
-      const int incumbent_score =
-          incumbent_chain != nullptr ? incumbent_chain->chain_score : 0;
-      // The restricted family's only candidate has solver id 0.
-      const DnaPlacementCandidateChain* alternative_chain =
-          alternative_chaining.find(0);
-      if (alternative_chain != nullptr &&
-          alternative_chain->chain_score > incumbent_score) {
-        const std::vector<::fa::cpu::voting::CandidateId> incumbent_owners =
-            incumbent.supplementary_candidates;
-        const int incumbent_part = incumbent.primary_part;
-        const std::vector<int> incumbent_parts = incumbent.supplementary_parts;
-        DnaAlternativeCommit committed = commit_dna_alternative_hypothesis(
-            std::move(incumbent), incumbent_candidate, incumbent_score,
-            std::move(alternative),
-            *alternative_chaining.family.original_candidate_id,
-            alternative_chain->chain_score);
-        if (committed.promoted && !committed.primary.secondary.empty())
-          stamp_secondary_chain_tags(committed.primary.secondary.back(),
-                                     incumbent_chain, incumbent_owners,
-                                     &placement, incumbent_part,
-                                     &incumbent_parts,
-                                     &placement.family.block_parts);
-        out.primary = std::move(committed.primary);
-        out.primary_candidate = committed.primary_candidate;
-        out.promoted = committed.promoted;
-        out.pieces = std::move(pieces);
-        return out;
-      }
-      zero_hypothesis_mapq(alternative);
-      stamp_secondary_chain_tags(alternative, alternative_chain, {}, nullptr);
-      incumbent.secondary.push_back(
-          static_cast<AlignResult&&>(std::move(alternative)));
-    }
-  }
-  out.primary = std::move(incumbent);
-  return out;
 }
 
 // The all-chains lane (options/dna_profile.h all_chains). Every chain of
@@ -1775,7 +1113,6 @@ AlignResult map_read(const DnaContext& base_dctx,
     selected_chain.push_back(*best);
   DnaPlacementFamily placement_family;
   DnaPlacementChainingResult placement_chaining;
-  DnaPlacementChainingResult alternative_chaining;
   bool placement_chaining_ran = false;
   if (best) {
     placement_family =
@@ -1807,8 +1144,6 @@ AlignResult map_read(const DnaContext& base_dctx,
       placement_chaining_ran = true;
       dctx.inversion_gate_seeds = placement_chaining.inversion_gate_seeds.get();
       placement_family = placement_chaining.family;
-      alternative_chaining = build_dna_alternative_placement(
-          dctx, placement_family, placement_chaining, fwd_enc, reverse_query);
     }
   }
   const auto& chain = selected_chain;
@@ -1818,36 +1153,9 @@ AlignResult map_read(const DnaContext& base_dctx,
   dna::Result realized;
   // Catalogue id 0 is the top-ranked vote candidate.
   ::fa::cpu::voting::CandidateId primary_candidate = 0;
-  bool alternative_realization_accepted = false;
-  bool alternative_promoted = false;
-  // minimap2's dp_max / dp_max2 for this read, and the catalogue candidate
-  // dp_max2 belongs to: the summed ksw2 scores of the primary and the retained
-  // alternative.
-  double chain_mapq_dp1 = 0.0;
-  double chain_mapq_dp2 = 0.0;
-  // The same pair as raw ksw2 scores, for the HiFi margin rule. Without
-  // rescoring they equal the pair above; with it the pair above holds the
-  // post-DP prices.
-  double chain_mapq_dp1_raw = 0.0;
-  double chain_mapq_dp2_raw = 0.0;
-  // The primary/alternative interval-matched margin (chain_mapq.h R1), winner
-  // minus rival; valid only when the two primaries' query spans intersect.
-  // HiFi preset only.
-  bool chain_mapq_alternative_im_valid = false;
-  double chain_mapq_alternative_im_margin = 0.0;
-  ::fa::cpu::voting::CandidateId chain_mapq_dp2_owner =
-      ::fa::cpu::voting::kNullCandidate;
-  // The post-DP prices. `ran` stays false without rescoring and when the
-  // incumbent family was refused; consumers then read the raw decision scores.
-  DnaPostDpOutcome postdp;
-  // The block records demoted after the primary was extended, with their
-  // owners, slots and the primary's pre-extension record. They join
-  // `realized.secondary` after MAPQ is scored on the family they came from,
-  // and leave with MAPQ 0.
-  DnaDemotedBlocks demoted;
-  // Ranks 2..n of the alternatives (-N n), realized or projected, in rank
-  // order. They join `realized.secondary` after MAPQ.
-  std::vector<AlignResult> ranked_secondaries;
+  // The -c lane: the controller's records (region_realization.h) and what
+  // the MAPQ reads for each primary.
+  std::vector<DnaRegionPrice> region_prices;
   if (dctx.opts.enable_full_read_cigar) {
     const std::vector<uint8_t>& reverse_query = ensure_rc_enc();
     DnaFamilyRealizationRequest request;
@@ -1855,171 +1163,15 @@ AlignResult map_read(const DnaContext& base_dctx,
     request.placement = placement_chaining_ran ? &placement_chaining : nullptr;
     request.forward_query = &fwd_enc;
     request.reverse_query = &reverse_query;
-    // Only the primary family's realization extends and demotes; the
-    // alternative and the MAPQ rivals build their own requests.
-    request.primary_family = true;
-    DnaFamilyRealizationOutcome family_outcome =
-        realize_full_cigar_family(dctx, request);
-    DnaFamilyRealizationOutcome alternative_outcome;
-    if (family_outcome.accepted() && alternative_chaining.accepted &&
-        alternative_chaining.family.valid &&
-        alternative_chaining.family.original_candidate_id) {
-      DnaFamilyRealizationRequest alternative_request;
-      alternative_request.family = &alternative_chaining.family;
-      alternative_request.placement = &alternative_chaining;
-      alternative_request.forward_query = &fwd_enc;
-      alternative_request.reverse_query = &reverse_query;
-      alternative_outcome =
-          realize_full_cigar_family(dctx, alternative_request);
-      alternative_realization_accepted = alternative_outcome.accepted();
-    }
-    primary_candidate = family_outcome.primary_candidate;
-    // Price both realized hypotheses before anything is moved out of them,
-    // with the primary as it was before its extension. The stage declines
-    // without rescoring or when the incumbent was refused.
-    if (family_outcome.accepted()) {
-      if (family_outcome.primary_extended)
-        exchange_alignment_fields(family_outcome.output,
-                                  family_outcome.pre_extension_primary);
-      postdp = run_dna_postdp_scoring(
-          dctx, family_outcome,
-          alternative_realization_accepted ? &alternative_outcome : nullptr,
-          fwd_enc, reverse_query, read_len);
-      if (family_outcome.primary_extended)
-        exchange_alignment_fields(family_outcome.output,
-                                  family_outcome.pre_extension_primary);
-    }
-    // The interval-matched margin (chain_mapq.h R1): one CIGAR walk per
-    // realized record while both outputs are whole. HiFi preset only.
-    DnaChainMapqAlternativeInterval alternative_interval;
-    const bool interval_wanted = dctx.opts.chain_mapq_hifi_margin;
-    if (family_outcome.accepted() && alternative_realization_accepted &&
-        interval_wanted)
-      alternative_interval = chain_mapq_alternative_interval(
-          dctx, family_outcome, alternative_outcome, fwd_enc, reverse_query,
-          read_len);
-    realized = std::move(family_outcome.output);
-    if (alternative_outcome.accepted()) {
-      // Promotion is decided on the raw decision score; post-DP prices feed
-      // only the MAPQ.
-      const ::fa::cpu::voting::CandidateId incumbent_candidate =
-          primary_candidate;
-      const std::vector<::fa::cpu::voting::CandidateId> incumbent_owners =
-          realized.supplementary_candidates;
-      const int incumbent_part = realized.primary_part;
-      const std::vector<int> incumbent_parts = realized.supplementary_parts;
-      DnaAlternativeCommit committed = commit_dna_alternative_hypothesis(
-          std::move(realized), primary_candidate, family_outcome.decision_score,
-          std::move(alternative_outcome.output),
-          *alternative_chaining.family.original_candidate_id,
-          alternative_outcome.decision_score);
-      alternative_promoted = committed.promoted;
-      realized = std::move(committed.primary);
-      primary_candidate = committed.primary_candidate;
-      // The losing hypothesis carries its own chain, the one it would be
-      // scored on as the primary.
-      if (committed.retained && !realized.secondary.empty()) {
-        const DnaPlacementChainingResult* stable =
-            placement_chaining_ran ? &placement_chaining : nullptr;
-        if (alternative_promoted)
-          stamp_secondary_chain_tags(
-              realized.secondary.back(),
-              dna_committed_winner_chain(stable, nullptr, incumbent_candidate,
-                                         false),
-              incumbent_owners, stable, incumbent_part, &incumbent_parts,
-              stable != nullptr ? &stable->family.block_parts : nullptr);
-        else
-          stamp_secondary_chain_tags(
-              realized.secondary.back(),
-              dna_committed_winner_chain(
-                  stable, &alternative_chaining,
-                  *alternative_chaining.family.original_candidate_id, true),
-              {}, nullptr);
-      }
-    }
-    // A family that demoted has more than one block, so it never retains an
-    // alternative; the guard only states that a promoted alternative's family
-    // is the one emitted.
-    if (!alternative_promoted) {
-      demoted.records = std::move(family_outcome.demoted);
-      demoted.candidates = std::move(family_outcome.demoted_candidates);
-      demoted.positions = std::move(family_outcome.demoted_positions);
-      demoted.parts = std::move(family_outcome.demoted_parts);
-      demoted.primary_extended = family_outcome.primary_extended;
-      demoted.pre_extension_primary =
-          std::move(family_outcome.pre_extension_primary);
-    }
+    DnaRegionOutcome regions = realize_dna_regions(dctx, request);
+    DnaFamilyRealizationOutcome& outcome = regions.family;
+    primary_candidate = outcome.primary_candidate;
+    realized = std::move(outcome.output);
     realized.read_len = read_len;
-    // Promotion swaps the roles: the promoted alternative owns dp_max and
-    // the demoted incumbent owns dp_max2.
-    chain_mapq_dp1 = static_cast<double>(
-        alternative_promoted ? alternative_outcome.decision_score
-                             : family_outcome.decision_score);
-    if (alternative_realization_accepted) {
-      chain_mapq_dp2 = static_cast<double>(
-          alternative_promoted ? family_outcome.decision_score
-                               : alternative_outcome.decision_score);
-      chain_mapq_dp2_owner =
-          alternative_promoted
-              ? family_outcome.primary_candidate
-              : *alternative_chaining.family.original_candidate_id;
-    }
-    chain_mapq_dp1_raw = chain_mapq_dp1;
-    chain_mapq_dp2_raw = chain_mapq_dp2;
-    // The incumbent's inside score minus the alternative's, negated after a
-    // promotion so that it reads winner minus rival.
-    if (dctx.opts.chain_mapq_hifi_margin && alternative_realization_accepted &&
-        alternative_interval.scored &&
-        alternative_interval.hi > alternative_interval.lo) {
-      chain_mapq_alternative_im_valid = true;
-      const double inside = static_cast<double>(
-          alternative_interval.a_inside - alternative_interval.b_inside);
-      chain_mapq_alternative_im_margin =
-          alternative_promoted ? -inside : inside;
-    }
-    // The post-DP pair, when rescoring ran. It is priced in the incumbent's
-    // frame (dp1 = the incumbent over the alternative's query span, dp2 = the
-    // alternative primary's own price), so a promotion swaps it like the raw
-    // pair. The dp2 owner does not depend on the scoring.
-    if (postdp.ran) {
-      chain_mapq_dp1 = static_cast<double>(
-          alternative_promoted ? postdp.mapq_dp2 : postdp.mapq_dp1);
-      if (alternative_realization_accepted)
-        chain_mapq_dp2 = static_cast<double>(
-            alternative_promoted ? postdp.mapq_dp1 : postdp.mapq_dp2);
-    }
-    // Ranks 2..n, each realized as its own restricted family as the retained
-    // alternative is. Output only.
-    if (dctx.opts.alternative_realize_max >= 2 && realized.mapped()) {
-      const DnaPlacementChainingResult* stable =
-          placement_chaining_ran ? &placement_chaining : nullptr;
-      for (const DnaRankedAlternative& ranked :
-           placement_chaining.ranked_alternatives) {
-        const DnaPlacementChainingResult rival = build_dna_rival_placement(
-            dctx, placement_family, ranked.candidate, ranked.exact, fwd_enc,
-            reverse_query);
-        if (!rival.accepted || !rival.family.valid ||
-            !rival.family.original_candidate_id)
-          continue;
-        DnaFamilyRealizationRequest rival_request;
-        rival_request.family = &rival.family;
-        rival_request.placement = &rival;
-        rival_request.forward_query = &fwd_enc;
-        rival_request.reverse_query = &reverse_query;
-        DnaFamilyRealizationOutcome rival_outcome =
-            realize_full_cigar_family(dctx, rival_request);
-        if (!rival_outcome.accepted() || !rival_outcome.output.mapped() ||
-            !rival_outcome.output.supplementary.empty())
-          continue;
-        AlignResult record =
-            static_cast<AlignResult&&>(std::move(rival_outcome.output));
-        zero_hypothesis_mapq(record);
-        stamp_secondary_chain_tags(
-            record,
-            dna_committed_winner_chain(stable, &rival, ranked.candidate, true),
-            {}, nullptr);
-        ranked_secondaries.push_back(std::move(record));
-      }
+    region_prices = std::move(regions.prices);
+    if (!realized.mapped()) {
+      if (regions.floored)
+        demote_unmapped(realized);
     }
   } else {
     // Map-only: the placement family's projection replaces this carrier
@@ -2040,67 +1192,21 @@ AlignResult map_read(const DnaContext& base_dctx,
       primary_candidate = projection.primary_candidate;
       join_pieces = std::move(projection.pieces);
       realized = settle_map_only_projection(std::move(projection));
-      if (realized.mapped()) {
-        // Ranks 2..n, each projected as the retained alternative is, against
-        // the same incumbent. Output only.
-        if (dctx.opts.alternative_realize_max >= 2) {
-          for (const DnaRankedAlternative& ranked :
-               placement_chaining.ranked_alternatives) {
-            const DnaPlacementChainingResult rival = build_dna_rival_placement(
-                dctx, placement_family, ranked.candidate, ranked.exact,
-                fwd_enc, reverse_query_stream());
-            if (!rival.accepted || !rival.family.valid ||
-                !rival.family.original_candidate_id)
-              continue;
-            DnaFamilyProjectionResult rival_projection =
-                project_map_only_placement_family(dctx, rival, realized);
-            if (!rival_projection.committed ||
-                !rival_projection.output.mapped() ||
-                !rival_projection.output.supplementary.empty())
-              continue;
-            AlignResult record = static_cast<AlignResult&&>(
-                settle_map_only_projection(std::move(rival_projection)));
-            zero_hypothesis_mapq(record);
-            // The restricted family's only candidate has solver id 0.
-            stamp_secondary_chain_tags(record, rival.find(0), {}, nullptr);
-            ranked_secondaries.push_back(std::move(record));
-          }
-        }
-        const ::fa::cpu::voting::CandidateId incumbent_candidate =
-            primary_candidate;
-        DnaMapOnlyCommit committed = commit_map_only_hypothesis(
-            dctx, placement_chaining, alternative_chaining,
-            std::move(realized), incumbent_candidate);
-        realized = std::move(committed.primary);
-        primary_candidate = committed.primary_candidate;
-        if (committed.promoted) {
-          // As after the -c lane's promotion: the promoted hypothesis owns
-          // the winner chain and the demoted incumbent is the dp2 owner.
-          alternative_promoted = true;
-          join_pieces = std::move(committed.pieces);
-          chain_mapq_dp2_owner = incumbent_candidate;
-        }
-      }
     }
-    if (realized.mapped()) {
-      // Map-only joins the block records the -c lane would bridge, so the
+    if (dctx.opts.enable_full_read_cigar) {
+      price_dna_regions(dctx, placement_family, placement_chaining,
+                        region_prices, read_len, realized);
+    } else if (realized.mapped()) {
+      // Map-only joins the block records that pass the bridge test, so the
       // MAPQ below scores a joined record on its owner's chain.
-      if (!dctx.opts.enable_full_read_cigar)
-        dna_join_map_only_family(dctx, placement_chaining,
-                                 std::move(join_pieces), realized,
-                                 primary_candidate);
-      // Confidence belongs to the committed hypothesis. Both output modes
-      // reach this point, so MAPQ cannot affect placement, realization or
-      // record-family decisions.
+      dna_join_map_only_family(dctx, placement_chaining,
+                               std::move(join_pieces), realized,
+                               primary_candidate);
+      // Confidence belongs to the committed hypothesis, so MAPQ cannot affect
+      // placement or record-family decisions.
       const DnaPlacementCandidateChain* winner_chain =
-          dna_committed_winner_chain(
-              placement_chaining_ran ? &placement_chaining : nullptr,
-              alternative_promoted ? &alternative_chaining : nullptr,
-              primary_candidate, alternative_promoted);
-      // The pre-extension family stands in for the MAPQ stage and its
-      // routing (see exchange_alignment_fields).
-      const std::vector<std::size_t> stand_in_slots =
-          install_mapq_stand_in(demoted, realized);
+          placement_chaining_ran ? placement_chaining.find(primary_candidate)
+                                 : nullptr;
       // Confidence is minimap2's formula over the whole-query chains, scored
       // once per block-owning record (chain_mapq.h), after everything else is
       // committed.
@@ -2108,26 +1214,12 @@ AlignResult map_read(const DnaContext& base_dctx,
           realized.alignment_accounting_valid && realized.block_len > 0
               ? realized.identity()
               : 1.0;
-      // The realized rivals (chain_mapq.h R1): the HiFi rule's extra DP, run
-      // only under the HiFi preset with a committed primary CIGAR. The family
-      // is final, so rivals are compared with the emitted records.
-      DnaChainMapqEvidenceRealizations evidence_realizations;
-      evidence_realizations.block_rivals.assign(
-          1 + realized.supplementary.size(), DnaChainMapqRealizedRival());
-      // The committed family's diagonal map, built once for the shadow rules
-      // and the block rivals' own-locus test. HiFi preset only.
+      // The committed family's diagonal map, built once for the shadow rules.
+      // HiFi preset only.
       const bool family_map_wanted = dctx.opts.chain_mapq_hifi_margin;
       DnaChainMapqFamilyMap family_map;
       if (family_map_wanted)
         family_map = chain_mapq_family_map(dctx, realized, primary_candidate);
-      if (dctx.opts.chain_mapq_hifi_margin &&
-          dctx.opts.enable_full_read_cigar && placement_chaining_ran &&
-          !realized.cigar.empty()) {
-        evidence_realizations = realize_chain_mapq_evidence(
-            dctx, placement_family, placement_chaining, family_map,
-            winner_chain, primary_candidate, realized, fwd_enc,
-            ensure_rc_enc(), read_len);
-      }
       // The committed family's block-owning records. The split-read caps
       // (chain_mapq.h R6) read this and each block record's divergence, so
       // the per-record counts are taken only where the caps can fire.
@@ -2198,72 +1290,32 @@ AlignResult map_read(const DnaContext& base_dctx,
       };
       DnaChainMapqEvidence evidence = build_chain_mapq_evidence(
           dctx, placement_family, placement_chaining, placement_chaining_ran,
-          winner_chain, primary_candidate, chain_mapq_dp2_owner, chain_mapq_dp1,
-          chain_mapq_dp2, chain_mapq_dp1_raw, chain_mapq_dp2_raw, identity,
-          read_len);
+          winner_chain, primary_candidate, ::fa::cpu::voting::kNullCandidate,
+          0.0, 0.0, identity, read_len);
       mark_chain_mapq_record_shadows(dctx, placement_family,
                                      placement_chaining, family_map, 0,
                                      primary_candidate, read_len, evidence);
       price_block_part(placement_family, realized.primary_part, evidence);
-      evidence.alternative_im_valid = chain_mapq_alternative_im_valid;
-      evidence.alternative_im_margin = chain_mapq_alternative_im_margin;
-      evidence.sibling = evidence_realizations.sibling;
-      evidence.block_rival = evidence_realizations.block_rivals[0];
       const DnaChainMapqRecordCensus primary_census =
           block_census(static_cast<const AlignResult&>(realized));
       rule_fields(primary_census, evidence, 0);
       DnaChainMapqBreakdown breakdown;
       std::vector<DnaChainMapqRivalVerdict> verdicts;
       int mapq = dna_chain_mapq(evidence, &breakdown, &verdicts);
-      // cm:i and s1:i: the committed chain; s2:i: the competing chain this
-      // record's MAPQ weighed. With f1 <= 0 there is no chain, the breakdown
-      // is default-constructed and "no evidence" is not "no rival", so the
-      // record keeps -1 and writes none of the three.
+      // cm:i and s1:i: the block part the record prints from; s2:i: the
+      // competing chain this record's MAPQ weighed. With f1 <= 0 there is no
+      // chain, the breakdown is default-constructed and "no evidence" is not
+      // "no rival", so the record keeps -1 and writes none of the three.
       if (evidence.f1 > 0) {
-        realized.chain_anchors = evidence.cnt;
-        realized.chain_score = evidence.f1;
+        const DnaBlockPart& part = placement_family.block_parts
+            [static_cast<std::size_t>(realized.primary_part)];
+        realized.chain_anchors = part.anchors;
+        realized.chain_score = part.score;
         realized.secondary_chain_score = breakdown.f2;
-        // A record printed from a block part carries the part's anchors and
-        // score.
-        if (realized.primary_part >= 0 &&
-            static_cast<std::size_t>(realized.primary_part) <
-                placement_family.block_parts.size()) {
-          const DnaBlockPart& part = placement_family.block_parts
-              [static_cast<std::size_t>(realized.primary_part)];
-          realized.chain_anchors = part.anchors;
-          realized.chain_score = part.score;
-        }
-      }
-      // Keep the retained alternative only if the MAPQ weighed it as an
-      // admissible, non-shadow rival. A twin candidate of the committed locus
-      // is a shadow; the writers derive md:i and XA:Z from `secondary` and
-      // --secondary yes prints it, so such a twin must not appear as an
-      // alternative placement. At most one alternative is retained, so one
-      // verdict answers for the whole vector.
-      if (!realized.secondary.empty()) {
-        const ::fa::cpu::voting::CandidateId alternative_candidate =
-            chain_mapq_dp2_owner != ::fa::cpu::voting::kNullCandidate
-                ? chain_mapq_dp2_owner
-                : alternative_chaining.family.original_candidate_id.value_or(
-                      ::fa::cpu::voting::kNullCandidate);
-        bool weighed = false;
-        for (std::size_t index = 0;
-             index < evidence.rivals.size() && index < verdicts.size();
-             ++index) {
-          if (evidence.rivals[index].candidate != alternative_candidate)
-            continue;
-          weighed = verdicts[index].admissible && !verdicts[index].shadow;
-          break;
-        }
-        if (!weighed)
-          realized.secondary.clear();
       }
       // Every supplementary that owns a selected block is scored on its own
-      // candidate's whole-query chain, against the same rivals, with its own
-      // realized score as dp1 (none in map-only) and its own identity. One
-      // that owns no block (an inversion middle) keeps -1 and
-      // inherits the primary's MAPQ during routing. A promoted alternative is
-      // a single-record family, so the stable placement's chains suffice.
+      // candidate's whole-query chain, against the same rivals. One that owns
+      // no block keeps -1 and inherits the primary's MAPQ during routing.
       std::vector<int> supplementary_mapq(realized.supplementary.size(), -1);
       for (std::size_t index = 0; index < realized.supplementary.size();
            ++index) {
@@ -2279,18 +1331,14 @@ AlignResult map_read(const DnaContext& base_dctx,
         if (block_chain == nullptr)
           continue;
         const AlignResult& record = realized.supplementary[index];
-        const double block_dp1 =
-            dctx.opts.enable_full_read_cigar && record.score > 0
-                ? static_cast<double>(record.score)
-                : 0.0;
         const double block_identity =
             record.alignment_accounting_valid && record.block_len > 0
                 ? record.identity()
                 : 1.0;
         DnaChainMapqEvidence block_evidence = build_chain_mapq_evidence(
             dctx, placement_family, placement_chaining, placement_chaining_ran,
-            block_chain, owner, ::fa::cpu::voting::kNullCandidate, block_dp1,
-            0.0, block_dp1, 0.0, block_identity, read_len);
+            block_chain, owner, ::fa::cpu::voting::kNullCandidate, 0.0, 0.0,
+            block_identity, read_len);
         mark_chain_mapq_record_shadows(dctx, placement_family,
                                        placement_chaining, family_map,
                                        index + 1, owner, read_len,
@@ -2300,11 +1348,6 @@ AlignResult map_read(const DnaContext& base_dctx,
                              ? realized.supplementary_parts[index]
                              : -1,
                          block_evidence);
-        // This block's realized rivals (the read-level sibling is never
-        // realized on a multi-block family) and the R6 fields.
-        block_evidence.sibling = evidence_realizations.sibling;
-        block_evidence.block_rival =
-            evidence_realizations.block_rivals[index + 1];
         const DnaChainMapqRecordCensus census = block_census(record);
         rule_fields(census, block_evidence, index + 1);
         DnaChainMapqBreakdown block_breakdown;
@@ -2315,21 +1358,11 @@ AlignResult map_read(const DnaContext& base_dctx,
         // Written through the vector because `record` is a const reference.
         if (block_evidence.f1 > 0) {
           AlignResult& stamped = realized.supplementary[index];
-          stamped.chain_anchors = block_evidence.cnt;
-          stamped.chain_score = block_evidence.f1;
+          const DnaBlockPart& part = placement_family.block_parts
+              [static_cast<std::size_t>(realized.supplementary_parts[index])];
+          stamped.chain_anchors = part.anchors;
+          stamped.chain_score = part.score;
           stamped.secondary_chain_score = block_breakdown.f2;
-          const int part = index < realized.supplementary_parts.size()
-                               ? realized.supplementary_parts[index]
-                               : -1;
-          if (part >= 0 && static_cast<std::size_t>(part) <
-                               placement_family.block_parts.size()) {
-            stamped.chain_anchors =
-                placement_family.block_parts[static_cast<std::size_t>(part)]
-                    .anchors;
-            stamped.chain_score =
-                placement_family.block_parts[static_cast<std::size_t>(part)]
-                    .score;
-          }
         }
       }
       // Divergence contrast cap (chain_mapq.h): a record whose event
@@ -2349,39 +1382,13 @@ AlignResult map_read(const DnaContext& base_dctx,
         supplementary_mapq[index] =
             std::min(carried, kDnaChainMapqDivergentRecordMapq);
       }
-      // Ranks 2..n join after the retained alternative (or the demoted
-      // incumbent), in rank order. The MAPQ above never saw them; duplicates
-      // go after the floors below.
-      for (AlignResult& record : ranked_secondaries) {
-        record.output_only = true;
-        realized.secondary.push_back(std::move(record));
-      }
-      ranked_secondaries.clear();
-      // The demoted block records become secondaries before routing, which
-      // gives every secondary 0. Their copies stay in their slots and the
-      // primary stays pre-extension until routing is done, so the
-      // inversion-middle rule sees that family too. Each takes its owner's
-      // chain tags, as its stand-in copy carried them.
-      for (std::size_t k = 0; k < demoted.records.size(); ++k) {
-        AlignResult& record = demoted.records[k];
-        if (placement_chaining_ran && k < demoted.candidates.size() &&
-            demoted.candidates[k] != ::fa::cpu::voting::kNullCandidate)
-          stamp_secondary_chain_tags(
-              record, placement_chaining.find(demoted.candidates[k]), {},
-              nullptr, k < demoted.parts.size() ? demoted.parts[k] : -1,
-              nullptr, &placement_chaining.family.block_parts);
-        realized.secondary.push_back(std::move(record));
-      }
-      demoted.records.clear();
       route_dna_mapq(placement_family, primary_candidate, mapq,
                      supplementary_mapq, realized);
-      // Restore the extended primary under the MAPQ computed above.
-      remove_mapq_stand_in(demoted, stand_in_slots, realized);
     }
   }
-  // The emitted family is final here, MAPQ included. Two demotions follow on
-  // CIGAR output, and one on map-only, whose records carry chain scores and
-  // approximate match counts that the CIGAR floor must not read.
+  // The emitted family is final here, MAPQ included; the -c lane's emission
+  // floor ran in its controller. One demotion follows on CIGAR output, and
+  // one on map-only.
   //
   // (1) A mapped primary with an empty CIGAR is a realization refusal. Emit
   // it unmapped, as minimap2 does for a read it cannot align, rather than as
@@ -2391,33 +1398,13 @@ AlignResult map_read(const DnaContext& base_dctx,
       realized.cigar.empty()) {
     demote_unmapped(realized);
   }
-  // (2) minimap2's per-record emission floor (mm_filter_regs): every record
-  // owns at least min_chain_score matched bases and min_dp_max (-s) DP score.
-  // A failing supplementary or secondary is erased, a failing primary is
-  // replaced by the widest surviving supplementary, and a family that keeps
-  // nothing becomes unmapped.
-  if (dctx.opts.enable_full_read_cigar && realized.mapped()) {
-    apply_dna_emission_floor(dctx.opts.min_chain_score,
-                             dctx.opts.cigar_dp_min_dp_max, realized);
-  }
-  // (3) Map-only: no record under min_chain_score, judged on the chains the
-  // MAPQ reads (apply_dna_min_chain_score).
-  if (!dctx.opts.enable_full_read_cigar && realized.mapped()) {
-    const DnaPlacementChainingResult* placement =
-        placement_chaining_ran ? &placement_chaining : nullptr;
-    apply_dna_min_chain_score(
-        dna_committed_winner_chain(
-            placement, alternative_promoted ? &alternative_chaining : nullptr,
-            primary_candidate, alternative_promoted),
-        placement, dctx.opts.min_chain_score, realized);
-  }
-  // Then, in both lanes, ranks 2..n lying on the reference span of a
-  // surviving record go; a record the floors erased removes none.
-  if (dctx.opts.alternative_realize_max >= 2 && realized.mapped())
-    drop_duplicate_output_only(realized);
-  // ms:i: the max-scoring segment of each emitted record's CIGAR. Stamped
-  // after the floor, which can erase records, promote a supplementary or
-  // unmap the read (hence the second mapped() test). Map-only records have
+  // (2) Map-only: no record under min_chain_score, judged on the block parts
+  // the MAPQ reads (apply_dna_min_chain_score).
+  if (!dctx.opts.enable_full_read_cigar && realized.mapped())
+    apply_dna_min_chain_score(placement_chaining.family,
+                              dctx.opts.min_chain_score, realized);
+  // ms:i: the max-scoring segment of each emitted record's CIGAR, after the
+  // demotion above (hence the second mapped() test). Map-only records have
   // no CIGAR and keep -1.
   if (dctx.opts.enable_full_read_cigar && realized.mapped()) {
     const std::vector<uint8_t>& reverse_query = ensure_rc_enc();

@@ -6,6 +6,7 @@
 // paths. No DP runs here.
 #pragma once
 
+#include "chain_ownership.h"
 #include "context.h"
 #include "retained_seed_density.h"
 #include "placement_family_adapter.h"
@@ -38,15 +39,14 @@ struct DnaPlacementCandidateChain {
   ::fa::cpu::voting::QueryTileMask sparse_support;
   ::fa::cpu::voting::QueryTileMask dense_support;
   std::vector<chaining::Anchor> primary;
-  // Sibling paths from the same exact DP. Realization and the map-only
-  // projection may use one when the primary path has no anchors in a selected
-  // block (dna_selected_sibling_path).
+  // Sibling paths from the same exact DP, items of the ownership selection
+  // beside the primary.
   std::vector<std::vector<chaining::Anchor>> sibling_paths;
   // Parallel to sibling_paths: each sibling's chain score. rival_sibling is
   // the index of the sibling rival_chain_score came from
   // (ChainPartition::f2_index), or -1 when there is none or it was not
-  // materialized. Whole-query passes only; read by dna_sibling_rival_chain,
-  // and by the map-only projection for a record projected from a sibling.
+  // materialized. Whole-query passes only; read by the ownership selection
+  // (select_block_owners).
   std::vector<int> sibling_scores;
   int rival_sibling = -1;
   DnaPlacementChainStatus status = DnaPlacementChainStatus::NotSelected;
@@ -106,11 +106,22 @@ struct DnaRivalExactChain {
   bool reused = false;
 };
 
-// A rank 2..n alternative (-N n on a DNA preset) with its exact whole-query
-// chain. Output only: no selection, MAPQ or rival lookup reads it.
-struct DnaRankedAlternative {
-  ::fa::cpu::voting::CandidateId candidate = ::fa::cpu::voting::kNullCandidate;
-  DnaPlacementCandidateChain exact;
+// One chain of the final ownership selection, kept for the -c lane's
+// controller (region_realization.h): a candidate's primary (path -1) or
+// sibling path.
+struct DnaSelectionItem {
+  int candidate = -1;
+  int path = -1;
+  int contig = -1;
+  bool reverse = false;
+  int score = 0;
+};
+
+// The final selection's chains and the parent walk's roles over them, in its
+// order (dna/chain_ownership.h); role items index `items`.
+struct DnaKeptSelection {
+  std::vector<DnaSelectionItem> items;
+  std::vector<DnaOwnershipRole> roles;
 };
 
 struct DnaPlacementChainingResult {
@@ -118,9 +129,6 @@ struct DnaPlacementChainingResult {
   std::vector<DnaPlacementCandidateChain> candidates;
   DnaAlternativeSelection alternative;
   DnaPlacementCandidateChain alternative_exact;
-  // Ranks 2..n of the alternative ranking whose exact restore succeeded, in
-  // rank order. Empty unless n >= 2.
-  std::vector<DnaRankedAlternative> ranked_alternatives;
   // The MAPQ's cross-locus rivals; empty when none is worth chaining.
   std::vector<DnaRivalExactChain> rival_exact;
   // Whole-query chains built for the MAPQ rivals, reused ones excluded.
@@ -135,34 +143,23 @@ struct DnaPlacementChainingResult {
   // Not accepted because the partition's owners have no whole-query chain
   // that qualifies to own a block (dna/chain_ownership.h).
   bool no_owner_chain = false;
+  // The final ownership selection.
+  DnaKeptSelection kept_selection;
 
   const DnaPlacementCandidateChain*
   find(::fa::cpu::voting::CandidateId candidate) const noexcept;
 
   // A candidate's whole-query exact chain: its MAPQ rival chain (any status),
-  // else the retained alternative's exact restore, else its own record if it
+  // else the alternative's exact restore, else its own record if it
   // was exact-restored. Null when there is none. Callers that need an
   // accepted chain check the status.
   const DnaPlacementCandidateChain*
   whole_query_chain(::fa::cpu::voting::CandidateId candidate) const noexcept;
+
+  // A kept selection item's anchors, in chain order; null when gone.
+  const std::vector<chaining::Anchor>*
+  selection_anchors(const DnaSelectionItem& item) const noexcept;
 };
-
-// The winner's rival sibling as a chain record of its own, for
-// build_dna_rival_placement: the sibling path as `primary`, exact and
-// Accepted, with its own score, anchor count, dense_support (on tile_count
-// tiles) and spans; other fields are left empty. Empty (NotSelected) when the
-// winner has no rival sibling.
-DnaPlacementCandidateChain
-dna_sibling_rival_chain(const DnaPlacementCandidateChain& winner, bool reverse,
-                        int read_length, int seed_length, int tile_count);
-
-// The whole-query chain of the committed hypothesis. A promoted alternative
-// uses its restricted rerun, not the stable run's record for that candidate.
-const DnaPlacementCandidateChain* dna_committed_winner_chain(
-    const DnaPlacementChainingResult* stable,
-    const DnaPlacementChainingResult* promoted_alternative,
-    ::fa::cpu::voting::CandidateId primary_candidate,
-    bool primary_is_alternative) noexcept;
 
 // Chain parameters for the candidate paths under diagonal band `band`.
 chaining::ColinearChainParams
@@ -176,26 +173,6 @@ dna_candidate_chain_params(const DnaContext& context, int band,
 chaining::DenseChainParams
 dna_dense_chain_params(const chaining::ColinearChainParams& params,
                        int seed_length, int diag_min_runs);
-
-// Runs the restore/stabilize pipeline over {retained alternative, null}. The
-// returned family uses solver id 0 and records the catalogue id in
-// family.original_candidate_id.
-DnaPlacementChainingResult
-build_dna_alternative_placement(const DnaContext& context,
-                                const DnaPlacementFamily& stable_family,
-                                const DnaPlacementChainingResult& stable,
-                                const std::vector<std::uint8_t>& forward_query,
-                                const std::vector<std::uint8_t>& reverse_query);
-
-// The same over {one catalogue candidate, null}, from a given exact
-// whole-query chain.
-DnaPlacementChainingResult
-build_dna_rival_placement(const DnaContext& context,
-                          const DnaPlacementFamily& stable_family,
-                          ::fa::cpu::voting::CandidateId original,
-                          const DnaPlacementCandidateChain& exact_chain,
-                          const std::vector<std::uint8_t>& forward_query,
-                          const std::vector<std::uint8_t>& reverse_query);
 
 DnaPlacementChainingResult build_dna_placement_chains(
     const DnaContext& context, DnaPlacementFamily family,

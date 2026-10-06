@@ -407,9 +407,6 @@ std::string resolved_config_text(const AlignOptions& opt,
   }
 
   if (!is_rna) {
-    // HiFi only: the MAPQ's dp1/dp2 come from minibwa-style rescoring of the
-    // CIGAR (dna/postdp_scoring.h) instead of the raw DP scores.
-    row("dna_postdp.rescoring", b2s(mapping.postdp_rescoring), "builtin");
     // HiFi only: the chain MAPQ margin rule (dna/chain_mapq.h).
     row("dna_chain_mapq.hifi_margin", b2s(mapping.chain_mapq_hifi_margin),
         "builtin");
@@ -419,8 +416,9 @@ std::string resolved_config_text(const AlignOptions& opt,
         "builtin");
     row("dna_rival.pri_ratio", f2s(mapping.pri_ratio),
         src(opt.pri_ratio.has_value(), "builtin"));
-    // -N: alternatives realized per read; ranks 2..n are output only. Only
-    // an installed count prints, so the default text and config_digest stay.
+    // -N: the alternatives whose whole-query chains enter the ownership
+    // selection. Only an installed count prints, so the default text and
+    // config_digest stay.
     if (opt.dna_alternative_realize_max)
       row("dna_alternative.realize_max", i2s(mapping.alternative_realize_max),
           "explicit");

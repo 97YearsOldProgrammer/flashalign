@@ -6,7 +6,6 @@
 #include "../voting/query_partition.h"
 
 #include <cstdint>
-#include <optional>
 #include <vector>
 
 namespace fa::cpu::lr {
@@ -54,17 +53,13 @@ struct DnaPlacementFamily {
   int seed_length = 0;
   // The partition's tiles (--tiles); masks, blocks and assignments use them.
   int tile_count = ::fa::cpu::voting::kQueryTileCount;
-  // Set only for a restricted alternative-hypothesis catalogue, whose solver
-  // ids are positional: the id of the candidate in the original catalogue.
-  std::optional<::fa::cpu::voting::CandidateId> original_candidate_id;
   int forward_candidates = 0;
   int reverse_candidates = 0;
   std::uint64_t exact_posting_tests = 0;
   std::vector<DnaPlacementCandidate> candidates;
   ::fa::cpu::voting::QueryPartitionResult partition;
   // Parallel to partition.selected.blocks once the owners are decided on the
-  // dense chains' anchors; empty in a family placed on tiles alone (the
-  // retained alternative, ranks 2..n, a rival placement).
+  // dense chains' anchors; empty before.
   std::vector<DnaBlockPart> block_parts;
   // Set when build_dna_placement_family left `partition` unsolved for
   // build_dna_placement_chains to solve.

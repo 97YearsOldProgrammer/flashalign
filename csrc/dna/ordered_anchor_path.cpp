@@ -601,6 +601,10 @@ TerminalWindowPlan plan_terminal_windows(const OrderedAnchorPath& path,
   int query_start0 = path.selected.front().q;
   int target_start1 = path.target_bound_begin;
   int query_start1 = path.query_bound_begin;
+  if (control.left_cap) {
+    target_start1 = std::max(target_start1, control.left_cap_target);
+    query_start1 = std::max(query_start1, control.left_cap_query);
+  }
   const int adjusted_query_start = plan.first_adjusted.query;
   const int adjusted_target_start = plan.first_adjusted.target;
   if (adjusted_query_start > path.query_bound_begin &&
@@ -626,6 +630,10 @@ TerminalWindowPlan plan_terminal_windows(const OrderedAnchorPath& path,
   int query_end0 = path.selected.back().q + path.selected.back().span;
   int target_end1 = path.target_bound_end;
   int query_end1 = path.query_bound_end;
+  if (control.right_cap) {
+    target_end1 = std::min(target_end1, control.right_cap_target);
+    query_end1 = std::min(query_end1, control.right_cap_query);
+  }
   const int adjusted_query_end = plan.last_adjusted.query;
   const int adjusted_target_end = plan.last_adjusted.target;
   if (adjusted_query_end < path.query_bound_end &&

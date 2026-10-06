@@ -196,9 +196,6 @@ inline void set_dna_long_platform_fields(
     // The vote's empty-tile rescue past N, up to M (seeding/syncmer.h).
     mapping.dna_tile_rescue_occ =
         hifi_row ? lr::kDnaHiFiTileRescueOcc : lr::kDnaTileRescueOcc;
-    // HiFi only: the MAPQ's dp1/dp2 come from minibwa-style rescoring of the
-    // CIGAR (dna/postdp_scoring.h) instead of the raw DP scores.
-    mapping.postdp_rescoring = profile.kind == DnaPresetKind::HiFi;
     // HiFi only: the chain MAPQ margin rule (dna/chain_mapq.h).
     mapping.chain_mapq_hifi_margin = profile.kind == DnaPresetKind::HiFi;
     // HiFi only: the late inversion probe's local-chain gate
@@ -334,7 +331,6 @@ inline void set_splice_fields(
     mapping.base.vote_admission_ratio = 0.0;
     mapping.base.dna_tandem_window = 0;
     mapping.base.cigar_dp_min_ksw_len = 0;
-    mapping.base.postdp_rescoring = false;
     mapping.base.chain_mapq_hifi_margin = false;
     mapping.base.inversion_probe_local_gate = false;
     mapping.base.dna_pool_gate_occ = 0;

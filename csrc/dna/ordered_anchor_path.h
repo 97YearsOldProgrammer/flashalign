@@ -235,6 +235,15 @@ struct TerminalWindowControl {
   int match = 0;
   int gap_open = 0;
   int gap_extend = 0;
+  // minimap2's cap at nearby seeds (mm_align1): where set, the left window
+  // starts at or after (left_cap_query, left_cap_target) and the right one
+  // ends at or before (right_cap_query, right_cap_target).
+  bool left_cap = false;
+  int left_cap_query = 0;
+  int left_cap_target = 0;
+  bool right_cap = false;
+  int right_cap_query = 0;
+  int right_cap_target = 0;
 };
 
 struct TerminalWindowPlan {

@@ -66,9 +66,6 @@ struct Alignment {
   int secondary_chain_score = -1;
   /// ms:i, the score of the maximum-scoring segment of the CIGAR; -1 without a CIGAR.
   int dp_max_segment = -1;
-  /// True for a DNA secondary beyond the first alternative (-N 2 and above): output
-  /// only, weighed by no MAPQ, and left out of the primary's md:i and XA:Z.
-  bool output_only = false;
 
   /** True when the record has a placement. */
   bool mapped() const {

@@ -110,45 +110,14 @@ double rival_strength(const DnaChainMapqEvidence& evidence,
   return strength;
 }
 
-// The realized rival holding the dp2 seat (R1), or none. The guard and the
-// ladder read m_eff; the ratio form reads the seat's own score pair
-// (pair_dp1 / pair_dp2): dp1 / dp2 for the alternative, the raw pair for the
-// sibling, and for the block rival the two inside scores of the contested
-// interval, or the raw pair when there is none or the block's own is not
-// positive.
+// The rival holding the dp2 seat (R1), or none.
 struct DnaChainMapqSeat {
-  int kind = 0; // 0 none, 1 alternative, 2 sibling, 3 block rival
-  bool has_slot = false;
-  std::size_t slot = 0; // index into evidence.rivals when has_slot
-  double dp2_raw = 0.0;
-  double raw_margin = 0.0;
-  bool in_valid = false;
-  double in_margin = 0.0;
-  double m_eff = 0.0;
+  int kind = 0;         // 0 none, 1 the dp2 owner
+  std::size_t slot = 0; // index into evidence.rivals when kind is 1
   bool chained = false;
-  int chain_score = 0;
   int chain_anchors = 0;
   bool tie = false;
-  double pair_dp1 = 0.0;
-  double pair_dp2 = 0.0;
-  double strength = 0.0; // before the DP factor; 1.0 on a tie
 };
-
-// R1's margins for one realized rival: raw, interval-matched where the spans
-// intersect, and effective: min(raw, in) for a whole-read hypothesis, the
-// interval margin alone for a block rival (`interval_only`), raw when there is
-// no interval.
-void seat_margins(double dp1_raw, double dp2_raw, bool in_valid,
-                  double in_margin, bool interval_only,
-                  DnaChainMapqSeat& seat) noexcept {
-  seat.dp2_raw = dp2_raw;
-  seat.raw_margin = dp1_raw - dp2_raw;
-  seat.in_valid = in_valid;
-  seat.in_margin = in_valid ? in_margin : 0.0;
-  seat.m_eff = !in_valid       ? seat.raw_margin
-               : interval_only ? in_margin
-                               : std::min(seat.raw_margin, in_margin);
-}
 
 } // namespace
 
@@ -202,18 +171,6 @@ DnaChainMapqChainShadow dna_chain_mapq_chain_shadow(
   }
   out.shadow = out.half && out.contained && out.on_diagonal;
   return out;
-}
-
-bool dna_chain_mapq_spans_compete(int a_begin, int a_end, int b_begin,
-                                  int b_end) noexcept {
-  if (a_begin < 0 || a_end <= a_begin || b_begin < 0 || b_end <= b_begin)
-    return false;
-  const int overlap = std::min(a_end, b_end) - std::max(a_begin, b_begin);
-  if (overlap <= 0)
-    return false;
-  const int shorter = std::min(a_end - a_begin, b_end - b_begin);
-  return static_cast<std::int64_t>(overlap) * 2 >
-         static_cast<std::int64_t>(shorter);
 }
 
 bool dna_chain_mapq_admissible(const DnaChainMapqEvidence& evidence,
@@ -310,111 +267,22 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
               rival_strength(evidence, evidence.rivals[index], effective_vote);
   }
 
-  // R1: the seat goes to the realized rival with the smallest effective
-  // margin; ties go to the sibling, then the alternative, then the block
-  // rival.
+  // R1: the seat is the dp2 owner.
   const double f1 = static_cast<double>(evidence.f1);
-  const bool sibling_realized = hifi && dp1 > 0.0 &&
-                                evidence.sibling.realized &&
-                                evidence.sibling.dp2_raw > 0.0;
-  const bool block_rival_realized = hifi && dp1 > 0.0 &&
-                                    evidence.block_rival.realized &&
-                                    evidence.block_rival.dp2_raw > 0.0;
   DnaChainMapqSeat seat;
-  const auto consider = [&seat](const DnaChainMapqSeat& candidate) {
-    if (seat.kind == 0 || candidate.m_eff < seat.m_eff)
-      seat = candidate;
-  };
-  const auto realized_seat = [&](const DnaChainMapqRealizedRival& rival,
-                                 int kind) {
-    DnaChainMapqSeat candidate;
-    candidate.kind = kind;
-    const bool block_rival = kind == 3;
-    const bool in_valid = rival.im_lo >= 0 && rival.im_hi > rival.im_lo;
-    // A block rival is realized clipped to the block's query span, so it is
-    // compared on the contested interval alone.
-    seat_margins(evidence.dp1_raw, rival.dp2_raw, in_valid,
-                 static_cast<double>(rival.im_a_inside - rival.im_b_inside),
-                 /*interval_only=*/block_rival, candidate);
-    candidate.chained = true;
-    candidate.chain_score = rival.chain_score;
-    candidate.chain_anchors = rival.chain_anchors;
-    candidate.tie =
-        rival.chain_score == evidence.f1 && rival.chain_anchors == evidence.cnt;
-    candidate.pair_dp1 = evidence.dp1_raw;
-    candidate.pair_dp2 = rival.dp2_raw;
-    // R5: the block rival's pair is the two inside scores, while the block's
-    // own is positive (the ratio needs a positive denominator).
-    if (block_rival && in_valid && rival.im_a_inside > 0) {
-      candidate.pair_dp1 = static_cast<double>(rival.im_a_inside);
-      candidate.pair_dp2 = static_cast<double>(rival.im_b_inside);
-    }
-    return candidate;
-  };
-  if (sibling_realized) {
-    // Its strength for the ratio form is the sibling floor,
-    // max(sib_f2, min_chain_score) / f1.
-    DnaChainMapqSeat candidate = realized_seat(evidence.sibling, 2);
-    candidate.strength =
-        candidate.tie ? 1.0
-                      : static_cast<double>(
-                            std::max(evidence.sib_f2, evidence.min_chain_score)) /
-                            f1;
-    consider(candidate);
-  }
   if (alternative_competes) {
     const DnaChainMapqRival& rival = evidence.rivals[alternative_slot];
-    const DnaChainMapqRivalVerdict& verdict = judged[alternative_slot];
-    DnaChainMapqSeat candidate;
-    candidate.kind = 1;
-    candidate.has_slot = true;
-    candidate.slot = alternative_slot;
-    seat_margins(evidence.dp1_raw, evidence.dp2_raw,
-                 hifi && evidence.alternative_im_valid,
-                 evidence.alternative_im_margin, /*interval_only=*/false,
-                 candidate);
-    candidate.chained = rival.chained;
-    candidate.chain_score = rival.chain_score;
-    candidate.chain_anchors = rival.chain_anchors;
-    candidate.tie = verdict.tie;
-    candidate.pair_dp1 = dp1;
-    candidate.pair_dp2 = evidence.dp2;
-    candidate.strength = verdict.strength;
-    consider(candidate);
-  }
-  if (block_rival_realized) {
-    DnaChainMapqSeat candidate = realized_seat(evidence.block_rival, 3);
-    // The strength is the rival's catalogue slot verdict, or, when the slot
-    // is inadmissible or a shadow, the realized chain's ratio.
-    candidate.strength =
-        static_cast<double>(
-            std::max(evidence.block_rival.chain_score, evidence.min_chain_score)) /
-        f1;
-    bool slot_shadow = false;
-    for (std::size_t index = 0; index < evidence.rivals.size(); ++index) {
-      if (evidence.rivals[index].candidate != evidence.block_rival.candidate)
-        continue;
-      slot_shadow = judged[index].shadow;
-      if (judged[index].admissible && !judged[index].shadow) {
-        candidate.has_slot = true;
-        candidate.slot = index;
-        candidate.strength = judged[index].strength;
-      }
-      break;
-    }
-    if (candidate.tie)
-      candidate.strength = 1.0;
-    // Bit 32: a block rival the shadow rule calls the winner's own locus
-    // cannot take the seat.
-    const bool shadow_seat =
-        slot_shadow &&
-        (evidence.study_bits & kDnaChainMapqStudyNoShadowSeat) != 0;
-    if (!shadow_seat)
-      consider(candidate);
+    seat.kind = 1;
+    seat.slot = alternative_slot;
+    seat.chained = rival.chained;
+    seat.chain_anchors = rival.chain_anchors;
+    seat.tie = judged[alternative_slot].tie;
   }
   const bool dp_branch = seat.kind != 0;
-  // Outside the HiFi rule dp2 is the alternative's, or nothing.
+  // dp2 is the seat's, or nothing.
   const double dp2 = alternative_competes ? evidence.dp2 : 0.0;
+  // R1: the seat's margin, which the guard, the ladder and mapq_alt read.
+  const double m_eff = dp_branch ? dp1 - dp2 : 0.0;
 
   // Second pass: f2, n_sub and x over the competing rivals. As minimap2's
   // mm_set_parent, a rival counts toward n_sub once if it meets the anchor
@@ -428,11 +296,10 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   double vote_ratio = 0.0;
   double max_competing_strength = 0.0;
   const double winner_vote = static_cast<double>(std::max(1, effective_vote));
-  // The winner's sibling path seeds x with its chain ratio, unless it was
-  // realized and so is judged as a realized rival instead.
+  // The winner's sibling path seeds x with its chain ratio.
   const double sibling_floor =
       static_cast<double>(std::max(evidence.sib_f2, evidence.min_chain_score)) / f1;
-  double x = sibling_realized ? 0.0 : sibling_floor;
+  double x = sibling_floor;
   // x over the competing rivals other than the seat.
   double x_other = x;
   for (std::size_t index = 0; index < evidence.rivals.size(); ++index) {
@@ -450,18 +317,14 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     vote_ratio = std::max(vote_ratio, static_cast<double>(rival.vote_evidence) /
                                           winner_vote);
     max_competing_strength = std::max(max_competing_strength, verdict.strength);
-    const bool is_seat = seat.has_slot && seat.slot == index;
-    // R1: a realized rival that lost the seat enters neither x nor x_other.
-    const bool lost_seat =
-        !is_seat && ((rival.owns_dp2 && alternative_competes) ||
-                     (block_rival_realized &&
-                      rival.candidate == evidence.block_rival.candidate));
+    const bool is_seat = seat.kind != 0 && seat.slot == index;
+    // R1: a dp2 owner that is not the seat enters neither x nor x_other.
+    const bool lost_seat = !is_seat && rival.owns_dp2 && alternative_competes;
     if (rival.chained) {
       f2 = std::max(f2, rival.chain_score);
       bool counts =
           evidence.n_sub_cnt_clause && rival.chain_anchors >= evidence.cnt;
-      if (is_seat && seat.pair_dp1 - seat.pair_dp2 <=
-                         static_cast<double>(evidence.sub_diff))
+      if (is_seat && m_eff <= static_cast<double>(evidence.sub_diff))
         counts = true;
       verdict.counted = counts;
       if (counts)
@@ -470,18 +333,13 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     if (is_seat) {
       // The DP ratio discounts the seat once; a tie is not discounted.
       if (!verdict.tie)
-        verdict.strength *= seat.pair_dp2 / seat.pair_dp1;
+        verdict.strength *= dp2 / dp1;
       x = std::max(x, verdict.strength);
     } else if (!lost_seat) {
       x = std::max(x, verdict.strength);
       x_other = std::max(x_other, verdict.strength);
     }
   }
-  // A seat without a catalogue slot enters x the same way.
-  if (dp_branch && !seat.has_slot)
-    x = std::max(x, seat.tie ? 1.0
-                             : seat.strength * seat.pair_dp2 / seat.pair_dp1);
-
   // minimap2's own x (chain ratio alone), for the breakdown.
   const int subsc = std::max(f2, evidence.min_chain_score);
   const double x_chain = static_cast<double>(subsc) / f1;
@@ -512,21 +370,21 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   const double match_sc = static_cast<double>(std::max(1, evidence.match_sc));
   // R2. `margin_beats_rival` also gates the never-Q0 promotion below.
   const bool margin_beats_rival =
-      hifi && dp_branch && evidence.dp1_raw > 0.0 && seat.dp2_raw > 0.0 &&
+      hifi && dp_branch && dp1 > 0.0 && dp2 > 0.0 &&
       evidence.substitution_cost > 0 &&
-      seat.m_eff >= static_cast<double>(evidence.substitution_cost);
+      m_eff >= static_cast<double>(evidence.substitution_cost);
   const bool margin_rule = margin_beats_rival && seat.chained && !seat.tie &&
                            seat.chain_anchors < evidence.cnt &&
                            x_other < kDnaChainMapqHifiRivalStrengthMax;
   int hifi_margin_mapq = -1;
   int mapq;
   if (margin_rule) {
-    // R3: BWA-MEM's margin Phred on the raw scores (minimap2's mapq_alt).
+    // R3: BWA-MEM's margin Phred (minimap2's mapq_alt).
     const double two_base_gap =
         static_cast<double>(evidence.gap_open1 + 2 * evidence.gap_extend1);
-    int margin_q = truncate_to_int(6.02 * seat.m_eff / match_sc + 0.499);
-    if (seat.m_eff > static_cast<double>(evidence.substitution_cost) &&
-        seat.m_eff < two_base_gap)
+    int margin_q = truncate_to_int(6.02 * m_eff / match_sc + 0.499);
+    if (m_eff > static_cast<double>(evidence.substitution_cost) &&
+        m_eff < two_base_gap)
       margin_q = std::min(margin_q, kDnaChainMapqHifiSingleEventMapq);
     hifi_margin_mapq = margin_q;
     mapq = truncate_to_int(pen_margin * static_cast<double>(margin_q));
@@ -535,13 +393,9 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     // strength.
     mapq = truncate_to_int(evidence.identity * pen_cm * kDnaChainMapqCoef *
                            (1.0 - x * x) * std::log(dp1 / match_sc));
-    // mapq_alt on the seat's pair margin, bounded by m_eff under the HiFi
-    // rule (R5).
-    const double pair_margin = seat.pair_dp1 - seat.pair_dp2;
+    // mapq_alt on the seat's margin (R5).
     const int mapq_alt = truncate_to_int(
-        6.02 * evidence.identity * evidence.identity *
-            (hifi ? std::min(pair_margin, seat.m_eff) : pair_margin) /
-            match_sc +
+        6.02 * evidence.identity * evidence.identity * m_eff / match_sc +
         0.499);
     mapq = std::min(mapq, mapq_alt);
   } else if (dp1 > 0.0) {
@@ -642,10 +496,7 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     breakdown->hifi_margin_applied = margin_rule;
     breakdown->hifi_margin_mapq = hifi_margin_mapq;
     breakdown->seat_kind = seat.kind;
-    breakdown->seat_raw_margin = seat.raw_margin;
-    breakdown->seat_in_valid = seat.in_valid;
-    breakdown->seat_in_margin = seat.in_margin;
-    breakdown->seat_m_eff = seat.m_eff;
+    breakdown->seat_m_eff = m_eff;
     breakdown->hifi_pen = pen_margin;
     breakdown->split_cap = split_cap;
   }

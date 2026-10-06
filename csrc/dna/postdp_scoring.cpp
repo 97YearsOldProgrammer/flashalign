@@ -1,7 +1,6 @@
 #include "postdp_scoring.h"
 
 #include "../core/cigar.h"
-#include "chain_mapq.h" // kDnaChainMapqMaskLevel
 
 #include <algorithm>
 #include <cmath>
@@ -13,10 +12,6 @@
 namespace fa::cpu::lr {
 
 namespace {
-
-// minimap2's rank_frac. minibwa's trigger: the best hit covers rank_frac of
-// the read and the runner-up's span reaches sqrt(rank_frac) of the best's.
-constexpr double kRankFrac = 0.9;
 
 // C's (int) conversion truncates toward zero; saturate instead of UB.
 int truncate_to_int(double value) noexcept {
@@ -164,38 +159,6 @@ double rescore_b2(double best_identity, int match, int mismatch) noexcept {
   return b2;
 }
 
-// minibwa's mb_recal_max_dp: a gap costs b2 * log2(1 + len) and each clipped
-// query base adds 1 / b2 mismatches, a net -a per base. Floored at 0.
-int rescored_dp_max(const DpMaxSweep& sweep, double b2, int match,
-                    int read_len, int aligned_query_span) noexcept {
-  const double a = static_cast<double>(match);
-  int n_mis = sweep.blen + sweep.n_ambi - sweep.mlen - sweep.n_gap;
-  n_mis += truncate_to_int(
-      static_cast<double>(std::max(0, read_len - aligned_query_span)) / b2 +
-      0.499);
-  const int rescored = truncate_to_int(
-      a * (static_cast<double>(sweep.mlen) - b2 * n_mis -
-           b2 * sweep.log_gap_sum) +
-      0.499);
-  return std::max(0, rescored);
-}
-
-// mm_set_parent's overlap test without the uncovered term: two records
-// compete when overlap / shorter span > mask_level. A record without a valid
-// span competes with everything.
-bool spans_compete(int a_begin, int a_end, int b_begin, int b_end) noexcept {
-  const bool a_span = a_begin >= 0 && a_end > a_begin;
-  const bool b_span = b_begin >= 0 && b_end > b_begin;
-  if (!a_span || !b_span)
-    return true;
-  const int overlap = std::min(a_end, b_end) - std::max(a_begin, b_begin);
-  if (overlap <= 0)
-    return false;
-  const int shorter = std::min(a_end - a_begin, b_end - b_begin);
-  return static_cast<double>(overlap) / static_cast<double>(shorter) >
-         kDnaChainMapqMaskLevel;
-}
-
 // The record's contig index by name, or -1 when unknown.
 int record_contig_index(const DnaContext& context, const std::string& name) {
   if (context.ref.names == nullptr)
@@ -207,29 +170,17 @@ int record_contig_index(const DnaContext& context, const std::string& name) {
   return -1;
 }
 
-// One realized record's prices and its forward-query span.
 struct RecordPrice {
-  int dp_sweep = 0;
-  int dp_rescored = 0; // 0 when the rescoring did not run
-  int dp_used = 0;     // rescored if rescoring ran, else the sweep
-  int q_begin = -1;
-  int q_end = -1;
   DpMaxSweep sweep;
   // False when the record has no CIGAR or its contig is unknown, so that
   // dna_record_dp_max_segment can report -1 instead of 0.
   bool swept = false;
 };
 
-int record_span(const RecordPrice& price) noexcept {
-  return std::max(0, price.q_end - price.q_begin);
-}
-
 RecordPrice price_record(const DnaContext& context, const AlignResult& record,
                          const std::vector<std::uint8_t>& fwd,
                          const std::vector<std::uint8_t>& rc) {
   RecordPrice price;
-  price.q_begin = record.query_start;
-  price.q_end = record.query_end;
   const int contig = record_contig_index(context, record.chromosome);
   if (context.ref.encoded != nullptr && contig >= 0 &&
       static_cast<std::size_t>(contig) < context.ref.encoded->size() &&
@@ -245,20 +196,7 @@ RecordPrice price_record(const DnaContext& context, const AlignResult& record,
                                context.opts.cigar_dp_gap_extend1);
     price.swept = true;
   }
-  price.dp_sweep = price.sweep.dp_max;
-  price.dp_used = price.dp_sweep;
   return price;
-}
-
-// Prices a family: the primary first, then the supplementaries in order.
-void price_family(const DnaContext& context,
-                  const DnaFamilyRealizationOutcome& outcome,
-                  const std::vector<std::uint8_t>& fwd,
-                  const std::vector<std::uint8_t>& rc,
-                  std::vector<RecordPrice>& into) {
-  into.push_back(price_record(context, outcome.output, fwd, rc));
-  for (const AlignResult& part : outcome.output.supplementary)
-    into.push_back(price_record(context, part, fwd, rc));
 }
 
 } // namespace
@@ -267,186 +205,48 @@ int dna_record_dp_max_segment(const DnaContext& context,
                               const AlignResult& record,
                               const std::vector<std::uint8_t>& fwd,
                               const std::vector<std::uint8_t>& rc) {
-  // Same pricing as the family sums, so ms and dp1 / dp2 agree.
   if (!record.mapped())
     return -1;
   const RecordPrice price = price_record(context, record, fwd, rc);
-  return price.swept ? price.dp_sweep : -1;
+  return price.swept ? price.sweep.dp_max : -1;
 }
 
-AffineIntervalScore affine_score_over_query_interval(
-    const std::vector<std::pair<int, char>>& ops, const std::uint8_t* query,
-    const std::uint8_t* reference, int read_len, bool is_reverse, int lo,
-    int hi, const DpScoringParams& dp) noexcept {
-  AffineIntervalScore out;
-  if (query == nullptr || reference == nullptr || read_len <= 0)
-    return out;
-  // Magnitudes; the signs are applied below.
-  const long long a = std::abs(dp.match);
-  const long long b = std::abs(dp.mismatch);
-  const long long ambi = std::abs(dp.ambi);
-  const auto forward = [&](int oriented) {
-    return is_reverse ? read_len - 1 - oriented : oriented;
-  };
-  const auto inside = [&](int oriented) {
-    const int q = forward(oriented);
-    return q >= lo && q < hi;
-  };
-  const auto gap_cost = [&](int len) {
-    const long long one =
-        static_cast<long long>(dp.gap_open1) +
-        static_cast<long long>(dp.gap_extend1) * static_cast<long long>(len);
-    const long long two =
-        static_cast<long long>(dp.gap_open2) +
-        static_cast<long long>(dp.gap_extend2) * static_cast<long long>(len);
-    return std::min(one, two);
-  };
-  const auto credit = [&](bool in, long long delta) {
-    (in ? out.inside : out.outside) += delta;
-  };
-  int qoff = 0;
-  std::size_t toff = 0;
-  for (const auto& op : ops) {
-    const int len = op.first;
-    if (len <= 0)
-      continue;
-    switch (op.second) {
-    case 'M':
-    case '=':
-    case 'X': {
-      // Never read past the query, even on a malformed CIGAR.
-      if (qoff + len > read_len)
-        return out;
-      for (int l = 0; l < len; ++l) {
-        const int cq = query[static_cast<std::size_t>(qoff + l)];
-        const int ct = reference[toff + static_cast<std::size_t>(l)];
-        long long s;
-        if (cq > 3 || ct > 3)
-          s = -ambi;
-        else if (cq != ct)
-          s = -b;
-        else
-          s = a;
-        const bool in = inside(qoff + l);
-        credit(in, s);
-        ++(in ? out.aligned_inside : out.aligned_outside);
-      }
-      qoff += len;
-      toff += static_cast<std::size_t>(len);
-      break;
-    }
-    case 'I':
-      // One event at the run's midpoint.
-      credit(inside(qoff + len / 2), -gap_cost(len));
-      qoff += len;
-      break;
-    case 'D':
-      // One event at the query base the deletion precedes in the walk.
-      credit(inside(std::min(qoff, read_len - 1)), -gap_cost(len));
-      toff += static_cast<std::size_t>(len);
-      break;
-    case 'N':
-      toff += static_cast<std::size_t>(len);
-      break;
-    case 'S':
-      qoff += len;
-      break;
-    default: // H, P: consume nothing
-      break;
-    }
-  }
-  return out;
+bool dna_record_event_identity(const DnaContext& context,
+                               const AlignResult& record,
+                               const std::vector<std::uint8_t>& fwd,
+                               const std::vector<std::uint8_t>& rc,
+                               double& identity) {
+  if (!record.mapped())
+    return false;
+  const RecordPrice price = price_record(context, record, fwd, rc);
+  if (!price.swept)
+    return false;
+  identity = event_identity(price.sweep);
+  return true;
 }
 
-DnaPostDpOutcome
-run_dna_postdp_scoring(const DnaContext& context,
-                       const DnaFamilyRealizationOutcome& incumbent,
-                       const DnaFamilyRealizationOutcome* alternative,
-                       const std::vector<std::uint8_t>& fwd,
-                       const std::vector<std::uint8_t>& rc, int read_len) {
-  DnaPostDpOutcome out;
-  if (!context.opts.postdp_rescoring || !incumbent.accepted())
-    return out;
-  out.ran = true;
+int dna_record_recal_dp_max(const DnaContext& context,
+                            const AlignResult& record,
+                            const std::vector<std::uint8_t>& fwd,
+                            const std::vector<std::uint8_t>& rc, double b2) {
+  if (!record.mapped())
+    return -1;
+  const RecordPrice price = price_record(context, record, fwd, rc);
+  if (!price.swept)
+    return -1;
+  const DpMaxSweep& sweep = price.sweep;
+  const double gap_cost =
+      b2 * static_cast<double>(sweep.n_gapo) + sweep.log_gap_sum;
+  const int n_mis = sweep.blen + sweep.n_ambi - sweep.mlen - sweep.n_gap;
+  const int recal = truncate_to_int(
+      static_cast<double>(std::abs(context.opts.cigar_dp_match)) *
+          (static_cast<double>(sweep.mlen) - b2 * n_mis - gap_cost) +
+      .499);
+  return std::max(0, recal);
+}
 
-  // Sweep every record of both families.
-  std::vector<RecordPrice> incumbent_prices;
-  std::vector<RecordPrice> alternative_prices;
-  price_family(context, incumbent, fwd, rc, incumbent_prices);
-  const bool has_alternative =
-      alternative != nullptr && alternative->accepted();
-  if (has_alternative)
-    price_family(context, *alternative, fwd, rc, alternative_prices);
-  out.incumbent_records = static_cast<int>(incumbent_prices.size());
-  out.alternative_records = static_cast<int>(alternative_prices.size());
-  out.incumbent_dp_raw = incumbent.decision_score;
-  if (has_alternative)
-    out.alternative_dp_raw = alternative->decision_score;
-  for (const RecordPrice& price : incumbent_prices)
-    out.incumbent_dp_sweep += price.dp_sweep;
-  for (const RecordPrice& price : alternative_prices)
-    out.alternative_dp_sweep += price.dp_sweep;
-
-  // The rescoring trigger compares the two primaries, as minibwa's max /
-  // max2. Without an alternative there is no runner-up and no rescoring.
-  if (has_alternative) {
-    const RecordPrice& incumbent_primary = incumbent_prices.front();
-    const RecordPrice& alternative_primary = alternative_prices.front();
-    // A tie keeps the incumbent as the best hit.
-    const bool incumbent_best =
-        incumbent_primary.dp_sweep >= alternative_primary.dp_sweep;
-    const RecordPrice& best =
-        incumbent_best ? incumbent_primary : alternative_primary;
-    const RecordPrice& runner =
-        incumbent_best ? alternative_primary : incumbent_primary;
-    out.best_span = record_span(best);
-    out.runner_span = record_span(runner);
-    // As minibwa: no length floor and no score clause.
-    out.triggered =
-        static_cast<double>(out.best_span) >=
-            static_cast<double>(read_len) * kRankFrac &&
-        !(static_cast<double>(out.runner_span) <
-          static_cast<double>(out.best_span) * std::sqrt(kRankFrac));
-    if (out.triggered) {
-      out.best_identity = event_identity(best.sweep);
-      out.b2 = rescore_b2(out.best_identity, context.opts.cigar_dp_match,
-                          context.opts.cigar_dp_mismatch);
-      out.clip_bp = std::max(0, read_len - out.best_span);
-      // One b2, from the best hit, for every record of both families.
-      const auto rescore_all = [&](std::vector<RecordPrice>& family,
-                                   int& total) {
-        for (RecordPrice& price : family) {
-          price.dp_rescored =
-              rescored_dp_max(price.sweep, out.b2, context.opts.cigar_dp_match,
-                              read_len, record_span(price));
-          price.dp_used = price.dp_rescored;
-          total += price.dp_rescored;
-        }
-      };
-      rescore_all(incumbent_prices, out.incumbent_dp_rescored);
-      rescore_all(alternative_prices, out.alternative_dp_rescored);
-    }
-  }
-
-  // The MAPQ's dp1 / dp2.
-  if (has_alternative) {
-    // minimap2 judges a hit against rivals over its own query span, so dp1
-    // sums only the incumbent records that compete with the alternative's
-    // span, not supplementaries the rival never contested.
-    const RecordPrice& alternative_primary = alternative_prices.front();
-    int priced = 0;
-    for (const RecordPrice& price : incumbent_prices)
-      if (spans_compete(alternative_primary.q_begin, alternative_primary.q_end,
-                        price.q_begin, price.q_end))
-        priced += price.dp_used;
-    // An alternative that competes with no record at all is priced against
-    // the primary record, the hit the MAPQ is about.
-    out.mapq_dp1 = priced > 0 ? priced : incumbent_prices.front().dp_used;
-    out.mapq_dp2 = alternative_primary.dp_used;
-  } else {
-    out.mapq_dp1 = incumbent_prices.front().dp_used;
-  }
-  return out;
+double dna_rank_b2(double identity, int match, int mismatch) noexcept {
+  return rescore_b2(identity, match, mismatch);
 }
 
 } // namespace fa::cpu::lr
