@@ -679,13 +679,13 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         throw UsageError("--vote-ratio is valid only with a DNA preset");
     }
     if (rna && opt.min_chain_score)
-        throw UsageError("-m is valid only with lr or lr:hq");
+        throw UsageError("-m is valid only with a DNA preset");
     if (rna && opt.max_cands)
-        throw UsageError("--max-cands is valid only with lr or lr:hq");
+        throw UsageError("--max-cands is valid only with a DNA preset");
     if (rna && opt.tiles)
-        throw UsageError("--tiles is valid only with lr or lr:hq");
+        throw UsageError("--tiles is valid only with a DNA preset");
     if (rna && opt.tile_owner)
-        throw UsageError("--tile-owner is valid only with lr or lr:hq");
+        throw UsageError("--tile-owner is valid only with a DNA preset");
     if (rna && (opt.tile_supported_reward || opt.tile_block_open_cost ||
                 opt.tile_null_cost || opt.tile_unsupported_cost)) {
         throw UsageError(

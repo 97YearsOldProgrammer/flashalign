@@ -76,7 +76,8 @@ void append(std::ostringstream& out, const char* name,
 // constructor and __repr__.
 #define FA_CONFIG_FIELDS(X)                                                    \
   X(preset,                                                                    \
-    "Preset name: 'lr', 'lr:hq', 'splice', 'splice:hq' [-x / --preset].")      \
+    "Preset name: 'lr', 'lr:hq', 'splice', 'splice:hq'; experimental "         \
+    "'asm5', 'asm10', 'asm20' [-x / --preset].")                               \
   X(k, "Seed k-mer length [-k]; mapping always uses the index's.")             \
   X(min_support, "Minimum anchor support [--min-support]. -1 = preset-owned.") \
   X(max_query_seeds,                                                           \

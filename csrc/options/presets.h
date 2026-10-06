@@ -15,7 +15,20 @@ namespace fa {
 namespace cpu {
 namespace options {
 
-enum class DnaPresetKind { Ont, HiFi };
+// Asm marks the experimental assembly-to-reference rows.
+enum class DnaPresetKind { Ont, HiFi, Asm };
+
+// The placement values --vote-seeds, --tiles and --tile-owner replace.
+struct DnaPlacementDefaults {
+  int vote_seeds;
+  int query_tiles;
+  bool tile_owner_anchors;
+};
+
+inline constexpr DnaPlacementDefaults kReadPlacement{
+    128, ::fa::cpu::voting::kQueryTileCount, false};
+// Above 128 vote seeds the nested sampler applies (seeding/syncmer.h).
+inline constexpr DnaPlacementDefaults kAssemblyPlacement{4096, 2048, true};
 
 struct DnaPresetProfile {
   std::string_view name;
@@ -43,7 +56,8 @@ struct DnaPresetProfile {
   int cigar_dp_max_gap;
   int cigar_dp_min_dp_max;
   // The gap-fill row -A -B -O -E -z --score-N set; the cigar_dp_* row above
-  // is the end row, which prices every path.
+  // is the end row, which prices every path. On an Asm row the two are equal
+  // and the letters set both (options/resolve.cpp).
   int fill_dp_match;
   int fill_dp_mismatch;
   int fill_dp_ambi;
@@ -58,21 +72,40 @@ struct DnaPresetProfile {
   int chain_max_gap;
   int residue_min_interval_bp;
   int residue_min_anchor_density_per_100bp;
+  DnaPlacementDefaults placement;
 };
 
-inline constexpr std::array<DnaPresetProfile, 2> kDnaPresetProfiles{{
+inline constexpr std::array<DnaPresetProfile, 5> kDnaPresetProfiles{{
     // End row as minimap2: lr is map-ont (-A2 -B4 -O4,24 -E2,1), lr:hq is
     // map-hifi (-A1 -B4 -O6,26 -E2,1). The fill rows are gentler on gaps.
     {"lr", DnaPresetKind::Ont, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
-     20000, 200, 9},
+     20000, 200, 9, kReadPlacement},
     {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048, {4, 12, 0, 1, 2},
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
      10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
-     10000, 100, 9},
+     10000, 100, 9, kReadPlacement},
+    // minimap2's asm5, asm10 and asm20 scoring with its -r1k,100k -g10k -s200
+    // -z200, one row for the fills and the read ends; lr's seeding, vote
+    // width, chain gap and terminal-clip bounds.
+    {"asm5", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
+     1, 19, 1, 39, 3, 81, 1, 200, -1, 1000, 100000,
+     10000, 200,
+     1, 19, 1, 39, 3, 81, 1, 200, 200,
+     20000, 200, 9, kAssemblyPlacement},
+    {"asm10", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
+     1, 9, 1, 16, 2, 41, 1, 200, -1, 1000, 100000,
+     10000, 200,
+     1, 9, 1, 16, 2, 41, 1, 200, 200,
+     20000, 200, 9, kAssemblyPlacement},
+    {"asm20", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
+     1, 4, 1, 6, 2, 26, 1, 200, -1, 1000, 100000,
+     10000, 200,
+     1, 4, 1, 6, 2, 26, 1, 200, 200,
+     20000, 200, 9, kAssemblyPlacement},
 }};
 
 inline const DnaPresetProfile* find_dna_preset_profile(
@@ -103,8 +136,8 @@ inline void set_dna_long_platform_fields(
     // (seeding/context.h), up to long_occ_ceiling.
     mapping.long_occ_cap = 200;
     mapping.query_partition = profile.query_partition;
-    mapping.query_tiles = ::fa::cpu::voting::kQueryTileCount;
-    mapping.tile_owner_anchors = false;
+    mapping.query_tiles = profile.placement.query_tiles;
+    mapping.tile_owner_anchors = profile.placement.tile_owner_anchors;
     mapping.vote_admission_ratio = lr::kDnaProductionVoteAdmissionRatio;
     mapping.dna_tandem_window = lr::kDnaTandemWindow;
     // minimap2's min_ksw_len, the piece length of its gap-filling loop.
@@ -129,7 +162,7 @@ inline void set_dna_long_platform_fields(
     // (dna/inv_local_chain.h).
     mapping.inversion_probe_local_gate = profile.kind == DnaPresetKind::HiFi;
     common.min_support = 3;
-    common.max_query_seeds_per_strand = 128;
+    common.max_query_seeds_per_strand = profile.placement.vote_seeds;
     mapping.cigar_dp_match = profile.cigar_dp_match;
     mapping.cigar_dp_mismatch = profile.cigar_dp_mismatch;
     mapping.cigar_dp_ambi = profile.cigar_dp_ambi;
@@ -152,8 +185,8 @@ inline void set_dna_long_platform_fields(
     mapping.fill_dp_gap_extend2 = profile.fill_dp_gap_extend2;
     mapping.fill_dp_tail_zdrop = profile.fill_dp_tail_zdrop;
     mapping.fill_dp_inversion_zdrop = profile.fill_dp_inversion_zdrop;
-    // 20000 under lr (minimap2's bw_long), 10000 under lr:hq (map-hifi's
-    // max_gap).
+    // 20000 under lr and the asm rows (minimap2's bw_long), 10000 under lr:hq
+    // (map-hifi's max_gap).
     mapping.cigar_local_interval_anchor_chain_max_gap = profile.chain_max_gap;
     mapping.residue_min_interval_bp = profile.residue_min_interval_bp;
     mapping.residue_min_anchor_density_per_100bp =
@@ -163,6 +196,12 @@ inline void set_dna_long_platform_fields(
 inline bool is_hifi_preset(std::string_view preset) {
     const auto* profile = find_dna_preset_profile(preset);
     return profile && profile->kind == DnaPresetKind::HiFi;
+}
+
+// asm5, asm10 and asm20: experimental, not qualified on intact chromosomes.
+inline bool is_assembly_preset(std::string_view preset) {
+    const auto* profile = find_dna_preset_profile(preset);
+    return profile && profile->kind == DnaPresetKind::Asm;
 }
 
 inline bool is_rna_preset(std::string_view preset) {
@@ -190,14 +229,19 @@ inline PresetSeeding resolve_preset_seeding(std::string_view preset) {
     return PresetSeeding{15, 10};
 }
 
-// Every accepted preset name, for error messages.
+// Every accepted preset name, for error messages; the experimental ones last.
 inline std::string accepted_preset_names() {
   std::string names;
-  for (const auto& profile : kDnaPresetProfiles) {
+  const auto append = [&names](std::string_view name) {
     if (!names.empty()) names += ", ";
-    names += profile.name;
-  }
-  names += ", splice, splice:hq";
+    names += name;
+  };
+  for (const auto& profile : kDnaPresetProfiles)
+    if (profile.kind != DnaPresetKind::Asm) append(profile.name);
+  append("splice");
+  append("splice:hq");
+  for (const auto& profile : kDnaPresetProfiles)
+    if (profile.kind == DnaPresetKind::Asm) append(profile.name);
   return names;
 }
 

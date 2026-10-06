@@ -179,7 +179,8 @@ struct DnaResidueAdmission {
 };
 
 // Helpers for post-commit terminal recovery. They read only the whole-query
-// fine seeds and cached posting views.
+// fine seeds and cached posting views. The supply is counted up to
+// kDnaResidueMinClusterAnchors.
 int dna_residue_cached_supply(const DnaPlacementFamily& family,
                               const std::vector<RetainedSeedRef>& fine_forward,
                               const std::vector<RetainedSeedRef>& fine_reverse,

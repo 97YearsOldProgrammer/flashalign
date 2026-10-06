@@ -177,7 +177,8 @@ Config to_public_config(const fa::cpu::options::ResolvedOptions& source,
   config.long_occ_cap = mapping.long_occ_cap;
   config.long_primary_occ_cap = mapping.long_primary_occ_cap;
   config.threads = source.common.num_threads;
-  // DNA: the gap-fill row, which these set; the end row is the preset's.
+  // DNA: the gap-fill row, which these set; the end row is the preset's, and
+  // on an asm preset the two rows are one.
   config.dp_match = rna ? mapping.cigar_dp_match : mapping.fill_dp_match;
   config.dp_mismatch =
       rna ? mapping.cigar_dp_mismatch : mapping.fill_dp_mismatch;

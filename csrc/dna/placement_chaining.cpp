@@ -908,8 +908,9 @@ struct ResidueRun {
 };
 
 // Distinct fine-seed keys inside the run whose cached view is under the
-// occurrence cap. The index is never queried: recovery only rereads postings
-// already fetched.
+// occurrence cap, counted up to kDnaResidueMinClusterAnchors: the caller
+// tests only that threshold. The index is never queried: recovery only rereads
+// postings already fetched.
 int residue_cached_supply(const DnaPlacementFamily& family,
                           const std::vector<RetainedSeedRef>& fine_forward,
                           const std::vector<RetainedSeedRef>& fine_reverse,
@@ -931,8 +932,11 @@ int residue_cached_supply(const DnaPlacementFamily& family,
       KmerPostingView view;
       if (!lookup_cache.find_cached_view(seed.key, view)) continue;
       if (!view.found() || view.occurrence > occurrence_cap) continue;
-      if (std::find(keys.begin(), keys.end(), seed.key) == keys.end())
-        keys.push_back(seed.key);
+      if (std::find(keys.begin(), keys.end(), seed.key) != keys.end())
+        continue;
+      keys.push_back(seed.key);
+      if (static_cast<int>(keys.size()) >= kDnaResidueMinClusterAnchors)
+        return kDnaResidueMinClusterAnchors;
     }
   }
   return static_cast<int>(keys.size());

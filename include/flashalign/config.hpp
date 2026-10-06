@@ -16,7 +16,8 @@ enum class CsMode { None, Short, Long };
  * std::invalid_argument. The bracketed names are the matching CLI options.
  */
 struct Config {
-  std::string preset = "lr";    ///< 'lr', 'lr:hq', 'splice' or 'splice:hq' [-x]
+  std::string preset = "lr";    ///< 'lr', 'lr:hq', 'splice', 'splice:hq';
+                                ///< experimental 'asm5', 'asm10', 'asm20' [-x]
   int k = -1;                   ///< seed k-mer length [-k]; fixed by a loaded index
   int min_support = -1;         ///< minimum anchor support [--min-support]
   int max_query_seeds = -1;     ///< query seeds kept per strand

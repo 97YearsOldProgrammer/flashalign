@@ -120,9 +120,10 @@ const std::vector<OptionSpec>& specs_table() {
          "STR", SEC_PLACEMENT,
          "tiles a placed chain owns: span or anchors [span]"},
 
-        // On a DNA preset -A -B -O -E -z --score-N set the DP row of the gap
+        // On lr and lr:hq -A -B -O -E -z --score-N set the DP row of the gap
         // fills between anchors; the read ends keep the preset's own row,
-        // which also prices every path. Defaults are lr's.
+        // which also prices every path. On a splice or assembly preset they
+        // set its one row. Defaults are lr's.
         {OptionId::DpMatch, 'A', "", kInt, kStable, A,
          "INT", SEC_ALIGN, "matching score [4]"},
         {OptionId::DpMismatch, 'B', "", kInt, kStable, A,
@@ -233,7 +234,7 @@ const std::vector<OptionSpec>& specs_table() {
 
         {OptionId::Preset, 'x', "--preset", kStr, kStable, A,
          "STR", SEC_PRESET,
-         "preset: lr, lr:hq, splice or splice:hq (see 'flashalign index') [lr]"},
+         "preset: lr, lr:hq, splice, splice:hq; experimental: asm5, asm10, asm20 (see 'flashalign index') [lr]"},
 
         // align, not on the help screen; the manual page lists these.
         // --batch-window INT [3]: batches in flight in the compute stage.
@@ -272,7 +273,10 @@ const std::vector<OptionSpec>& specs_table() {
          "  lr         noisy long reads (Nanopore) vs reference mapping                 [-k21 -s9]\n"
          "  lr:hq      accurate long reads (HiFi, error rate <1%) vs reference mapping  [-k21 -s5]\n"
          "  splice     spliced alignment for long RNA reads                             [-k15 -s10]\n"
-         "  splice:hq  spliced alignment for accurate long RNA reads                    [-k15 -s10]"},
+         "  splice:hq  spliced alignment for accurate long RNA reads                    [-k15 -s10]\n"
+         "  asm5       experimental: assembly vs reference, ~0.1% divergence            [-k21 -s9]\n"
+         "  asm10      experimental: assembly vs reference, ~1% divergence              [-k21 -s9]\n"
+         "  asm20      experimental: assembly vs reference, several % divergence        [-k21 -s9]"},
         {OptionId::K, 'k', "", kInt, kStable, I,
          "INT", SEC_IOPT, "k-mer size (no larger than 23) [21]"},
         {OptionId::SyncmerS, 's', "", kInt, kStable, I,

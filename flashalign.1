@@ -124,13 +124,20 @@ are
 and
 .B splice:hq
 .RB ( \-k15
-.BR \-s10 ).
+.BR \-s10 ),
+and the experimental
+.BR asm5 ,
+.B asm10
+and
+.B asm20
+.RB ( \-k21
+.BR \-s9 ).
 See
 .BR "Preset options" .
 .TP
 .BI \-k \ INT
-Syncmer k-mer length [21], no larger than 23. Every preset maps an index of any
-such k; Nanopore direct RNA maps on a
+Syncmer k-mer length [21], no larger than 23. Every preset but the experimental
+assembly ones maps an index of any such k; Nanopore direct RNA maps on a
 .B \-k14
 splice index. A k-mer that is its own reverse complement,
 possible at an even value only, is never a seed.
@@ -336,7 +343,8 @@ on it may not be below the width
 sets. DNA presets only.
 .TP
 .BI \-\-vote\-seeds \ INT
-Seeds per strand that vote [128]: the read is cut into
+Seeds per strand that vote [128; 4096 on asm5, asm10, asm20]: the read is cut
+into
 .I INT
 equal tiles and each tile votes with one of its seeds; 0 votes with every seed,
 and every preset takes the value. Above 128, a DNA preset keeps the seeds the
@@ -371,7 +379,8 @@ ranks are drawn from these candidates, so a wider bound can add secondaries.
 DNA presets only.
 .TP
 .BI \-\-tiles \ INT
-Query tiles the read is cut into for placement, 2 to 4096 [128]. The exact query
+Query tiles the read is cut into for placement, 2 to 4096 [128; 2048 on asm5,
+asm10, asm20]. The exact query
 partition gives each tile one candidate or none, and an owned block needs two
 tiles with seed support. Under the default
 .BR \-\-tile\-score ,
@@ -394,7 +403,8 @@ tiles. The partition's work grows with
 DNA presets only; the splice presets keep 128.
 .TP
 .BI \-\-tile\-owner \ STR
-Which tiles a placed chain owns when the partition is solved again [span]:
+Which tiles a placed chain owns when the partition is solved again [span;
+anchors on asm5, asm10, asm20]:
 .B span
 gives it every tile between its first and last anchor except those a rival at
 the same locus keeps, and when a CIGAR is realized
@@ -447,6 +457,13 @@ are in its units: for
 for
 .B lr:hq
 .BR \-A1 " " \-B4 " " \-O6,26 " " \-E2,1 " " \-z400,200 " " \-\-score\-N " 1."
+Under
+.BR asm5 ,
+.B asm10
+and
+.BR asm20 ,
+as under the splice presets, the gap fills and the read-end extensions use one
+row, and these options set it.
 The defaults below are those of
 .BR lr .
 .TP 10
@@ -759,7 +776,43 @@ Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq
 It differs from
 .B splice
 only in scoring.
+.TP
+.B asm5
+Experimental. Align an assembly to a reference that it differs from by about
+0.1%
+.RB ( \-k21
+.B \-s9 \-\-min\-support 3 \-A1 \-B19 \-O39,81 \-E3,1
+.B \-z200,200 \-\-score\-N 1 \-r1000,100000 \-g10000 \-m40 \-p0.8
+.B \-S200 \-\-vote\-seeds 4096 \-\-tiles 2048
+.BR "\-\-tile\-owner anchors" ).
+The gap fills and the read-end extensions use the one scoring row, which
+.BR \-A ", " \-B ", " \-O ", " \-E ", " \-z " and " \-\-score\-N
+set. A
+.I .faix
+target must have been built with
+.B \-k21
+.BR \-s9 ;
+another is refused.
+.TP
+.B asm10
+Experimental. As
+.B asm5
+for a divergence of about 1%
+.RB ( \-xasm5
+.B \-B9 \-O16,41
+.BR \-E2,1 ).
+.TP
+.B asm20
+Experimental. As
+.B asm5
+for a divergence of several percent
+.RB ( \-xasm5
+.B \-B4 \-O6,26
+.BR \-E2,1 ).
 .RE
+.IP
+The assembly presets are experimental: they are not qualified on intact
+chromosomes.
 .SS Miscellaneous options
 .TP 10
 .B \-\-help
@@ -908,6 +961,14 @@ more diagonals.
 *
 FlashAlign requires SSE4.1 instructions on x86 CPUs or NEON on ARM CPUs. A build
 without them is not provided.
+.TP
+*
+The assembly presets
+.BR asm5 ,
+.B asm10
+and
+.B asm20
+are experimental: they are not qualified on intact chromosomes.
 .SH SEE ALSO
 .PP
 samtools(1).

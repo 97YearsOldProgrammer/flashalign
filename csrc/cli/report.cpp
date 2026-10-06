@@ -147,6 +147,9 @@ std::string resolved_config_text(const AlignOptions& opt,
 
   row("mode", is_rna ? "rna_long" : "dna_long", "resolved");
   row("preset", opt.preset, opt.preset_source.c_str());
+  // asm5, asm10 and asm20 are not qualified on intact chromosomes.
+  const bool assembly = fa::cpu::api::is_assembly_preset(opt.preset);
+  row("preset_status", assembly ? "experimental" : "supported", "preset");
   row("index_source", seeding_from_index ? "faix" : "built", "cli");
   row("k", i2s(cfg.index.k), seeding_from_index ? "index" : "preset");
   row("syncmer_s", i2s(cfg.index.syncmer_s),
@@ -274,8 +277,9 @@ std::string resolved_config_text(const AlignOptions& opt,
         src(opt.max_cands.has_value(), "derived"));
   row("local_diag_band", i2s(mapping.cigar_local_diag_band), "builtin");
 
-  // DNA: -A -B -O -E -z --score-N are the gap-fill row; the end row, which
-  // prices every path, is the preset's (dp_end_row).
+  // lr, lr:hq: -A -B -O -E -z --score-N are the gap-fill row; the end row,
+  // which prices every path, is the preset's (dp_end_row). The assembly
+  // presets fill under their end row, so the two rows print as one.
   const bool fill = !is_rna;
   row("dp_match", i2s(fill ? mapping.fill_dp_match : mapping.cigar_dp_match),
       dp_src(opt.dp_match));
@@ -312,7 +316,7 @@ std::string resolved_config_text(const AlignOptions& opt,
   if (fill)
     row("dp_inversion_zdrop", i2s(mapping.fill_dp_inversion_zdrop),
         dp_src(opt.dp_zdrop));
-  if (fill)
+  if (fill && !assembly)
     row("dp_end_row",
         "A" + i2s(mapping.cigar_dp_match) + " B" +
             i2s(mapping.cigar_dp_mismatch) + " N" +

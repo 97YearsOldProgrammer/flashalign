@@ -33,7 +33,9 @@ class Config:
 
     @property
     def preset(self) -> str:
-        """Preset name: 'lr', 'lr:hq', 'splice', 'splice:hq' [-x / --preset]."""
+        """
+        Preset name: 'lr', 'lr:hq', 'splice', 'splice:hq'; experimental 'asm5', 'asm10', 'asm20' [-x / --preset].
+        """
 
     @preset.setter
     def preset(self, arg: str, /) -> None: ...

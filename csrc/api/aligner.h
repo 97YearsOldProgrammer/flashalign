@@ -48,6 +48,7 @@ struct PresetSeeding {
 };
 PresetSeeding resolve_preset_seeding(std::string_view preset);
 bool is_hifi_preset(std::string_view preset);
+bool is_assembly_preset(std::string_view preset);
 bool is_rna_preset(std::string_view preset);
 bool is_rna_hifi_preset(std::string_view preset);
 bool preset_is_valid(std::string_view preset);

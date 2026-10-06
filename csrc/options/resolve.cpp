@@ -38,6 +38,7 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
                                 accepted_preset_names() + ")");
   }
   const bool rna_mode = is_rna_preset(request.preset);
+  const bool asm_mode = is_assembly_preset(request.preset);
   const bool hifi_class = rna_mode ? is_rna_hifi_preset(request.preset)
                                    : is_hifi_preset(request.preset);
 
@@ -197,6 +198,16 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
         "k=" + std::to_string(resolved_k) +
         " is too large; the maximum is " + std::to_string(::fa::cpu::kFaixMaxK));
   if (request.index.has_index) {
+    // The assembly presets map only with the seeding they were measured on.
+    if (asm_mode && (request.index.k != seeding.k ||
+                     request.index.syncmer_s != seeding.syncmer_s))
+      throw std::invalid_argument(
+          "-x " + request.preset + " requires an index with k=" +
+          std::to_string(seeding.k) + " s=" +
+          std::to_string(seeding.syncmer_s) + " (this index has k=" +
+          std::to_string(request.index.k) + " s=" +
+          std::to_string(request.index.syncmer_s) +
+          "); build one with 'flashalign index -x " + request.preset + "'");
     if (user.k && *user.k != request.index.k) {
       throw std::invalid_argument(
           "explicit -k=" + std::to_string(*user.k) +
@@ -277,7 +288,7 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
     common.min_support = std::max(0, *user.min_support);
   }
   if (rna_mode && user.min_chain_score)
-    throw std::invalid_argument("-m is valid only with lr or lr:hq");
+    throw std::invalid_argument("-m is valid only with a DNA preset");
   if (user.min_chain_score) {
     if (*user.min_chain_score < 1)
       throw std::invalid_argument("-m must be at least 1");
@@ -341,9 +352,9 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
     }
     mapping.vote_diag_width_max = *user.vote_diag_width_max;
   }
-  // On a DNA preset -A -B -O -E -z --score-N set the gap-fill row and the
-  // end row stays the preset's; a splice preset has one row.
-  const bool fill_row = !rna_mode;
+  // On lr and lr:hq -A -B -O -E -z --score-N set the gap-fill row and the
+  // end row stays the preset's; a splice or assembly preset has one row.
+  const bool fill_row = !rna_mode && !asm_mode;
   int& dp_match = fill_row ? mapping.fill_dp_match : mapping.cigar_dp_match;
   int& dp_mismatch =
       fill_row ? mapping.fill_dp_mismatch : mapping.cigar_dp_mismatch;
@@ -390,15 +401,21 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
   }
   if (user.dp_tail_end_bonus)
     mapping.cigar_dp_tail_end_bonus = *user.dp_tail_end_bonus;
+  // An assembly preset fills its gaps under that one row.
+  if (asm_mode) {
+    mapping.fill_dp_match = mapping.cigar_dp_match;
+    mapping.fill_dp_mismatch = mapping.cigar_dp_mismatch;
+    mapping.fill_dp_ambi = mapping.cigar_dp_ambi;
+    mapping.fill_dp_gap_open1 = mapping.cigar_dp_gap_open1;
+    mapping.fill_dp_gap_extend1 = mapping.cigar_dp_gap_extend1;
+    mapping.fill_dp_gap_open2 = mapping.cigar_dp_gap_open2;
+    mapping.fill_dp_gap_extend2 = mapping.cigar_dp_gap_extend2;
+    mapping.fill_dp_tail_zdrop = mapping.cigar_dp_tail_zdrop;
+    mapping.fill_dp_inversion_zdrop = mapping.cigar_dp_inversion_zdrop;
+  }
   if (user.dp_min_dp_max) {
     mapping.cigar_dp_min_dp_max = std::max(0, *user.dp_min_dp_max);
   }
-  // -S is in the end row's units; the inversion gates of a fill compare
-  // fill-row scores.
-  mapping.fill_dp_min_dp_max = static_cast<int>(std::min<std::int64_t>(
-      std::numeric_limits<int>::max(),
-      static_cast<std::int64_t>(mapping.cigar_dp_min_dp_max) *
-          mapping.fill_dp_match / mapping.cigar_dp_match));
   if (user.dp_bw)
     mapping.cigar_dp_bw = std::max(1, *user.dp_bw);
   if (user.dp_bw_long)
@@ -540,6 +557,13 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
         "(got " +
         std::to_string(mapping.vote_diag_bin_width) + ")");
   }
+  // -S is in the end row's units; the inversion gates of a fill compare
+  // fill-row scores. Scaled after the checks above, which keep a typed end
+  // row's match score positive.
+  mapping.fill_dp_min_dp_max = static_cast<int>(std::min<std::int64_t>(
+      std::numeric_limits<int>::max(),
+      static_cast<std::int64_t>(mapping.cigar_dp_min_dp_max) *
+          mapping.fill_dp_match / mapping.cigar_dp_match));
   check_vote_diag_model(mapping);
   return output;
 }

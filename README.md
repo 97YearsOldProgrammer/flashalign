@@ -26,6 +26,7 @@ cmake --build build --target flashalign -j
 ./build/flashalign align -ax splice ref.fa cdna.fq.gz > aln.sam            # spliced long reads (strand unknown)
 ./build/flashalign align -ax splice:hq -u f ref.fa isoseq.fq.gz > aln.sam  # PacBio Iso-Seq (transcript strand)
 ./build/flashalign align -ax splice --junc-bed anno.bed ref.fa cdna.fq.gz > aln.sam  # use annotated junctions
+./build/flashalign align -cx asm5 ref.fa asm.fa > aln.paf                  # assembly vs reference (experimental)
 # man page for detailed command line options
 man ./flashalign.1
 ```
@@ -147,6 +148,19 @@ flashalign align -ax splice --junc-bed anno.bed ref.fa cdna.fq.gz > aln.sam
 converts from GTF or GFF3, or intron positions in 6-column BED with the strand column. A splice
 donor or acceptor found in the annotation gets a score bonus, `--junc-bonus` (9 by default).
 
+#### Align an assembly to a reference (experimental)
+
+```sh
+flashalign align -cx asm5 ref.fa asm.fa > aln.paf    # an assembly ~0.1% from the reference
+```
+
+`asm5`, `asm10` and `asm20` are experimental: they are not qualified on intact chromosomes. They
+are for divergences of about 0.1%, 1% and several percent, and take minimap2's scoring for its
+presets of the same names, one row for the gap fills and the read ends, with `-r1000,100000`,
+`-g10000` and `-S200`. Their placement samples 4,096 vote seeds per strand into a partition of
+2,048 query tiles, each owned by the chain whose anchors fall in it. They map with an index built
+with `lr`'s seeding (`-k21 -s9`) and refuse another.
+
 ### Output
 
 PAF is the default and `-a` writes SAM. `-o FILE` outputs alignments to `FILE` [stdout],
@@ -220,6 +234,8 @@ The package needs CPython 3.12 or newer and installs no `flashalign` command.
   minimap2.
 - FlashAlign requires SSE4.1 instructions on x86 CPUs or NEON on ARM CPUs. A build without
   them is not provided.
+- The assembly presets `asm5`, `asm10` and `asm20` are experimental: they are not qualified on
+  intact chromosomes.
 
 ## License
 

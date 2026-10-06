@@ -58,6 +58,9 @@ PresetSeeding resolve_preset_seeding(std::string_view preset) {
 bool is_hifi_preset(std::string_view preset) {
   return ::fa::cpu::options::is_hifi_preset(preset);
 }
+bool is_assembly_preset(std::string_view preset) {
+  return ::fa::cpu::options::is_assembly_preset(preset);
+}
 bool is_rna_preset(std::string_view preset) {
   return ::fa::cpu::options::is_rna_preset(preset);
 }
