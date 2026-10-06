@@ -108,8 +108,9 @@ struct DnaLongOptions {
   // (dna/context.h DnaContext::self_contig); everything else after the vote
   // still reads the read's own postings.
   bool skip_self = false;
-  // The all-chains lane, minimap2's -P for map-only PAF: every catalogue
-  // candidate gets its whole-query chain, and each chain at -m or above is
+  // The all-chains lane, minimap2's -P for map-only PAF: the catalogue
+  // candidates on each contig and strand share one whole-query chain call and
+  // take its chains best first, one each, and each chain at -m or above is
   // printed once, MAPQ 0 and tp:A:S (dna/backend.cpp emit_all_chains). No
   // tile mask, partition, -p, -N, recovery or MAPQ runs, so its lane bound
   // (max_cands) may reach kAllChainsLaneBound. Map-only.

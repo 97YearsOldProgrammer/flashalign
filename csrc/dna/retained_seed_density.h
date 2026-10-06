@@ -65,6 +65,11 @@ class RetainedSeedDensity {
     return entries_[entry_index].rescued;
   }
 
+  // The entry's whole posting list.
+  const KmerPostingView& view(std::uint32_t entry_index) const {
+    return entries_[entry_index].view;
+  }
+
   // Intervals resolved per lock-step round of slice_batch, which accepts any
   // n and chunks internally.
   static constexpr std::size_t kSliceBatch = 16;

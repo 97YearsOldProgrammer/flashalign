@@ -347,23 +347,6 @@ build_dna_rival_placement(const DnaContext& context,
                           const std::vector<std::uint8_t>& forward_query,
                           const std::vector<std::uint8_t>& reverse_query);
 
-// The all-chains lane: the whole-query exact chain of every catalogue
-// candidate, parallel to family.candidates, with no screening pass and no
-// partition. A candidate that does not chain keeps the refusing status, and
-// one on a contig below DnaContext::dual_rank is not chained (NotSelected).
-// Empty when the read's seeds cannot be indexed.
-std::vector<DnaPlacementCandidateChain> build_dna_all_candidate_chains(
-    const DnaContext& context, const DnaPlacementFamily& family,
-    const std::vector<std::uint8_t>& forward_query,
-    const std::vector<std::uint8_t>& reverse_query,
-    const std::vector<ChainWindowRetainedSeed>* forward_seeds,
-    const std::vector<ChainWindowRetainedSeed>* reverse_seeds,
-    const std::vector<QuerySeed>* fine_forward_seeds,
-    const std::vector<QuerySeed>* fine_reverse_seeds,
-    ChainSeedLookupCache* lookup_cache,
-    const std::vector<std::uint32_t>* fine_forward_slots,
-    const std::vector<std::uint32_t>* fine_reverse_slots);
-
 // Which query tiles an accepted whole-query chain owns when stabilization
 // re-solves the partition (see stabilize_selected_family).
 enum class DnaTileOwnership : std::uint8_t {

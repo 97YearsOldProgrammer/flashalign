@@ -14,6 +14,7 @@
 #include "record_family.h"
 #include "residue_emission.h"
 #include "residue_trigger.h"
+#include "target_chaining.h"
 #include "worker_scratch.h"
 #include "../core/cigar.h"
 #include "../core/sequence.h"
@@ -1706,7 +1707,7 @@ AlignResult map_read(const DnaContext& base_dctx,
       if (placement_family.valid)
         emit_all_chains(
             dctx, placement_family,
-            build_dna_all_candidate_chains(
+            build_dna_target_chains(
                 dctx, placement_family, fwd_enc, reverse_query_stream(),
                 &scratch.fwd.retained_seeds, &scratch.rc.retained_seeds,
                 shared_fwd_syncmer_seeds, shared_rc_syncmer_seeds,

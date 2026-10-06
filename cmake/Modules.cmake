@@ -58,6 +58,7 @@ add_library(flashalign_dna STATIC
     csrc/dna/retained_seed_density.cpp
     csrc/dna/inv_local_chain.cpp
     csrc/dna/placement_chaining.cpp
+    csrc/dna/target_chaining.cpp
     csrc/dna/placement_family_adapter.cpp
     csrc/dna/record_family.cpp
     csrc/dna/family_projection.cpp

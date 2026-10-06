@@ -49,10 +49,21 @@ inline void vote_emit_peaks_batched(const VoteWindowState& st,
     std::vector<int> chunk_evidence_lo;
     std::vector<int> chunk_evidence_hi;
     std::vector<uint8_t> seed_hit;
+    std::vector<size_t> seed_hit_entries;
     // The chunk's entries in (chr, bin) order, so a posting visits only the entries of its
     // chromosome within coarse_radius bins of it. Each entry still sees its postings in
     // order, so the emitted peaks match a full scan.
     std::vector<size_t> by_chr_bin;
+    // The chunk's contigs in ascending order: flattened bounds and their entries'
+    // range in by_chr_bin.
+    struct ChunkContig {
+        uint64_t lo;
+        uint64_t hi;
+        int chr;
+        size_t first;
+        size_t last;
+    };
+    std::vector<ChunkContig> chunk_contigs;
     while (!ranked.empty() && static_cast<int>(out.size()) < st.limit) {
         chunk.clear();
         const int needed = st.limit - static_cast<int>(out.size());
@@ -88,43 +99,59 @@ inline void vote_emit_peaks_batched(const VoteWindowState& st,
                           return chunk[a].bin < chunk[b].bin;
                       return a < b;
                   });
+        chunk_contigs.clear();
+        for (size_t o = 0; o < chunk_size; ++o) {
+            const int chr = chunk[by_chr_bin[o]].chr;
+            if (!chunk_contigs.empty() && chunk_contigs.back().chr == chr) {
+                chunk_contigs.back().last = o + 1;
+                continue;
+            }
+            chunk_contigs.push_back({st.chr_bounds[static_cast<size_t>(chr)],
+                                     st.chr_bounds[static_cast<size_t>(chr + 1)],
+                                     chr, o, o + 1});
+        }
+        // A posting list ascends: k stays on the first chunk contig ending past the
+        // postings read so far, and a posting off the chunk's contigs reaches no entry.
         auto visit_seed = [&](const QuerySeed& seed,
                               const KmerPostingView& v,
                               int /*seed_id*/) {
             if (!v.found() || v.count == 0) return;
-            int chr_idx = chromosome_index_for_global_pos(
-                st.chr_bounds, st.n_chr, v.positions[0]);
-            if (chr_idx < 0 || chr_idx >= st.n_chr) return;
-            uint64_t chr_lo = st.chr_bounds[static_cast<size_t>(chr_idx)];
-            uint64_t chr_hi = st.chr_bounds[static_cast<size_t>(chr_idx + 1)];
-            std::fill(seed_hit.begin(), seed_hit.end(), uint8_t{0});
+            size_t k = 0;
             for (uint32_t i = 0; i < v.count; ++i) {
                 const uint64_t g = static_cast<uint64_t>(v.positions[i]);
-                advance_contig_cursor(st.chr_bounds, st.n_chr, g, chr_idx,
-                                      chr_lo, chr_hi);
-                if (g < chr_lo || g >= chr_hi) continue;
+                if (g >= chunk_contigs[k].hi) {
+                    k = static_cast<size_t>(
+                        std::upper_bound(chunk_contigs.begin() +
+                                             static_cast<ptrdiff_t>(k + 1),
+                                         chunk_contigs.end(), g,
+                                         [](uint64_t x, const ChunkContig& cc) {
+                                             return x < cc.hi;
+                                         }) -
+                        chunk_contigs.begin());
+                    if (k == chunk_contigs.size()) break;
+                }
+                const ChunkContig& cc = chunk_contigs[k];
+                if (g < cc.lo) continue;
                 // The accumulate stage's strand test, so every statistic here counts
-                // compatible postings only; tested after the cursor advance.
+                // compatible postings only.
                 if (!packed_ref_orientation_compatible(
                         seed.z, v.positions.packed_at(i), st.is_rc))
                     continue;
-                const int local = static_cast<int>(g - chr_lo);
+                const int local = static_cast<int>(g - cc.lo);
                 const int ref_start = local - seed.read_pos;
                 const int bin = vote_floor_div(ref_start, st.W);
                 // First entry of this chromosome at or past bin - coarse_radius.
                 const int bin_lo = bin - coarse_radius;
-                size_t lo = 0, hi = chunk_size;
+                size_t lo = cc.first, hi = cc.last;
                 while (lo < hi) {
                     const size_t mid = lo + (hi - lo) / 2;
-                    const ChainWindowRankedBucket& e = chunk[by_chr_bin[mid]];
-                    if (e.chr < chr_idx || (e.chr == chr_idx && e.bin < bin_lo))
+                    if (chunk[by_chr_bin[mid]].bin < bin_lo)
                         lo = mid + 1;
                     else
                         hi = mid;
                 }
-                for (size_t o = lo; o < chunk_size; ++o) {
+                for (size_t o = lo; o < cc.last; ++o) {
                     const size_t c = by_chr_bin[o];
-                    if (chunk[c].chr != chr_idx) break;
                     const int bin_distance = std::abs(bin - chunk[c].bin);
                     if (bin - chunk[c].bin < -coarse_radius) break;
                     if (bin_distance <= coarse_radius) {
@@ -135,16 +162,20 @@ inline void vote_emit_peaks_batched(const VoteWindowState& st,
                     }
                     if (bin_distance <= st.vote_radius) {
                         chunk_ref_starts[c].push_back(ref_start);
-                        seed_hit[c] = 1;
+                        if (!seed_hit[c]) {
+                            seed_hit[c] = 1;
+                            seed_hit_entries.push_back(c);
+                        }
                     }
                 }
             }
-            for (size_t c = 0; c < chunk_size; ++c) {
-                if (!seed_hit[c]) continue;
-                // Unweighted vote: one unit per distinct query seed.
+            // Unweighted vote: one unit per distinct query seed.
+            for (const size_t c : seed_hit_entries) {
+                seed_hit[c] = 0;
                 ++chunk_seed_count[c];
                 chunk_occurrences[c].push_back(v.occurrence);
             }
+            seed_hit_entries.clear();
         };
         if (exact_refine_seed_views) {
           for (size_t seed_i = 0; seed_i < exact_refine_seed_views->size();
