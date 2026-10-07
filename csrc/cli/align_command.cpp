@@ -242,8 +242,10 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.dp_bw_long = *opt.dp_bw_long;
   if (opt.dp_max_gap)
     u.dp_max_gap = *opt.dp_max_gap;
-  if (opt.screen_band)
-    u.screen_band = *opt.screen_band;
+  if (opt.chain_band)
+    u.chain_band = *opt.chain_band;
+  if (opt.chain_band_screen)
+    u.chain_band_screen = *opt.chain_band_screen;
   // Passed as given; the resolver validates the intron bounds.
   if (opt.min_intron)
     u.rna_min_intron = *opt.min_intron;

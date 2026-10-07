@@ -141,9 +141,10 @@ struct AlignOptions {
     // -g: the DP's maximum gap and the chains' gap (on a splice preset the
     // fine chain's query gap).
     std::optional<int> dp_max_gap;
-    // --screen-band NUM: the DNA screening chain's diagonal band, >= 1. DNA
-    // presets only.
-    std::optional<int> screen_band;
+    // -b NUM[,NUM]: the dense chain passes' band and the screening pass's,
+    // each >= 1; a lone NUM sets both. DNA presets only.
+    std::optional<int> chain_band;
+    std::optional<int> chain_band_screen;
     // Every option the command line gave, filled where the parser dispatches
     // a spelling.
     std::set<OptionId> given_options;

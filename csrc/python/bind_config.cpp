@@ -136,9 +136,9 @@ void append(std::ostringstream& out, const char* name,
     "the fine chain's band on a splice preset. -1 = preset-owned, or on a\n"   \
     "splice preset rna_max_intron, as -G sets -r.")                            \
   X(dp_bw_long,                                                                \
-    "The second -r value: the gap-fill bandwidth and the dense chain's band\n" \
-    "on a DNA preset, only a bound on dp_bw on a splice preset. -1 =\n"        \
-    "preset-owned, or on a splice preset rna_max_intron, as -G sets -r.")      \
+    "The second -r value: the gap-fill bandwidth on a DNA preset, only a\n"    \
+    "bound on dp_bw on a splice preset. -1 = preset-owned, or on a splice\n"   \
+    "preset rna_max_intron, as -G sets -r.")                                   \
   X(emit_md, "Emit the MD:Z difference string [--MD].")                        \
   X(emit_eqx, "Write =/X CIGAR operators instead of M [--eqx].")
 

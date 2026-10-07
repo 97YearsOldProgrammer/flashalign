@@ -32,6 +32,13 @@ inline constexpr DnaPlacementDefaults kAssemblyPlacement{4096, 2048};
 inline constexpr DnaPlacementDefaults kOntOverlapPlacement{
     256, ::fa::cpu::voting::kQueryTileCount};
 
+// -b: the dense (whole-query) chain passes' diagonal band and the screening
+// pass's.
+struct DnaChainBand {
+  int dense;
+  int screen;
+};
+
 // An all-vs-all overlap row turns on both of its mechanisms (dna_profile.h
 // skip_self, all_chains) and replaces --max-cands and --vote-ratio, and -m and
 // --min-support where positive. Off on every other row.
@@ -94,6 +101,7 @@ struct DnaPresetProfile {
   // The dense chain's maximum gap; the splice presets borrow it as the fine
   // chain's query gap. -g sets it.
   int chain_max_gap;
+  DnaChainBand chain_band;
   DnaPlacementDefaults placement;
   DnaOverlapDefaults overlap;
 };
@@ -105,30 +113,31 @@ inline constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
-     20000, kReadPlacement, kNoOverlap},
+     20000, {20000, 20000}, kReadPlacement, kNoOverlap},
     {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048, {4, 12, 0, 1, 2},
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
      10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
-     10000, kReadPlacement, kNoOverlap},
+     10000, {20000, 20000}, kReadPlacement, kNoOverlap},
     // minimap2's asm5, asm10 and asm20 scoring with its -r1k,100k -g10k -s200
-    // -z200, one row for the fills and the read ends; lr's seeding, vote
-    // width and chain gap.
+    // -z200, one row for the fills and the read ends, and its 100k bandwidth
+    // as the dense chains' band; lr's seeding, vote width, chain gap and
+    // screening band.
     {"asm5", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
      1, 19, 1, 39, 3, 81, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 19, 1, 39, 3, 81, 1, 200, 200,
-     20000, kAssemblyPlacement, kNoOverlap},
+     20000, {100000, 20000}, kAssemblyPlacement, kNoOverlap},
     {"asm10", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
      1, 9, 1, 16, 2, 41, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 9, 1, 16, 2, 41, 1, 200, 200,
-     20000, kAssemblyPlacement, kNoOverlap},
+     20000, {100000, 20000}, kAssemblyPlacement, kNoOverlap},
     {"asm20", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
      1, 4, 1, 6, 2, 26, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 4, 1, 6, 2, 26, 1, 200, 200,
-     20000, kAssemblyPlacement, kNoOverlap},
+     20000, {100000, 20000}, kAssemblyPlacement, kNoOverlap},
     // Experimental all-vs-all read overlap, map-only: lr's row at k17 with
     // the vote width L/64, and lr:hq's row, as overlap rows. They follow the
     // row of their kind, which dna_preset_profile returns.
@@ -136,12 +145,12 @@ inline constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
-     20000, kOntOverlapPlacement, kOntOverlap},
+     20000, {20000, 20000}, kOntOverlapPlacement, kOntOverlap},
     {"ava-hifi", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048, {4, 12, 0, 1, 2},
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
      10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
-     10000, kReadPlacement, kHiFiOverlap},
+     10000, {20000, 20000}, kReadPlacement, kHiFiOverlap},
 }};
 
 inline const DnaPresetProfile* find_dna_preset_profile(
@@ -217,6 +226,8 @@ inline void set_dna_long_platform_fields(
     mapping.cigar_dp_tail_end_bonus = profile.cigar_dp_tail_end_bonus;
     mapping.cigar_dp_bw = profile.cigar_dp_bw;
     mapping.cigar_dp_bw_long = profile.cigar_dp_bw_long;
+    mapping.chain_band = profile.chain_band.dense;
+    mapping.screen_diag_band = profile.chain_band.screen;
     mapping.cigar_dp_max_gap = profile.cigar_dp_max_gap;
     mapping.cigar_dp_min_dp_max = profile.cigar_dp_min_dp_max;
     mapping.fill_dp_match = profile.fill_dp_match;

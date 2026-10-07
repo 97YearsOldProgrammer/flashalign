@@ -746,6 +746,7 @@ private:
         mapping.cigar_local_interval_anchor_interval_pad;
     dctx.opts.cigar_local_interval_anchor_chain_max_gap =
         mapping.cigar_local_interval_anchor_chain_max_gap;
+    dctx.opts.chain_band = mapping.chain_band;
     dctx.opts.screen_diag_band = mapping.screen_diag_band;
     dctx.opts.dna_dense_diag_min_runs = mapping.dna_dense_diag_min_runs;
     dctx.opts.dna_tandem_window = mapping.dna_tandem_window;

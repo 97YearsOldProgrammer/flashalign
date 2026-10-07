@@ -281,9 +281,15 @@ std::string resolved_config_text(const AlignOptions& opt,
   else
     row("chain_max_cands", i2s(fa::cpu::lr::dna_chain_max_candidates(mapping)),
         src(opt.max_cands.has_value(), overlap ? "preset" : "derived"));
+  // -b's bands; the dense band only where its stage runs.
+  if (!is_rna &&
+      fa::cpu::api::lane_runs_stage(fa::cpu::api::LaneStage::Partition,
+                                    opt.preset))
+    row("chain_band", i2s(mapping.chain_band),
+        src(opt.chain_band.has_value(), "preset"));
   if (!is_rna)
     row("screen_band", i2s(mapping.screen_diag_band),
-        src(opt.screen_band.has_value(), "builtin"));
+        src(opt.chain_band_screen.has_value(), "preset"));
 
   // lr, lr:hq: -A -B -O -E -z --score-N are the gap-fill row; the end row,
   // which prices every path, is the preset's (dp_end_row). The assembly

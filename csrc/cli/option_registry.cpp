@@ -46,19 +46,25 @@ const std::vector<OptionSpec>& specs_table() {
     static const std::vector<OptionSpec> kSpecs = {
         // align, shown by --help
         // minimap2's -g. On a DNA preset it also bounds the chains' reach,
-        // which never falls below a chain's band (-r's NUM2 for the dense
-        // chains, --screen-band for the screening chain); on a splice preset
-        // it also sets the fine chain's query gap, which the band does not
+        // which never falls below a chain's band (-b); on a splice preset it
+        // also sets the fine chain's query gap, which the band does not
         // raise.
         {OptionId::DpMaxGap, 'g', "", kSize, kStable, A,
          "NUM", SEC_PLACEMENT,
          "stop alignment elongation if there are no seeds in NUM-bp [5000]"},
         // minimap2's -r. On a DNA preset NUM1 bands the read-end extensions
-        // and no chain, and NUM2 the gap fills and the dense chains. On a
-        // splice preset NUM1 bands the fine chain and NUM2 only bounds NUM1.
+        // and NUM2 the gap fills; neither bands a chain. On a splice preset
+        // NUM1 bands the fine chain and NUM2 only bounds NUM1.
         {OptionId::DpBw, 'r', "", kPair, kStable, A,
          "NUM[,NUM]", SEC_PLACEMENT,
-         "alignment bandwidth and gap-fill/chaining bandwidth [500,20000]", "", kBaseAlign},
+         "alignment bandwidth and gap-fill bandwidth [500,20000]", "", kBaseAlign},
+        // NUM1 bands the dense (whole-query) chain passes and NUM2 the
+        // screening pass; a lone NUM sets both. Sizes as -r's. DNA presets
+        // that partition the query; the asm presets' NUM1 is 100000.
+        {OptionId::ChainBand, 'b', "--chain-band", kPair, kStable, A,
+         "NUM[,NUM]", SEC_PLACEMENT,
+         "chaining bandwidth of the dense chains and the screening chain [20000,20000]", "",
+         kPartition},
         // minimap2's -m. DNA presets only; the splice presets keep their own
         // chain floors.
         {OptionId::MinChainScore, 'm', "", kInt, kStable, A,
@@ -270,11 +276,6 @@ const std::vector<OptionSpec>& specs_table() {
         // cost per tile in no block; miss: penalty per unsupported tile in a
         // block.
         {OptionId::TileScore, '\0', "--tile-score", kStr, kDev, A, "",
-         HIDDEN, "", STUDY_FLASH_NATIVE, kPartition},
-        // --screen-band NUM [20000]: the DNA screening chain's diagonal band,
-        // >= 1, a size like -g. The screening pass feeds the partition; the
-        // overlap presets run neither. DNA presets only.
-        {OptionId::ScreenBand, '\0', "--screen-band", kSize, kDev, A, "",
          HIDDEN, "", STUDY_FLASH_NATIVE, kPartition},
         // --dual yes|no, also --dual=yes|no: the overlap presets only. no
         // prints a pair once, from its shorter read, ties broken by name

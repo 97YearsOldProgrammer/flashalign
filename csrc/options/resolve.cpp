@@ -433,12 +433,14 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
     mapping.cigar_local_interval_anchor_chain_max_gap =
         mapping.cigar_dp_max_gap;
   }
-  // --screen-band: the DNA screening chain's band.
-  if (user.screen_band) {
+  // -b: the dense chain passes' band and the screening pass's.
+  if (user.chain_band || user.chain_band_screen) {
     if (rna_mode)
-      throw std::invalid_argument(
-          "--screen-band is valid only with a DNA preset");
-    mapping.screen_diag_band = std::max(1, *user.screen_band);
+      throw std::invalid_argument("-b is valid only with a DNA preset");
+    if (user.chain_band)
+      mapping.chain_band = std::max(1, *user.chain_band);
+    if (user.chain_band_screen)
+      mapping.screen_diag_band = std::max(1, *user.chain_band_screen);
   }
 
   if (rna_mode) {

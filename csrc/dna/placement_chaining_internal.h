@@ -19,10 +19,10 @@
 namespace fa::cpu::lr {
 namespace internal {
 
-// The band of a chain pass, for both its harvest and its chain: -r's second
-// value on the whole-query pass, the screening band on the screening pass.
+// The band of a chain pass, for both its harvest and its chain: -b's first
+// value on the whole-query (dense) passes, its second on the screening pass.
 inline int pass_diagonal_band(const DnaContext& context, bool whole_query) {
-  return std::max(1, whole_query ? context.opts.cigar_dp_bw_long
+  return std::max(1, whole_query ? context.opts.chain_band
                                  : context.opts.screen_diag_band);
 }
 

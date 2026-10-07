@@ -218,17 +218,10 @@ Stop alignment elongation if there are no seeds within
 DNA preset two pieces of a read join into one record only across gaps of at most
 .IR NUM .
 Under a DNA preset it is also the maximum gap of chaining, whose reach is never
-below the chain's band or a quarter of the read length (up to 131072), so values
-under the band leave that chain unchanged. The band is
-.I NUM2
-of
-.B \-r
-for the dense chains and
-.B \-\-screen\-band
-for the screening chain, both 20000 under
-.B lr
-and
-.BR lr:hq .
+below the chain's band and grows with the read length, so values under the band
+leave that chain unchanged. The band is
+.BR \-b 's
+first value for the dense chains and its second for the screening chain.
 Under a splice preset it bounds base alignment and is also the maximum
 query gap of the fine chain, which is 20000 under
 .B splice
@@ -251,18 +244,17 @@ sets both.
 may be ending with k/K/m/M/g/G.
 .TP
 .B \-r \fINUM1\fR[,\fINUM2\fR]
-Bandwidth for base alignment and chaining [500,20000].
+Bandwidth for base alignment and gap filling [500,20000].
 Under a DNA preset,
 .I NUM1
 is used for alignment extension toward the read ends and for inverted middles,
-only when base-level alignment runs
-.RB ( \-c ,
-SAM).
+and
 .I NUM2
-is used for closing gaps between anchors and as the diagonal band of the dense
-chains, so it also acts on placement and plain PAF output; the screening chain
-keeps its own band
-.RB ( \-\-screen\-band ).
+for closing gaps between anchors, both only when base-level alignment runs
+.RB ( \-c ,
+SAM); neither bands chaining, which
+.B \-b
+sets.
 A single value sets
 .I NUM1
 only. Each value may be ending with k/K/m/M/g/G, and
@@ -278,6 +270,20 @@ only bounds
 neither bands base alignment there, and
 .B \-G
 sets both [200000,200000].
+.TP
+.B \-b \fINUM1\fR[,\fINUM2\fR]
+Chaining bandwidth [20000,20000; 100000,20000 on asm5, asm10, asm20].
+.I NUM1
+bands each candidate's dense chain over the whole read and
+.I NUM2
+its bounded screening chain: a chain keeps only the anchors whose diagonal lies
+within the band of the candidate's, and long reads chain with a reach that
+grows with their length. It acts on placement, so also on plain PAF output.
+A single value sets both. Each value may end with k/K/m/M/g/G. The long form is
+.BR \-\-chain\-band .
+DNA presets only;
+.BR ava\-ont " and " ava\-hifi ,
+which do not partition the read, refuse it.
 .TP
 .BI \-m \ INT
 Discard alignments with chaining score
@@ -467,24 +473,6 @@ per valid tile left unowned, and
 .I miss
 per owned tile without seed support, each at least 0. Any subset of the keys may
 be given, and a repeated key keeps its last value. DNA presets only.
-.TP
-.BI \-\-screen\-band \ NUM
-Diagonal band of placement's bounded screening chain [20000]. It keeps the
-anchors whose diagonal lies within
-.I NUM
-of the candidate's and chains them at a bandwidth of
-.I NUM
-or a quarter of the read length (up to 131072), whichever is larger. The dense
-chains band at
-.I NUM2
-of
-.BR \-r .
-.I NUM
-is at least 1 and may be ending with k/K/m/M/g/G. DNA presets only;
-.B ava\-ont
-and
-.BR ava\-hifi ,
-which run no screening pass, refuse it.
 .SS Alignment options
 Under a DNA preset,
 .BR \-A ", " \-B ", " \-O ", " \-E ", " \-z " and " \-\-score\-N
@@ -859,7 +847,7 @@ and the MAPQ coverage threshold (0.70 against 0.55).
 Experimental. Long assembly to reference mapping
 .RB ( \-k21
 .B \-s9 \-A1 \-B19 \-O39,81 \-E3,1 \-z200,200 \-\-score\-N 1 \-r1000,100000
-.BR "\-S200 \-\-vote\-seeds 4096 \-\-tiles 2048" ).
+.BR "\-b100000,20000 \-S200 \-\-vote\-seeds 4096 \-\-tiles 2048" ).
 Use this preset if the average divergence is not much higher than 0.1%.
 .TP
 .B asm10

@@ -176,7 +176,7 @@ int64_t parse_size(const std::string& value, const std::string& name) {
     return static_cast<int64_t>(scaled);
 }
 
-// A size that must fit an int (-r, -g, -G, --screen-band).
+// A size that must fit an int (-r, -b, -g, -G).
 int parse_int_size(const std::string& value, const std::string& name) {
     const int64_t size = parse_size(value, name);
     if (size > std::numeric_limits<int>::max()) {
@@ -647,11 +647,19 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 opt.dp_max_gap = gap;
                 break;
             }
-            case OptionId::ScreenBand: {
-                const int band = parse_int_size(val, arg);
-                if (band < 1)
-                    throw UsageError("--screen-band must be at least 1");
-                opt.screen_band = band;
+            // Sizes, as -r; a lone value sets both bands.
+            case OptionId::ChainBand: {
+                const auto comma = val.find(',');
+                const int dense = parse_int_size(
+                    comma == std::string::npos ? val : val.substr(0, comma), arg);
+                const int screen =
+                    comma == std::string::npos
+                        ? dense
+                        : parse_int_size(val.substr(comma + 1), arg);
+                if (dense < 1 || screen < 1)
+                    throw UsageError(arg + " must be at least 1");
+                opt.chain_band = dense;
+                opt.chain_band_screen = screen;
                 break;
             }
             case OptionId::Secondary:
@@ -797,8 +805,8 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         throw UsageError("--max-cands is valid only with a DNA preset");
     if (rna && opt.tiles)
         throw UsageError("--tiles is valid only with a DNA preset");
-    if (rna && opt.screen_band)
-        throw UsageError("--screen-band is valid only with a DNA preset");
+    if (rna && opt.chain_band)
+        throw UsageError("-b is valid only with a DNA preset");
     if (rna && (opt.tile_supported_reward || opt.tile_block_open_cost ||
                 opt.tile_null_cost || opt.tile_unsupported_cost)) {
         throw UsageError(
