@@ -853,8 +853,9 @@ VotePeak* vote_slope_best_peak(std::vector<VotePeak>& fwd,
 // Widens the winner's harvest window to its per-read line (vote_slope.h),
 // fitted on the seeds its lane's exact refine walked. When the fit passes its
 // gate, every chain pass harvests the winner over
-// [min(raw, a) - pad, max(raw + L, a + L + stretch(L, b)) + pad]. Nothing else
-// about the winner changes, and every other peak keeps the plain window.
+// [min(raw, a) - pad, max(raw + L, a + L + stretch(L, b)) + pad] and bands it
+// on the line (VotePeak::line_a, line_b_q20). Nothing else about the winner
+// changes, and every other peak keeps the plain window and band.
 void vote_slope_widen_winner(const LongReadSeedContext& seed_ctx,
                              std::uint32_t tie_seed, int span,
                              const ChainAnchorScratch& scratch,
@@ -884,6 +885,9 @@ void vote_slope_widen_winner(const LongReadSeedContext& seed_ctx,
       std::max<std::int64_t>(0, winner->raw_ref_start - fit.a));
   winner->harvest_above = static_cast<std::int32_t>(
       std::max<std::int64_t>(0, line_end - winner->raw_ref_start));
+  winner->line_a = fit.a;
+  winner->line_b_q20 = static_cast<std::int32_t>(fit.b1_q20);
+  winner->line_gate = true;
 }
 
 // The all-chains lane (options/dna_profile.h all_chains). Every chain of
@@ -1098,7 +1102,7 @@ AlignResult map_read(const DnaContext& base_dctx,
     rc_peak_params.tie_seed = dctx.vote_tie_seed;
     auto rc = window_anchor_peaks(seed_ctx, nullptr, span, /*is_rc=*/true,
                                   scratch.rc, rc_peak_params);
-    // The winner's harvest window, widened to its line.
+    // The winner's harvest window and band, on its line.
     vote_slope_widen_winner(seed_ctx, dctx.vote_tie_seed, span, scratch, fwd,
                             rc);
     raw.insert(raw.end(), fwd.begin(), fwd.end());

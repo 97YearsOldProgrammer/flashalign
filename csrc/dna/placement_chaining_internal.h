@@ -30,8 +30,9 @@ inline int pass_diagonal_band(const DnaContext& context, bool whole_query) {
 // its peak's expected start, padded on both sides by
 // cigar_local_interval_anchor_interval_pad, widened by harvest_below /
 // harvest_above and clamped to the contig. The widening reaches the whole-read
-// winner's per-read line (vote_slope_widen_winner) and is 0 on every other
-// peak. Empty when high <= low.
+// winner's per-read line (vote_slope_widen_winner), which also centres that
+// winner's band (append_interval_anchors), and is 0 on every other peak. Empty
+// when high <= low.
 struct HarvestWindow {
   std::int64_t low = 0;
   std::int64_t high = 0;
@@ -169,12 +170,16 @@ inline DnaPlacementChainStatus contig_lane_refusal(
 // anchor is flagged ANCHOR_TANDEM when posting_is_tandem holds over the
 // contig. `skip_own_diagonal` is skips_own_diagonal's for the contig and lane.
 // `query_length` bounds the query span.
+// `line_peak`, when not null, is a peak whose line passed its gate: the band is
+// then centred on that line at the seed's query position, not on
+// `main_diagonal`.
 void append_interval_anchors(
     const KmerPostingIntervalView& interval,
     const RetainedSeedRef& seed,
     std::uint64_t chromosome_base,
     int chromosome_length,
     int main_diagonal,
+    const VotePeak* line_peak,
     int seed_length,
     int diagonal_band,
     int tandem_window,

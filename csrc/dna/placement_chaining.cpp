@@ -133,6 +133,7 @@ void append_interval_anchors(
     std::uint64_t chromosome_base,
     int chromosome_length,
     int main_diagonal,
+    const VotePeak* line_peak,
     int seed_length,
     int diagonal_band,
     int tandem_window,
@@ -143,6 +144,12 @@ void append_interval_anchors(
     DnaPlacementCandidateChain& record) {
   const std::uint64_t chromosome_end =
       chromosome_base + static_cast<std::uint64_t>(chromosome_length);
+  // The winner's band follows its line at this seed.
+  const std::int64_t line_diagonal =
+      line_peak != nullptr
+          ? line_peak->line_a +
+                vote_slope_stretch(seed.seed.read_pos, line_peak->line_b_q20)
+          : 0;
   record.interval_hits += interval.count;
   for (std::uint32_t posting = 0; posting < interval.count; ++posting) {
     const std::uint64_t global = interval.positions[posting];
@@ -167,8 +174,13 @@ void append_interval_anchors(
         query_position + seed_length <= query_length &&
         reference_position >= 0 &&
         reference_position + seed_length <= chromosome_length &&
-        within_band(reference_position - query_position, main_diagonal,
-                    diagonal_band);
+        (line_peak != nullptr
+             ? within_band<std::int64_t>(
+                   static_cast<std::int64_t>(reference_position) -
+                       query_position,
+                   line_diagonal, diagonal_band)
+             : within_band(reference_position - query_position, main_diagonal,
+                           diagonal_band));
     // The posting was found under this seed's canonical key, so the k-mers
     // match exactly when the orientation bits agree with the lane.
     const bool verified =
@@ -370,6 +382,8 @@ bool chain_candidate(
       internal::pool_gate(context, whole_query_exact);
   const int diagonal_band =
       internal::pass_diagonal_band(context, whole_query_exact);
+  const VotePeak* line_peak =
+      candidate.peak.line_gate ? &candidate.peak : nullptr;
   const bool skip_own_diagonal = internal::skips_own_diagonal(
       context, candidate.peak.chr, reverse);
 
@@ -433,7 +447,7 @@ bool chain_candidate(
       } else {
         internal::append_interval_anchors(
             interval, seed, chromosome_base, chromosome_length,
-            static_cast<int>(expected), seed_length, diagonal_band,
+            static_cast<int>(expected), line_peak, seed_length, diagonal_band,
             context.opts.dna_tandem_window, reverse, skip_own_diagonal,
             family.read_length, sparse, record);
       }
@@ -457,7 +471,7 @@ bool chain_candidate(
       const std::size_t before = anchors.size();
       internal::append_interval_anchors(
           item.interval, item.seed, chromosome_base, chromosome_length,
-          static_cast<int>(expected), seed_length, diagonal_band,
+          static_cast<int>(expected), line_peak, seed_length, diagonal_band,
           context.opts.dna_tandem_window, reverse, skip_own_diagonal,
           family.read_length, anchors, record);
       record.rescued_anchors += anchors.size() - before;

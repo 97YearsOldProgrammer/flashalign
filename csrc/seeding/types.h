@@ -67,11 +67,16 @@ struct VotePeak {
   int center_support = 0;
   int vote_score = 0;
   LongWindowAnchor anchor;
-  // How much further the chain's harvest window reaches below raw_ref_start - pad and
-  // above raw_ref_start + L + pad, to cover the whole-read winner's per-read line
-  // (vote_slope.h). Nonzero only on that winner, when its line passes the gate.
+  // The whole-read winner's per-read line d(q) = line_a + stretch(q, line_b_q20)
+  // (vote_slope.h), set only on that winner, when its line passes the gate (line_gate).
+  // Its chain harvest window then reaches harvest_below further below raw_ref_start - pad
+  // and harvest_above further above raw_ref_start + L + pad, and its chain band follows
+  // the line.
   std::int32_t harvest_below = 0;
   std::int32_t harvest_above = 0;
+  std::int64_t line_a = 0;
+  std::int32_t line_b_q20 = 0;
+  bool line_gate = false;
   // Median reference-start diagonal before whole-read projection clamps it to
   // chromosome bounds. Coarse block projection must not inherit that clamp.
   int64_t raw_ref_start = 0;

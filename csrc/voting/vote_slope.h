@@ -1,9 +1,12 @@
 // The whole-read winner's per-read line d(q) = a + b q, with d = local - q. A read whose
 // anchors drift by b per query base covers L + b L bases of reference, not L, so the
 // harvest window [raw_ref_start - pad, raw_ref_start + L + pad] can leave its ends
-// outside. The line is fitted on the winner's own seeds, and dna/backend.cpp widens the
-// winner's window to its union with the line's span [a, a + L + stretch(L, b)]
-// (VotePeak::harvest_below / harvest_above). The vote itself is unchanged.
+// outside, and the chain band |d - raw_ref_start| <= band drops its anchors once they
+// drift further than the band. The line is fitted on the winner's own seeds, and
+// dna/backend.cpp widens the winner's window to its union with the line's span
+// [a, a + L + stretch(L, b)] (VotePeak::harvest_below / harvest_above) and centres its
+// band on the line at each seed's q (VotePeak::line_a, line_b_q20).
+// The vote itself is unchanged.
 //
 // The fit is integer only (int64, __int128), so no target's float contraction can move a
 // window edge:
@@ -14,8 +17,9 @@
 //         and nearest it. Least squares, one trim (residuals beyond max(3 MAD, 64)
 //         dropped), least squares again: line 1, of slope b1.
 //   gate  line 1 rests on at least 8 pairs spanning at least L / 4 of the query; b1 is
-//         clamped to [-6 %, +10 %] and carried as round(b1 2^20). A read that fails the
-//         gate keeps the plain window.
+//         clamped to [-6 %, +10 %] and carried as round(b1 2^20), and a b1 on either
+//         clamp fails the gate. A read that fails the gate keeps the plain window and
+//         band.
 //   a     floor(d at q = 0) on the line of the clamped slope through line 1's centroid.
 #pragma once
 
@@ -242,8 +246,10 @@ inline VoteSlopeFit vote_slope_fit_winner(const SeedViews& seeds,
   VoteSlopeLine clamped = line1;
   clamped.b_q20 = fit.b1_q20;
   fit.a = clamped.at(0);
+  // A slope the clamp had to set is not the read's own line.
   fit.gate = fit.n_s1 >= kVoteSlopeMinPairs &&
-             4 * static_cast<std::int64_t>(fit.span_s1) >= read_len;
+             4 * static_cast<std::int64_t>(fit.span_s1) >= read_len &&
+             fit.b1_q20 != kVoteSlopeMinQ20 && fit.b1_q20 != kVoteSlopeMaxQ20;
   return fit;
 }
 
