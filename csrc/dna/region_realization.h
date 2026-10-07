@@ -35,6 +35,10 @@ struct DnaRegionPrice {
   int dp_max2 = 0;
   // The catalogue candidate of the record dp_max2 came from, -1 for none.
   int dp_max2_candidate = -1;
+  // dp_max and dp_max2 before the rank rescale: the sweep scores (ms:i) of
+  // the record and of the record dp_max2 came from.
+  int dp_max0 = 0;
+  int dp_max2_0 = 0;
   // mm_set_parent's subsc and n_sub, and the same two over the secondaries
   // from its own candidate's chains.
   double subsc = 0.0;

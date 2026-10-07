@@ -706,6 +706,8 @@ void price_dna_regions(const DnaContext& dctx,
     evidence.winner_q_end = price.chain_q_end;
     evidence.winner_ref_begin = price.chain_ref_begin;
     evidence.winner_ref_end = price.chain_ref_end;
+    evidence.dp1_raw = static_cast<double>(price.dp_max0);
+    evidence.dp2_raw = static_cast<double>(price.dp_max2_0);
     if (family_map_wanted)
       mark_chain_mapq_record_shadows(dctx, family, placement, family_map, index,
                                      owner, read_len, evidence);

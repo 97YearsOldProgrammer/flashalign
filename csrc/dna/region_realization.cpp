@@ -63,6 +63,10 @@ struct Record {
   int dp_max2 = 0;
   // The record dp_max2 came from, -1 for none.
   int dp_max2_from = -1;
+  // The sweep's dp_max before the rank rescale (minimap2's dp_max0), its own
+  // and that of the record dp_max2 came from.
+  int dp_max0 = 0;
+  int dp_max2_0 = 0;
   double subsc = 0.0;
   int n_sub = 0;
   double pool_subsc = 0.0;
@@ -335,6 +339,7 @@ void set_parents(const DnaContext& context,
           if (ri.dp_max > rp.dp_max2) {
             rp.dp_max2 = ri.dp_max;
             rp.dp_max2_from = static_cast<int>(i);
+            rp.dp_max2_0 = ri.dp_max0;
           }
           if (rp.dp_max - ri.dp_max <= sub_diff) cnt_sub = true;
         }
@@ -592,10 +597,12 @@ DnaRegionOutcome realize_dna_regions(
 
   // 3. Filter, and for a read of rank_min_len or more rescale and filter
   // again (align.c 1113-1117).
-  for (Record& record : records)
+  for (Record& record : records) {
     record.dp_max = dna_record_dp_max_segment(
         context, record.alignment, *request.forward_query,
         *request.reverse_query);
+    record.dp_max0 = record.dp_max;
+  }
   filter_records(context, records);
   if (read_length >= kRankMinLen) {
     update_dp_max(context, request, read_length, records);
@@ -656,6 +663,8 @@ DnaRegionOutcome realize_dna_regions(
     price.chain_ref_end = chain.ref_end;
     price.dp_max = record.dp_max;
     price.dp_max2 = record.dp_max2;
+    price.dp_max0 = record.dp_max0;
+    price.dp_max2_0 = record.dp_max2_0;
     if (record.dp_max2_from >= 0) {
       const Record& from = records[static_cast<std::size_t>(record.dp_max2_from)];
       const DnaSelectionItem& source =

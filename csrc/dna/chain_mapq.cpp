@@ -281,8 +281,14 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   const bool dp_branch = seat.kind != 0;
   // dp2 is the seat's, or nothing.
   const double dp2 = alternative_competes ? evidence.dp2 : 0.0;
-  // R1: the seat's margin, which the guard, the ladder and mapq_alt read.
+  // The seat's margin on the rescaled pair, which the n_sub DP rule reads.
   const double m_eff = dp_branch ? dp1 - dp2 : 0.0;
+  // R1: the seat's margin on the pair before the rank rescale, which the
+  // guard, the ladder and mapq_alt read. x, the n_sub DP rule and the
+  // dp1 > dp2 promotion keep the rescaled pair.
+  const double dp1_margin = evidence.dp1_raw;
+  const double dp2_margin = alternative_competes ? evidence.dp2_raw : 0.0;
+  const double m_margin = dp_branch ? dp1_margin - dp2_margin : 0.0;
 
   // Second pass: f2, n_sub and x over the competing rivals. As minimap2's
   // mm_set_parent, a rival counts toward n_sub once if it meets the anchor
@@ -370,9 +376,9 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   const double match_sc = static_cast<double>(std::max(1, evidence.match_sc));
   // R2. `margin_beats_rival` also gates the never-Q0 promotion below.
   const bool margin_beats_rival =
-      hifi && dp_branch && dp1 > 0.0 && dp2 > 0.0 &&
+      hifi && dp_branch && dp1_margin > 0.0 && dp2_margin > 0.0 &&
       evidence.substitution_cost > 0 &&
-      m_eff >= static_cast<double>(evidence.substitution_cost);
+      m_margin >= static_cast<double>(evidence.substitution_cost);
   const bool margin_rule = margin_beats_rival && seat.chained && !seat.tie &&
                            seat.chain_anchors < evidence.cnt &&
                            x_other < kDnaChainMapqHifiRivalStrengthMax;
@@ -382,9 +388,9 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     // R3: BWA-MEM's margin Phred (minimap2's mapq_alt).
     const double two_base_gap =
         static_cast<double>(evidence.gap_open1 + 2 * evidence.gap_extend1);
-    int margin_q = truncate_to_int(6.02 * m_eff / match_sc + 0.499);
-    if (m_eff > static_cast<double>(evidence.substitution_cost) &&
-        m_eff < two_base_gap)
+    int margin_q = truncate_to_int(6.02 * m_margin / match_sc + 0.499);
+    if (m_margin > static_cast<double>(evidence.substitution_cost) &&
+        m_margin < two_base_gap)
       margin_q = std::min(margin_q, kDnaChainMapqHifiSingleEventMapq);
     hifi_margin_mapq = margin_q;
     mapq = truncate_to_int(pen_margin * static_cast<double>(margin_q));
@@ -395,7 +401,7 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
                            (1.0 - x * x) * std::log(dp1 / match_sc));
     // mapq_alt on the seat's margin (R5).
     const int mapq_alt = truncate_to_int(
-        6.02 * evidence.identity * evidence.identity * m_eff / match_sc +
+        6.02 * evidence.identity * evidence.identity * m_margin / match_sc +
         0.499);
     mapq = std::min(mapq, mapq_alt);
   } else if (dp1 > 0.0) {

@@ -14,6 +14,11 @@
 //     a rival. A chained rival at another locus that ties the winner exactly
 //     gives x = 1.
 //   - minimap2's seed-repetitiveness factor (uniq_ratio) is not applied.
+//   - The margin terms (mapq_alt, and the HiFi rule's guard, ladder and R4
+//     below) read dp1 and dp2 before the controller's rank rescale
+//     (minimap2's dp_max0, which it prints as ms:i). The ratio, the n_sub DP
+//     rule and the dp1 > dp2 never-Q0 promotion read the rescaled pair.
+//     minimap2 reads every term, mapq_alt included, on the rescaled pair.
 //   - Arithmetic is double rather than float, so a value on an integer
 //     boundary may truncate differently, and n_sub counts a bounded rival set
 //     rather than every secondary.
@@ -31,7 +36,8 @@
 // ratio form 1 - x*x cannot tell a rival one substitution worse from a tie, so
 // the DP margin over the rival that owns dp2 is read against the scoring row:
 //   R1 The seat: the rival that owns dp2, when it competes. Its margin m_eff
-//      is dp1 - dp2.
+//      is dp1_raw - dp2_raw, the pair before the controller's rank rescale,
+//      on which one substitution costs A + B.
 //   R2 The guard. The margin decides when m_eff >= A + B and the seat is
 //      chained, not a tie, has fewer anchors than the winner, and every other
 //      competing rival is weaker than the winner (x_other < 1).
@@ -41,8 +47,8 @@
 //      n_sub term and the clamp.
 //   R4 The never-Q0 promotion needs a seat beaten by at least A + B and
 //      x_other < 1.
-//   R5 Otherwise minimap2's ratio form on dp1 / dp2, with its mapq_alt on
-//      m_eff.
+//   R5 Otherwise minimap2's ratio form on the rescaled dp1 / dp2, with its
+//      mapq_alt on m_eff.
 //   R6 On a block record of a multi-block family the MAPQ is capped at
 //      kDnaChainMapqHifiSplitCapMapq when (a) there is no seat and a competing
 //      rival reaches kDnaChainMapqHifiSplitRivalStrength, or (b) the record's
@@ -201,9 +207,15 @@ struct DnaChainMapqEvidence {
   // The chained shadow slack: the whole-query scan window's interval pad.
   int shadow_slack_bp = kDnaChainMapqDefaultShadowSlackBp;
   std::vector<DnaChainMapqRival> rivals;
-  // CIGAR output only; 0 otherwise.
+  // CIGAR output only; 0 otherwise. After the controller's rank rescale
+  // (minimap2's dp_max): the pair the ratio reads.
   double dp1 = 0.0;
   double dp2 = 0.0;
+  // dp1 and dp2 before the controller's rank rescale (minimap2's dp_max0):
+  // the pair the margin terms read. Equal to dp1 and dp2 when the rescale
+  // did not fire.
+  double dp1_raw = 0.0;
+  double dp2_raw = 0.0;
   // mlen/blen of the realized primary; 1.0 when there is no base-level
   // accounting (map-only), which makes the identity factor inert.
   double identity = 1.0;
@@ -223,7 +235,7 @@ struct DnaChainMapqEvidence {
   bool shadow_vote_credit = false;
   bool chain_shadow_read_slack = false;
   // HiFi margin rule (header comment), HiFi presets only: the margin
-  // dp1 - dp2 is read against the scoring row below.
+  // dp1_raw - dp2_raw is read against the scoring row below.
   bool hifi_margin_rule = false;
   int substitution_cost = 0; // A + B
   int gap_open1 = 0;         // O1
@@ -290,9 +302,10 @@ struct DnaChainMapqBreakdown {
   double x_other = 0.0;
   bool hifi_margin_applied = false;
   int hifi_margin_mapq = -1;
-  // The seat (0 none, 1 the dp2 owner) and its R1 margin, the pen the margin
-  // rule uses, and the split-read cap applied (0 none, 1 rival strength, 2
-  // substitution share, 3 both).
+  // The seat (0 none, 1 the dp2 owner) and its margin on the rescaled pair
+  // (R1 reads the pair before the rescale), the pen the margin rule uses,
+  // and the split-read cap applied (0 none, 1 rival strength, 2 substitution
+  // share, 3 both).
   int seat_kind = 0;
   double seat_m_eff = 0.0;
   double hifi_pen = 0.0;
