@@ -26,8 +26,11 @@ cmake --build build --target flashalign -j
 ./build/flashalign align -ax splice ref.fa cdna.fq.gz > aln.sam            # spliced long reads (strand unknown)
 ./build/flashalign align -ax splice:hq -u f ref.fa isoseq.fq.gz > aln.sam  # PacBio Iso-Seq (transcript strand)
 ./build/flashalign align -ax splice --junc-bed anno.bed ref.fa cdna.fq.gz > aln.sam  # use annotated junctions
-./build/flashalign align -cx asm5 ref.fa asm.fa > aln.paf                  # assembly vs reference (experimental)
-./build/flashalign align -x ava-ont reads.fq reads.fq > ovl.paf            # all-vs-all read overlap (experimental)
+./build/flashalign index -x splice -k14 ref.fa ref.k14.faix                # noisy Nanopore direct RNA-seq: a k14 index,
+./build/flashalign align -ax splice -uf ref.k14.faix drna.fq.gz > aln.sam  #   then map on it
+./build/flashalign align -cx asm5 ref.fa asm.fa > aln.paf                  # assembly to assembly/ref alignment (experimental)
+./build/flashalign align -x ava-ont reads.fq reads.fq > ovlp.paf           # Nanopore read overlap (experimental)
+./build/flashalign align -x ava-hifi reads.fq reads.fq > ovlp.paf          # PacBio HiFi read overlap (experimental)
 # man page for detailed command line options
 man ./flashalign.1
 ```
@@ -154,39 +157,24 @@ donor or acceptor found in the annotation gets a score bonus, `--junc-bonus` (9 
 #### Align an assembly to a reference (experimental)
 
 ```sh
-flashalign align -cx asm5 ref.fa asm.fa > aln.paf    # an assembly ~0.1% from the reference
+flashalign align -cx asm5 ref.fa asm.fa > aln.paf    # assembly to assembly/ref alignment
 ```
 
-`asm5`, `asm10` and `asm20` are experimental: they are not qualified on intact chromosomes. They
-are for divergences of about 0.1%, 1% and several percent, and take minimap2's scoring for its
-presets of the same names, one row for the gap fills and the read ends, with `-r1000,100000`,
-`-g10000` and `-S200`. Their placement samples 4,096 vote seeds per strand into a partition of
-2,048 query tiles, and, as on every DNA preset, the chains' anchors decide which chain owns each
-stretch of the query. They map with an index built with `lr`'s seeding (`-k21 -s9`) and refuse
-another.
+`asm5`, `asm10` and `asm20` are for an average divergence of about 0.1%, 1% and several percent,
+with minimap2's scoring for its presets of the same names.
 
 #### Find overlaps between long reads (experimental)
 
 ```sh
-flashalign align -x ava-ont reads.fq reads.fq > ovl.paf     # Nanopore read overlap
-flashalign align -x ava-hifi reads.fq reads.fq > ovl.paf    # PacBio HiFi read overlap
+flashalign align -x ava-ont  reads.fq reads.fq > ovlp.paf    # Oxford Nanopore read overlap
+flashalign align -x ava-hifi reads.fq reads.fq > ovlp.paf    # PacBio HiFi read overlap
 ```
 
-`ava-ont` and `ava-hifi` are experimental: they were measured on simulated reads only. They map a
-read set against itself and print every overlap as a map-only PAF record in minimap2's manner:
-mapping quality 0 and the tags `tp:A:S`, `cm:i` and `s1:i`, with columns 10 and 11 approximate.
-Each read is found in the target by its name and left out of its own mapping, so read names must
-be unique. An overlap is printed once, from the shorter of its two reads (minimap2 prints it from the
-read whose name sorts first); `--dual=yes` prints it from each read that finds it.
-Base-level alignment is not available: `-a`, `-c`, `--cs`, `--MD` and the options that only shape
-an alignment are refused, and so are both presets in the Python module.
-
-The seeding is `-k17 -s9` under `ava-ont` and `-k21 -s5` under `ava-hifi`; `flashalign index -x
-ava-ont -k INT -s INT reads.fq reads.faix` builds another, and `flashalign align reads.faix
-reads.fq` maps on it. The whole read set is one index in memory unless it is built in parts with
-`flashalign index -I NUM` ([Multi-part index](#multi-part-index)). On simulated Nanopore reads
-`ava-ont` finds 99.8 to 99.9% of the overlaps of 2 kb or more where minimap2 `ava-ont` finds 99.96 to
-99.99%, printing a third to two thirds of its false pairs.
+The output is PAF without CIGAR, each overlap once, from the shorter read (`--dual=yes` prints it
+from both reads); `-a` and `-c` are refused. Read names must be unique.
+`ava-ont` seeds with `-k17 -s9` and `ava-hifi` with `-k21 -s5`; a read set mapped more than once is
+indexed once with `flashalign index -x ava-ont reads.fq reads.faix`, in parts with `-I` for a large
+set ([Multi-part index](#multi-part-index)). The Python module has no overlap presets.
 
 ### Output
 
@@ -261,10 +249,7 @@ The package needs CPython 3.12 or newer and installs no `flashalign` command.
   minimap2.
 - FlashAlign requires SSE4.1 instructions on x86 CPUs or NEON on ARM CPUs. A build without
   them is not provided.
-- The assembly presets `asm5`, `asm10` and `asm20` are experimental: they are not qualified on
-  intact chromosomes.
-- The overlap presets `ava-ont` and `ava-hifi` are experimental: they were measured on simulated
-  reads only.
+- The assembly and overlap presets are experimental.
 
 ## License
 

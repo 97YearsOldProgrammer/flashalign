@@ -69,11 +69,11 @@ const std::vector<OptionSpec>& specs_table() {
          "min secondary-to-primary score ratio [0.8]", "", kSelection},
         // As in minimap2: -N 5 keeps the best locus and at most five rivals,
         // and -N 0 is --secondary no. On a splice preset up to INT rivals are
-        // realized; on a DNA preset, with secondary output, up to INT
-        // alternatives' chains enter the ownership selection (default 1).
+        // realized; on a DNA preset the -c lane retains at most INT
+        // secondary alignments.
         {OptionId::SpliceMaxLoci, 'N', "", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "retain at most INT secondary alignments (effective with -xsplice); on a DNA preset with --secondary=yes, chain at most INT alternative placements [1]", "", kSelection},
+         "retain at most INT secondary alignments [5]", "", kSelection},
         {OptionId::MinSupport, '\0', "--min-support", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "minimal number of seeds on a vote peak [3]"},

@@ -833,11 +833,9 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         if (opt.rna_rival_min_diff)
           throw UsageError(
               "--rival-min-diff is valid only with splice or splice:hq");
-        // -N n enters up to n alternatives' whole-query chains into the
-        // ownership selection; the DNA default is 1. Without secondary output
-        // the count is left at the default.
-        if (opt.rna_max_loci && opt.output_secondary)
-          opt.dna_alternative_realize_max = *opt.rna_max_loci - 1;
+        // -N n is minimap2's best_n, whatever --secondary says.
+        if (opt.rna_max_loci)
+          opt.dna_secondary_max = *opt.rna_max_loci - 1;
         opt.rna_max_loci.reset();
     }
     // Intron bounds must satisfy 0 < min <= max.

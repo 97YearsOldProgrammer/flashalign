@@ -221,9 +221,12 @@ struct DnaLongOptions {
   // The vote's empty-tile rescue M (kDnaTileRescueOcc); 0 is none. DNA
   // presets install it; not settable.
   int dna_tile_rescue_occ = 0;
-  // -N: the alternatives whose whole-query chains enter the ownership
-  // selection (dna/placement_chaining.cpp).
+  // The alternatives whose whole-query chains enter the ownership selection
+  // (dna/placement_chaining.cpp); not settable.
   int alternative_realize_max = 1;
+  // -N, minimap2's best_n: the -c lane's cap on secondary alignments
+  // (dna/region_realization.cpp).
+  int secondary_max = 5;
 };
 
 // The lane bound: the vote's peaks and the catalogue's candidates per strand.

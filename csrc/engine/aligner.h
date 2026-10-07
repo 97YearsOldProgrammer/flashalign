@@ -787,6 +787,7 @@ private:
     dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
     dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
     dctx.opts.alternative_realize_max = mapping.alternative_realize_max;
+    dctx.opts.secondary_max = mapping.secondary_max;
     dctx.opts.chain_syncmer_s = cfg_.index.syncmer_s;
     dctx.opts.chain_syncmer_downsample = cfg_.index.syncmer_downsample;
     dctx.opts.vote_admission_ratio = mapping.vote_admission_ratio;

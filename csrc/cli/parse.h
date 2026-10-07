@@ -110,9 +110,8 @@ struct AlignOptions {
     // depth (-N + 1), which also sets the realization budget.
     std::optional<int> rna_rival_min_diff;
     std::optional<int> rna_max_loci;
-    // DNA: -N's count of alternatives whose whole-query chains enter the
-    // ownership selection; unset without secondary output.
-    std::optional<int> dna_alternative_realize_max;
+    // DNA: -N, minimap2's best_n, the -c lane's cap on secondary alignments.
+    std::optional<int> dna_secondary_max;
     // --vote-ratio: admit vote peaks by their ratio to the read's best vote,
     // in [0,1]; 0 admits by count. DNA presets only.
     std::optional<double> dna_vote_admission_ratio;

@@ -238,7 +238,7 @@ inline bool is_hifi_preset(std::string_view preset) {
     return profile && profile->kind == DnaPresetKind::HiFi;
 }
 
-// asm5, asm10 and asm20: experimental, not qualified on intact chromosomes.
+// asm5, asm10 and asm20: experimental.
 inline bool is_assembly_preset(std::string_view preset) {
     const auto* profile = find_dna_preset_profile(preset);
     return profile && profile->kind == DnaPresetKind::Asm;
@@ -363,6 +363,8 @@ inline void set_splice_fields(
     mapping.splice_junction_bonus = 9;
     mapping.splice_junction_penalty = 5;
     mapping.splice_inversion_zdrop = 100;
+    // Both strands, the GT-AG motif deciding: minimap2's -ub.
+    mapping.strand_mode = 0;
     mapping.min_intron = 20;
     mapping.max_intron = 200000;
 

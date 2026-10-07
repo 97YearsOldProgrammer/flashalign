@@ -85,13 +85,13 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
   if (!rna_mode && user.rna_max_loci)
     throw std::invalid_argument(
         "rna_max_loci is valid only with an RNA preset");
-  if (rna_mode && user.dna_alternative_realize_max)
+  if (rna_mode && user.dna_secondary_max)
     throw std::invalid_argument(
-        "dna_alternative_realize_max is valid only with a DNA preset");
-  if (user.dna_alternative_realize_max) {
-    if (*user.dna_alternative_realize_max < 1)
+        "dna_secondary_max is valid only with a DNA preset");
+  if (user.dna_secondary_max) {
+    if (*user.dna_secondary_max < 1)
       throw std::invalid_argument("-N must be >= 1");
-    mapping.alternative_realize_max = *user.dna_alternative_realize_max;
+    mapping.secondary_max = *user.dna_secondary_max;
   }
   if (rna_mode) {
     if (user.rna_junction_bed)
@@ -195,17 +195,6 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
         "k=" + std::to_string(resolved_k) +
         " is too large; the maximum is " + std::to_string(::fa::cpu::kFaixMaxK));
   if (request.index.has_index) {
-    // The assembly presets map only with the seeding they were measured on.
-    if (asm_mode &&
-        (request.index.k != seeding.k ||
-         request.index.syncmer_s != seeding.syncmer_s))
-      throw std::invalid_argument(
-          "-x " + request.preset + " requires an index with k=" +
-          std::to_string(seeding.k) + " s=" +
-          std::to_string(seeding.syncmer_s) + " (this index has k=" +
-          std::to_string(request.index.k) + " s=" +
-          std::to_string(request.index.syncmer_s) +
-          "); build one with 'flashalign index -x " + request.preset + "'");
     if (user.k && *user.k != request.index.k) {
       throw std::invalid_argument(
           "explicit -k=" + std::to_string(*user.k) +

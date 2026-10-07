@@ -147,8 +147,7 @@ std::string resolved_config_text(const AlignOptions& opt,
 
   row("mode", is_rna ? "rna_long" : "dna_long", "resolved");
   row("preset", opt.preset, opt.preset_source.c_str());
-  // asm5, asm10 and asm20 are not qualified on intact chromosomes; ava-ont
-  // and ava-hifi are measured on simulated reads only.
+  // asm5, asm10, asm20, ava-ont and ava-hifi are experimental.
   const bool assembly = fa::cpu::api::is_assembly_preset(opt.preset);
   const bool overlap = fa::cpu::api::is_overlap_preset(opt.preset);
   row("preset_status", assembly || overlap ? "experimental" : "supported",
@@ -397,7 +396,7 @@ std::string resolved_config_text(const AlignOptions& opt,
       break;
     }
     row("rna_strand_mode", strand,
-        src(opt.splice_strand.has_value(), "builtin"));
+        src(opt.splice_strand.has_value(), "preset"));
     row("splice_transition", i2s(rna->splice_transition), "preset");
     // -z's second value; as in minimap2, a scalar -z sets it too.
     row("splice_inv_zdrop", i2s(rna->splice_inversion_zdrop),
@@ -416,12 +415,16 @@ std::string resolved_config_text(const AlignOptions& opt,
         "builtin");
     row("dna_rival.pri_ratio", f2s(mapping.pri_ratio),
         src(opt.pri_ratio.has_value(), "builtin"));
-    // -N: the alternatives whose whole-query chains enter the ownership
-    // selection. Only an installed count prints, so the default text and
-    // config_digest stay.
-    if (opt.dna_alternative_realize_max)
-      row("dna_alternative.realize_max", i2s(mapping.alternative_realize_max),
-          "explicit");
+    // Each row only where its stage runs: the cap in the -c lane, the
+    // alternative count in the ownership selection.
+    if (fa::cpu::api::lane_runs_stage(fa::cpu::api::LaneStage::BaseAlignment,
+                                      opt.preset))
+      row("dna_rival.secondary_max", i2s(mapping.secondary_max),
+          src(opt.dna_secondary_max.has_value(), "builtin"));
+    if (fa::cpu::api::lane_runs_stage(fa::cpu::api::LaneStage::Partition,
+                                      opt.preset))
+      row("dna_alternative.realize_max",
+          i2s(mapping.alternative_realize_max), "builtin");
   } else if (rna != nullptr) {
     row("rna_rival.pri_ratio", f2s(rna->rival_pri_ratio),
         src(opt.pri_ratio.has_value(), "builtin"));

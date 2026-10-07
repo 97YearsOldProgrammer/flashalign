@@ -90,9 +90,9 @@ struct UserOverrides {
   // which also sets the realization budget to one fewer.
   std::optional<int> rna_rival_min_diff;
   std::optional<int> rna_max_loci; // >= 1
-  // -N on a DNA preset: the alternatives whose whole-query chains enter the
-  // ownership selection, >= 1.
-  std::optional<int> dna_alternative_realize_max;
+  // -N on a DNA preset, minimap2's best_n: the -c lane's cap on secondary
+  // alignments, >= 1.
+  std::optional<int> dna_secondary_max;
   // --vote-ratio: admit vote peaks by ratio to the read's best vote, in
   // [0,1]; 0 admits by count. DNA presets only.
   std::optional<double> dna_vote_admission_ratio;

@@ -23,9 +23,8 @@ using family_internal::BlockPlan;
 using family_internal::BlockSplit;
 using family_internal::Unit;
 
-// minimap2's best_n (-N), mask_level, mask_len, rank_min_len and rank_frac
-// (options.c).
-constexpr int kBestN = 5;
+// minimap2's mask_level, mask_len, rank_min_len and rank_frac (options.c).
+// Its best_n (-N) is context.opts.secondary_max.
 constexpr float kMaskLevel = 0.5f;
 constexpr int kMaskLen = INT_MAX;
 constexpr int kRankMinLen = 500;
@@ -111,12 +110,12 @@ std::vector<Region> retain_regions(const DnaContext& context,
     if ((static_cast<float>(score) >=
              static_cast<float>(parent_score) * pri_ratio ||
          score + min_diff >= parent_score) &&
-        n_2nd < kBestN) {
+        n_2nd < context.opts.secondary_max) {
       if (!identical_chains(chain, parent)) {
         regions.push_back({role.item, false});
         ++n_2nd;
       }
-    } else if (n_2nd < kBestN && score > min_strand_sc &&
+    } else if (n_2nd < context.opts.secondary_max && score > min_strand_sc &&
                chain.item->reverse != parent.item->reverse) {
       regions.push_back({role.item, false});
       ++n_2nd;
@@ -375,7 +374,7 @@ void select_records(const DnaContext& context, int seed_length,
     } else if ((static_cast<float>(ri.score) >=
                     static_cast<float>(rp.score) * pri_ratio ||
                 ri.score + min_diff >= rp.score) &&
-               n_2nd < kBestN) {
+               n_2nd < context.opts.secondary_max) {
       const AlignResult& a = ri.alignment;
       const AlignResult& b = rp.alignment;
       if (!(a.query_start == b.query_start && a.query_end == b.query_end &&

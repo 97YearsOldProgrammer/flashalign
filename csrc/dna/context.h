@@ -105,9 +105,12 @@ struct ResolvedDnaOptions {
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (inv_local_chain.h).
   bool inversion_probe_local_gate = false;
-  // -N n: the alternatives whose whole-query chains enter the ownership
-  // selection, best first (placement_chaining.cpp).
+  // The alternatives whose whole-query chains enter the ownership selection,
+  // best first (placement_chaining.cpp).
   int alternative_realize_max = 1;
+  // -N, minimap2's best_n: the -c lane's cap on secondary alignments
+  // (region_realization.cpp).
+  int secondary_max = 5;
   // Chain MAPQ own-locus rules, both on: a chained shadow's vote counts for
   // the winner, and the chained shadow window grows with read length. No
   // option sets them.

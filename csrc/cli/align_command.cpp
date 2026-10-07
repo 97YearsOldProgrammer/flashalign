@@ -259,8 +259,8 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.rna_rival_min_diff = *opt.rna_rival_min_diff;
   if (opt.rna_max_loci)
     u.rna_max_loci = *opt.rna_max_loci;
-  if (opt.dna_alternative_realize_max)
-    u.dna_alternative_realize_max = *opt.dna_alternative_realize_max;
+  if (opt.dna_secondary_max)
+    u.dna_secondary_max = *opt.dna_secondary_max;
   // "auto" (-u b) maps to Unknown, the preset default.
   if (opt.splice_strand) {
     u.rna_strand = static_cast<int>(fa::cpu::lr::rna::parse_strand_mode(
