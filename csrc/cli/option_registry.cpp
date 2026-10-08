@@ -79,7 +79,7 @@ const std::vector<OptionSpec>& specs_table() {
         // secondary alignments.
         {OptionId::SpliceMaxLoci, 'N', "", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "retain at most INT secondary alignments [5]", "", kSelection},
+         "retain at most INT secondary alignments [1; splice 5]", "", kSelection},
         {OptionId::MinSupport, '\0', "--min-support", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "minimal number of seeds on a vote peak [3]"},

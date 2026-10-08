@@ -110,7 +110,7 @@ struct ResolvedDnaOptions {
   int alternative_realize_max = 1;
   // -N, minimap2's best_n: the -c lane's cap on secondary alignments
   // (region_realization.cpp).
-  int secondary_max = 5;
+  int secondary_max = 1;
   // Chain MAPQ own-locus rules, both on: a chained shadow's vote counts for
   // the winner, and the chained shadow window grows with read length. No
   // option sets them.
