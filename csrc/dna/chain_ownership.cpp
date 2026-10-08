@@ -19,7 +19,6 @@
 #include <map>
 #include <numeric>
 #include <tuple>
-#include <unordered_map>
 #include <utility>
 
 namespace fa::cpu::lr {
@@ -182,7 +181,29 @@ DnaOwnershipSelection select_chain_owners(
     bool is_owner = false;
   };
   std::vector<Holder> holder_of;
-  std::unordered_map<AnchorKey, std::vector<int>, AnchorKeyHash> holders;
+  // The held anchors: an open-addressing table sized once for every chain
+  // but the last, each key heading a list of holder slots in `links`.
+  struct Bucket {
+    AnchorKey key{};
+    int head = -1;  // the key's last link; -1 when empty
+  };
+  struct Link {
+    int slot;
+    int next;
+  };
+  int bound = -units[static_cast<std::size_t>(pool.back())].n;
+  for (const Unit& unit : units) bound += unit.n;
+  std::size_t capacity = 1;
+  while (capacity < 2 * static_cast<std::size_t>(bound)) capacity <<= 1;
+  std::vector<Bucket> buckets(bound > 0 ? capacity : 0);
+  std::vector<Link> links;
+  links.reserve(static_cast<std::size_t>(bound));
+  const auto bucket = [&](const AnchorKey& key) -> Bucket& {
+    std::size_t b = AnchorKeyHash{}(key) & (capacity - 1);
+    while (buckets[b].head >= 0 && !(buckets[b].key == key))
+      b = (b + 1) & (capacity - 1);
+    return buckets[b];
+  };
   std::vector<int> shared;
   std::vector<int> touched;
   const auto anchor_key = [&](const Unit& unit, int c) {
@@ -193,12 +214,17 @@ DnaOwnershipSelection select_chain_owners(
     return AnchorKey{item.contig, item.reverse ? 1 : 0, anchor.q, anchor.r};
   };
   const auto hold = [&](int u, int owner, bool is_owner) {
+    if (u == pool.back()) return;  // no chain after the last looks it up
     const int slot = static_cast<int>(holder_of.size());
     holder_of.push_back({u, owner, is_owner});
     shared.push_back(0);
-    for (int c = 0; c < units[static_cast<std::size_t>(u)].n; ++c)
-      holders[anchor_key(units[static_cast<std::size_t>(u)], c)].push_back(
-          slot);
+    for (int c = 0; c < units[static_cast<std::size_t>(u)].n; ++c) {
+      const AnchorKey key = anchor_key(units[static_cast<std::size_t>(u)], c);
+      Bucket& b = bucket(key);
+      b.key = key;
+      links.push_back({slot, b.head});
+      b.head = static_cast<int>(links.size()) - 1;
+    }
   };
   // The first holder (lowest slot) passing `accept` with half the anchors of
   // the smaller shared, or -1.
@@ -217,13 +243,13 @@ DnaOwnershipSelection select_chain_owners(
   for (const int u : pool) {
     const Unit& unit = units[static_cast<std::size_t>(u)];
     touched.clear();
-    for (int c = 0; c < unit.n; ++c) {
-      const auto it = holders.find(anchor_key(unit, c));
-      if (it == holders.end()) continue;
-      for (const int slot : it->second)
+    for (int c = 0; c < unit.n && !links.empty(); ++c)
+      for (int l = bucket(anchor_key(unit, c)).head; l >= 0;
+           l = links[static_cast<std::size_t>(l)].next) {
+        const int slot = links[static_cast<std::size_t>(l)].slot;
         if (shared[static_cast<std::size_t>(slot)]++ == 0)
           touched.push_back(slot);
-    }
+      }
     const auto settle = [&] {
       for (const int slot : touched) shared[static_cast<std::size_t>(slot)] = 0;
     };
