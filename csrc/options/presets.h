@@ -195,7 +195,6 @@ inline void set_dna_long_platform_fields(
         common.min_support = profile.overlap.min_support;
       mapping.dual = profile.overlap.dual;
     }
-    mapping.dna_tandem_window = lr::kDnaTandemWindow;
     // minimap2's min_ksw_len, the piece length of its gap-filling loop.
     mapping.cigar_dp_min_ksw_len = lr::kDnaMinKswLen;
     const bool hifi_row = profile.kind == DnaPresetKind::HiFi;
@@ -343,7 +342,6 @@ inline void set_splice_fields(
     // Clear DNA-only settings inherited from the DNA preset. RNA never reads
     // them, but the resolved configuration should not show them.
     mapping.base.vote_admission_ratio = 0.0;
-    mapping.base.dna_tandem_window = 0;
     mapping.base.cigar_dp_min_ksw_len = 0;
     mapping.base.chain_mapq_hifi_margin = false;
     mapping.base.inversion_probe_local_gate = false;

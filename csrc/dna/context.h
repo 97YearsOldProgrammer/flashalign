@@ -45,10 +45,6 @@ struct ResolvedDnaOptions {
   // predecessor search instead of the linear scan. Both are exact; 0 always
   // uses the diagonal search, -1 never does.
   int dna_dense_diag_min_runs = 2048;
-  // Tandem half-window W in bp: an anchor whose key has another posting on
-  // the same contig within W is flagged ANCHOR_TANDEM and is never a
-  // realization corner. 0 = off.
-  int dna_tandem_window = 1000;
   // Occurrence gate of the whole-query exact pass (--max-chain-occ, by
   // default the vote's resolved cap); 0 = off.
   int dna_pool_gate_occ = 0;

@@ -725,9 +725,6 @@ private:
     static_assert(::fa::cpu::lr::ResolvedDnaOptions{}.dna_dense_diag_min_runs ==
                       ::fa::cpu::lr::kDnaDenseDiagMinRuns,
                   "dna/context.h dna_dense_diag_min_runs mirror drifted");
-    static_assert(::fa::cpu::lr::ResolvedDnaOptions{}.dna_tandem_window ==
-                      ::fa::cpu::lr::kDnaTandemWindow,
-                  "dna/context.h dna_tandem_window mirror drifted");
     static_assert(::fa::cpu::lr::ResolvedDnaOptions{}.cigar_dp_min_ksw_len ==
                       ::fa::cpu::lr::kDnaMinKswLen,
                   "dna/context.h cigar_dp_min_ksw_len mirror drifted");
@@ -749,7 +746,6 @@ private:
     dctx.opts.chain_band = mapping.chain_band;
     dctx.opts.screen_diag_band = mapping.screen_diag_band;
     dctx.opts.dna_dense_diag_min_runs = mapping.dna_dense_diag_min_runs;
-    dctx.opts.dna_tandem_window = mapping.dna_tandem_window;
     dctx.opts.dna_pool_gate_occ = chain_occ.pool_gate_occ;
     dctx.opts.cigar_local_global_occ = chain_occ.global_occ;
     dctx.opts.k = cfg_.index.k;

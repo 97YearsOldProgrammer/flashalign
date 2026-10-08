@@ -357,7 +357,6 @@ std::string resolved_config_text(const AlignOptions& opt,
 
   if (!is_rna) {
     row("dense_diag_min_runs", i2s(mapping.dna_dense_diag_min_runs), "builtin");
-    row("tandem_window", i2s(mapping.dna_tandem_window), "builtin");
     row("dp_min_ksw_len", i2s(mapping.cigar_dp_min_ksw_len), "builtin");
     // Unless --max-chain-occ sets it, the pool gate is max_seed_occ, printed
     // by name while that row is still a rule.

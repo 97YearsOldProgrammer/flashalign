@@ -27,12 +27,16 @@ struct RetainedSeedRef {
   // (options/dna_profile.h kDnaTileRescueOcc), or its fine twin, which
   // placement's harvest gate admits too.
   bool rescued = false;
+  // minimap2's seed tandem: a seed whose query neighbour has the same key (seed.c), on every hit.
+  bool tandem = false;
 };
 
 class RetainedSeedDensity {
  public:
   // A rescued vote seed's fine twin is the fine seed of its strand with its
-  // read_pos and key: both come from the strand's one seed stream.
+  // read_pos and key: both come from the strand's one seed stream. A fine seed
+  // is tandem by its neighbours in its strand's whole fine stream, a vote seed
+  // as its fine twin.
   bool build(const SeedIndex& index,
              const std::vector<ChainWindowRetainedSeed>* forward,
              const std::vector<ChainWindowRetainedSeed>* reverse,

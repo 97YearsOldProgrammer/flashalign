@@ -83,31 +83,6 @@ inline bool skips_own_diagonal(const DnaContext& context, int contig,
   return !reverse && contig == context.self_contig;
 }
 
-// Whether the posting at `at` of its key's sorted posting list [first, last),
-// at `position`, has a neighbour in the list within `tandem_window` bases that
-// lies in [low, high) (<= 0 disables). Such a seed pins one copy of a tandem
-// array, chosen by accident, so its anchor is flagged ANCHOR_TANDEM and never
-// becomes a realization corner. The raw list is used: a neighbour that fails
-// the geometry tests still shows the key repeats nearby. `position_of(at)` is
-// a posting's position in the coordinates of `position`, `low` and `high`.
-template <class Position, class At, class PositionOf>
-inline bool posting_is_tandem(At at, At first, At last, Position position,
-                              const PositionOf& position_of, Position low,
-                              Position high, int tandem_window) {
-  if (tandem_window <= 0) return false;
-  const Position window = static_cast<Position>(tandem_window);
-  // Written to avoid unsigned wrap when `position` < `window`.
-  if (at > first) {
-    const Position previous = position_of(at - 1);
-    if (previous >= low && previous + window >= position) return true;
-  }
-  if (at + 1 < last) {
-    const Position next = position_of(at + 1);
-    if (next < high && next <= position + window) return true;
-  }
-  return false;
-}
-
 // The harvest's occurrence gate. A seed whose key occurs more than `cap` times
 // genome-wide gives no anchor unless it is rescued (RetainedSeedRef::rescued).
 // The screening pass always gates, at the global cap; the whole-query pass
@@ -167,8 +142,8 @@ inline DnaPlacementChainStatus contig_lane_refusal(
 // and the orientation test for `reverse_lane`; no base is read.
 // `chromosome_base` is the contig's offset in the flattened reference and
 // `chromosome_length` its length, so postings off the contig are dropped. An
-// anchor is flagged ANCHOR_TANDEM when posting_is_tandem holds over the
-// contig. `skip_own_diagonal` is skips_own_diagonal's for the contig and lane.
+// anchor is flagged ANCHOR_TANDEM when its seed is (RetainedSeedRef::tandem).
+// `skip_own_diagonal` is skips_own_diagonal's for the contig and lane.
 // `query_length` bounds the query span.
 // `line_peak`, when not null, is a peak whose line passed its gate: the band is
 // then centred on that line at the seed's query position, not on
@@ -182,7 +157,6 @@ void append_interval_anchors(
     const VotePeak* line_peak,
     int seed_length,
     int diagonal_band,
-    int tandem_window,
     bool reverse_lane,
     bool skip_own_diagonal,
     int query_length,

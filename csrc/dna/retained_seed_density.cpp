@@ -182,6 +182,8 @@ bool RetainedSeedDensity::build(
     std::sort(rescued[strand].begin(), rescued[strand].end());
   }
 
+  // Per strand, the tandem fine seeds by (read_pos, key).
+  std::vector<std::pair<int, std::uint64_t>> tandem_seeds[2];
   auto ingest_fine = [&](const std::vector<QuerySeed>* input,
                          const std::vector<std::uint32_t>* slots, int strand,
                          std::vector<RetainedSeedRef>& output) {
@@ -225,13 +227,26 @@ bool RetainedSeedDensity::build(
           !twins.empty() &&
           std::binary_search(twins.begin(), twins.end(),
                              std::make_pair(seed.read_pos, seed.key));
-      output.push_back(RetainedSeedRef{seed, entry_index, twin});
+      const bool tandem = query_seed_has_tandem_neighbor(*input, position);
+      output.push_back(RetainedSeedRef{seed, entry_index, twin, tandem});
       if (twin) entries_[entry_index].rescued = true;
+      if (tandem) tandem_seeds[strand].emplace_back(seed.read_pos, seed.key);
     }
   };
   ingest_fine(fine_forward, fine_forward_slots, 0, fine_forward_);
   ingest_fine(fine_reverse, fine_reverse_slots, 1, fine_reverse_);
   if (!valid) return false;
+
+  std::vector<RetainedSeedRef>* vote_refs[2] = {&forward_, &reverse_};
+  for (int strand = 0; strand < 2; ++strand) {
+    std::vector<std::pair<int, std::uint64_t>>& tandem = tandem_seeds[strand];
+    if (tandem.empty()) continue;
+    std::sort(tandem.begin(), tandem.end());
+    for (RetainedSeedRef& ref : *vote_refs[strand])
+      ref.tandem = std::binary_search(
+          tandem.begin(), tandem.end(),
+          std::make_pair(ref.seed.read_pos, ref.seed.key));
+  }
 
   return true;
 }

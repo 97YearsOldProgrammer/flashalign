@@ -272,7 +272,6 @@ void build_target_pool(const DnaContext& context,
       static_cast<int>(context.ref.contig_length(static_cast<int>(contig)));
   const int interval_pad =
       context.opts.cigar_local_interval_anchor_interval_pad;
-  const int tandem_window = context.opts.dna_tandem_window;
   const internal::PoolGate gate =
       internal::pool_gate(context, /*whole_query=*/true);
   const bool skip_own_diagonal =
@@ -357,17 +356,11 @@ void build_target_pool(const DnaContext& context,
         admit_high = std::max(admit_high, member.high);
       }
       if (admit_low > admit_high) continue;
-      // Over the union of the admitting members' windows.
-      const bool tandem = internal::posting_is_tandem(
-          at, postings + hit->begin, postings + hit->end, reference_position,
-          [](const PackedRefPos* posting) -> std::int64_t {
-            return packed_ref_local(*posting);
-          },
-          admit_low, admit_high, tandem_window);
       anchors.push_back(
           {static_cast<std::int32_t>(reference_position), query_position,
            seed_length, static_cast<std::int32_t>(anchors.size()),
-           tandem ? static_cast<std::uint32_t>(chaining::ANCHOR_TANDEM) : 0u});
+           seed.tandem ? static_cast<std::uint32_t>(chaining::ANCHOR_TANDEM)
+                       : 0u});
     }
   }
 }

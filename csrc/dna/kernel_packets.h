@@ -34,12 +34,10 @@
 // at the first retained anchor where both spans since the previous corner reach
 // min_ksw_len. Each piece is one fill, like a seam.
 //
-// ANCHOR_TANDEM marks an anchor whose key has another posting on the same
-// contig within dna_tandem_window. In a tandem array a seed may sit on the
-// wrong copy and a corner would pin the path there, so flagged interior anchors
-// are skipped and one fill crosses the array. Unlike minimap2's query-side
-// MM_SEED_TANDEM this flag is reference-side and dense: a read lying inside an
-// array becomes one stretch and one fill.
+// ANCHOR_TANDEM marks every anchor of a seed whose query neighbour has the
+// same key, minimap2's MM_SEED_TANDEM. In a tandem array such a seed may sit on
+// the wrong copy and a corner would pin the path there, so flagged interior
+// anchors are skipped and one fill crosses the run.
 //
 // A Z-drop in a fill splits the block at the fill's maximum cell: the prefix
 // is kept and the anchors past the cut form a new segment while at least

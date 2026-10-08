@@ -23,14 +23,6 @@ inline constexpr double kDnaProductionVoteAdmissionRatio = 0.25;
 // pools. 0 sends every pool to branch-and-bound, -1 every pool to the scan.
 inline constexpr int kDnaDenseDiagMinRuns = 2048;
 
-// Tandem release half-window W, in bp. A DNA anchor whose seed key has another
-// posting on the same chromosome within +-W is flagged ANCHOR_TANDEM
-// (dna/placement_chaining.cpp append_interval_anchors), and the realizer skips
-// it as a corner, as minimap2 skips MM_SEED_TANDEM seeds. Otherwise an anchor
-// on another copy of a tandem array would pin the DP to the wrong copy.
-// 0 disables the rule.
-inline constexpr int kDnaTandemWindow = 1000;
-
 // minimap2's min_ksw_len, in bases: the piece length of its gap-filling loop
 // over unverified material, which dna/ordered_anchor_path.h
 // plan_verified_geometry reproduces. A piece ends at the first retained anchor
@@ -205,8 +197,6 @@ struct DnaLongOptions {
   int cigar_local_global_occ = 200;
   // Dense-chain search crossover (kDnaDenseDiagMinRuns); not settable.
   int dna_dense_diag_min_runs = kDnaDenseDiagMinRuns;
-  // Tandem release half-window (kDnaTandemWindow); 0 on RNA presets.
-  int dna_tandem_window = kDnaTandemWindow;
   // HiFi only (dna/chain_mapq.h): when the rival that owns dp2 has fewer
   // chain anchors than the winner and no other rival is within 5 % of it, MAPQ is
   // BWA-MEM's margin Phred on dp_max - dp_max2. The full guard is in

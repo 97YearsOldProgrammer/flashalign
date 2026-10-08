@@ -136,14 +136,11 @@ void append_interval_anchors(
     const VotePeak* line_peak,
     int seed_length,
     int diagonal_band,
-    int tandem_window,
     bool reverse_lane,
     bool skip_own_diagonal,
     int query_length,
     std::vector<chaining::Anchor>& anchors,
     DnaPlacementCandidateChain& record) {
-  const std::uint64_t chromosome_end =
-      chromosome_base + static_cast<std::uint64_t>(chromosome_length);
   // The winner's band follows its line at this seed.
   const std::int64_t line_diagonal =
       line_peak != nullptr
@@ -191,12 +188,7 @@ void append_interval_anchors(
       ++record.filtered_hits;
       continue;
     }
-    const bool tandem = posting_is_tandem(
-        posting, 0u, interval.count, global,
-        [&interval](std::uint32_t at) -> std::uint64_t {
-          return interval.positions[at];
-        },
-        chromosome_base, chromosome_end, tandem_window);
+    const bool tandem = seed.tandem;
     const chaining::Anchor anchor{
         reference_position, query_position, seed_length,
         static_cast<std::int32_t>(anchors.size()),
@@ -448,7 +440,7 @@ bool chain_candidate(
         internal::append_interval_anchors(
             interval, seed, chromosome_base, chromosome_length,
             static_cast<int>(expected), line_peak, seed_length, diagonal_band,
-            context.opts.dna_tandem_window, reverse, skip_own_diagonal,
+            reverse, skip_own_diagonal,
             family.read_length, sparse, record);
       }
     }
@@ -472,7 +464,7 @@ bool chain_candidate(
       internal::append_interval_anchors(
           item.interval, item.seed, chromosome_base, chromosome_length,
           static_cast<int>(expected), line_peak, seed_length, diagonal_band,
-          context.opts.dna_tandem_window, reverse, skip_own_diagonal,
+          reverse, skip_own_diagonal,
           family.read_length, anchors, record);
       record.rescued_anchors += anchors.size() - before;
     }
