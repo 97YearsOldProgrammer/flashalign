@@ -18,6 +18,7 @@ struct RetainedSeedDensityEntry {
   KmerPostingView view;
   // Some RetainedSeedRef of this key is rescued.
   bool rescued = false;
+  bool retained = false;
 };
 
 struct RetainedSeedRef {
@@ -58,7 +59,7 @@ class RetainedSeedDensity {
   // Frees buffers a much longer read left; build() reuses the rest.
   void release_excess_for_read(std::size_t read_len);
 
-  // Entries, one per distinct key; every RetainedSeedRef::entry is below it.
+  // Entries use capture IDs when available; absent views have no refs.
   std::size_t entry_count() const { return entries_.size(); }
 
   // The genome-wide occurrence of an entry's key: the global_count of every
@@ -101,11 +102,6 @@ class RetainedSeedDensity {
 
  private:
   std::vector<RetainedSeedDensityEntry> entries_;
-  // Entry index per lookup-cache slot for the slot-keyed build (-1: none),
-  // -1 everywhere between builds: the next build resets the slots the last
-  // one set, listed in remembered_slots_.
-  std::vector<std::int32_t> entry_of_slot_;
-  std::vector<std::uint32_t> remembered_slots_;
   // The forward fine seeds' entries by position, -1 where skipped.
   std::vector<std::int64_t> fine_entry_;
   std::vector<RetainedSeedRef> forward_;

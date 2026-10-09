@@ -82,16 +82,15 @@ struct ChainWindowPeakScratch {
 };
 
 struct ChainSeedLookupCache {
+    // Hash buckets hold dense entry IDs; captured IDs survive a rehash.
+    std::vector<uint32_t> buckets;
+    std::vector<uint32_t> stamps;
     std::vector<uint64_t> keys;
     std::vector<KmerPostingView> views;
-    std::vector<uint32_t> stamps;
     size_t mask = 0;
     size_t used = 0;
     uint32_t epoch = 1;
-    // warm()'s per-position slots when the caller wants views but not slots,
-    // and the old-slot -> new-slot map of a rehash inside warm().
     std::vector<uint32_t> warm_slots_scratch;
-    std::vector<uint32_t> rehash_map_scratch;
 
     static size_t next_power_of_two(size_t x) {
         size_t cap = 1;
@@ -101,23 +100,26 @@ struct ChainSeedLookupCache {
 
     void allocate(size_t cap) {
         cap = std::max<size_t>(16, next_power_of_two(cap));
-        keys.assign(cap, kEmptyKmerKey);
-        views.assign(cap, KmerPostingView{});
+        buckets.resize(cap);
         stamps.assign(cap, 0);
+        keys.clear();
+        views.clear();
+        if (keys.capacity() > cap / 2) {
+            std::vector<uint64_t>().swap(keys);
+            std::vector<KmerPostingView>().swap(views);
+        }
+        keys.reserve(cap / 2);
+        views.reserve(cap / 2);
         mask = cap - 1;
         used = 0;
         epoch = 1;
     }
 
     void reset(size_t expected_entries) {
-        const size_t target =
-            std::max<size_t>(16, expected_entries * 2 + 1);
+        const size_t target = std::max<size_t>(16, expected_entries * 2 + 1);
         const size_t target_cap = next_power_of_two(target);
-        const size_t max_retain =
-            std::max<size_t>(1024, target_cap * 8);
-        if (!keys.empty() && keys.size() > max_retain) {
-            allocate(target);
-        } else if (keys.size() < target || keys.empty()) {
+        const size_t max_retain = std::max<size_t>(1024, target_cap * 8);
+        if (buckets.size() > max_retain || buckets.size() < target) {
             allocate(target);
         } else {
             ++epoch;
@@ -125,95 +127,64 @@ struct ChainSeedLookupCache {
                 std::fill(stamps.begin(), stamps.end(), 0);
                 epoch = 1;
             }
+            keys.clear();
+            views.clear();
             used = 0;
         }
     }
 
-    // `old_to_new`, when given, receives the new slot of every old slot that
-    // held an entry (UINT32_MAX elsewhere), so a caller holding slot numbers
-    // can translate them without probing the table again.
-    void rehash(size_t new_cap, std::vector<uint32_t>* old_to_new = nullptr) {
-        struct Moved {
-            uint64_t key;
-            KmerPostingView view;
-            uint32_t old_slot;
-        };
-        std::vector<Moved> entries;
-        entries.reserve(used);
-        for (size_t i = 0; i < keys.size(); ++i) {
-            if (stamps[i] == epoch) {
-                entries.push_back({keys[i], views[i], static_cast<uint32_t>(i)});
-            }
-        }
-        if (old_to_new != nullptr)
-            old_to_new->assign(keys.size(), UINT32_MAX);
-        allocate(new_cap);
-        for (const auto& entry : entries) {
-            size_t slot =
-                static_cast<size_t>(fa::cpu::detail::splitmix64(entry.key)) &
-                mask;
+    void rehash(size_t new_cap) {
+        const size_t cap = std::max<size_t>(16, next_power_of_two(new_cap));
+        buckets.resize(cap);
+        stamps.assign(cap, 0);
+        mask = cap - 1;
+        epoch = 1;
+        for (size_t entry = 0; entry < used; ++entry) {
+            size_t slot = static_cast<size_t>(
+                fa::cpu::detail::splitmix64(keys[entry])) & mask;
             while (stamps[slot] == epoch) slot = (slot + 1) & mask;
             stamps[slot] = epoch;
-            keys[slot] = entry.key;
-            views[slot] = entry.view;
-            ++used;
-            if (old_to_new != nullptr)
-                (*old_to_new)[entry.old_slot] = static_cast<uint32_t>(slot);
+            buckets[slot] = static_cast<uint32_t>(entry);
         }
     }
 
     struct ProbeResult {
-        size_t slot;  // hit: matching slot; miss: first empty slot (insert point)
+        size_t slot;
         bool hit;
     };
 
-    // One open-addressed walk: the matching slot on a hit, or the first empty slot (the
-    // insertion point) on a miss.
     ProbeResult probe(uint64_t key) {
-        if (keys.empty()) allocate(16);
-        size_t slot =
-            static_cast<size_t>(fa::cpu::detail::splitmix64(key)) & mask;
+        if (buckets.empty()) allocate(16);
+        size_t slot = static_cast<size_t>(fa::cpu::detail::splitmix64(key)) & mask;
         for (;;) {
             if (stamps[slot] != epoch) return {slot, false};
-            if (keys[slot] == key) return {slot, true};
+            if (keys[buckets[slot]] == key) return {slot, true};
             slot = (slot + 1) & mask;
         }
     }
 
     KmerPostingView lookup(const IndexView& index, uint64_t key) {
         ProbeResult p = probe(key);
-        if (p.hit) {
-            return views[p.slot];
-        }
+        if (p.hit) return views[buckets[p.slot]];
         KmerPostingView view = index.lookup(key);
-
-        // Reuse the empty slot probe() found; only a table grow forces a re-probe.
         size_t slot = p.slot;
-        if ((used + 1) * 2 >= keys.size()) {
-            rehash(keys.size() * 2);
-            slot = static_cast<size_t>(
-                       fa::cpu::detail::splitmix64(key)) & mask;
-            while (stamps[slot] == epoch) slot = (slot + 1) & mask;
+        if ((used + 1) * 2 >= buckets.size()) {
+            rehash(buckets.size() * 2);
+            slot = probe(key).slot;
         }
         stamps[slot] = epoch;
-        keys[slot] = key;
-        views[slot] = view;
+        buckets[slot] = static_cast<uint32_t>(used);
+        keys.push_back(key);
+        views.push_back(view);
         ++used;
         return view;
     }
 
-    // Batched cache warm-up: the same end state as calling lookup() for every seed key in
-    // order, but index lookups are deferred into batches whose memory loads overlap. A
-    // deferred key is inserted into its slot at once, so repeats hit and the grow trigger
-    // fires after the same keys; pending lookups are resolved before any rehash and at the
-    // end, so no placeholder view survives. `out_views` / `out_slots`, when given, receive
-    // per seed position the cached view and its slot, valid when warm() returns.
+    // Resolve misses in batches, then return each position's view and dense ID.
     void warm(const IndexView& index, const QuerySeed* seeds, size_t n,
               KmerPostingView* out_views = nullptr,
               uint32_t* out_slots = nullptr) {
         if (seeds == nullptr || n == 0) return;
-        // Misses go to the batched lookup in runs of kWarmPending, long enough for its
-        // prefetch pipeline to fill.
         constexpr size_t kWarmPending = 256;
         uint64_t pending_keys[kWarmPending];
         size_t pending_slots[kWarmPending];
@@ -222,13 +193,10 @@ struct ChainSeedLookupCache {
         auto flush = [&]() {
             if (pending == 0) return;
             index.lookup_batch(pending_keys, pending, pending_views);
-            for (size_t i = 0; i < pending; ++i) {
+            for (size_t i = 0; i < pending; ++i)
                 views[pending_slots[i]] = pending_views[i];
-            }
             pending = 0;
         };
-        // Positional views are copied from the slots after the final flush, so no
-        // unresolved placeholder is copied.
         uint32_t* slots = out_slots;
         if (slots == nullptr && out_views != nullptr) {
             warm_slots_scratch.resize(n);
@@ -238,29 +206,24 @@ struct ChainSeedLookupCache {
             const uint64_t key = seeds[i].key;
             ProbeResult p = probe(key);
             if (p.hit) {
-                if (slots != nullptr) slots[i] = static_cast<uint32_t>(p.slot);
+                if (slots != nullptr) slots[i] = buckets[p.slot];
                 continue;
             }
             size_t slot = p.slot;
-            if ((used + 1) * 2 >= keys.size()) {
-                flush();  // resolve placeholders before rehash() moves slots
-                rehash(keys.size() * 2,
-                       slots != nullptr ? &rehash_map_scratch : nullptr);
-                slot = static_cast<size_t>(
-                           fa::cpu::detail::splitmix64(key)) & mask;
-                while (stamps[slot] == epoch) slot = (slot + 1) & mask;
-                // Translate the slots recorded so far through the rehash's map.
-                if (slots != nullptr)
-                    for (size_t j = 0; j < i; ++j)
-                        slots[j] = rehash_map_scratch[slots[j]];
+            if ((used + 1) * 2 >= buckets.size()) {
+                flush();
+                rehash(buckets.size() * 2);
+                slot = probe(key).slot;
             }
+            const auto entry = static_cast<uint32_t>(used);
             stamps[slot] = epoch;
-            keys[slot] = key;
-            views[slot] = KmerPostingView{};
+            buckets[slot] = entry;
+            keys.push_back(key);
+            views.push_back(KmerPostingView{});
             ++used;
-            if (slots != nullptr) slots[i] = static_cast<uint32_t>(slot);
+            if (slots != nullptr) slots[i] = entry;
             pending_keys[pending] = key;
-            pending_slots[pending] = slot;
+            pending_slots[pending] = entry;
             ++pending;
             if (pending == kWarmPending) flush();
         }
@@ -269,49 +232,38 @@ struct ChainSeedLookupCache {
             for (size_t i = 0; i < n; ++i) out_views[i] = views[slots[i]];
     }
 
-    // The slot holding `key`, or npos. Const: nothing is resolved.
     static constexpr size_t npos = static_cast<size_t>(-1);
     size_t slot_of(uint64_t key) const {
-        if (keys.empty()) return npos;
-        size_t slot =
-            static_cast<size_t>(fa::cpu::detail::splitmix64(key)) & mask;
+        if (buckets.empty()) return npos;
+        size_t slot = static_cast<size_t>(fa::cpu::detail::splitmix64(key)) & mask;
         for (;;) {
             if (stamps[slot] != epoch) return npos;
-            if (keys[slot] == key) return slot;
+            const uint32_t entry = buckets[slot];
+            if (keys[entry] == key) return entry;
             slot = (slot + 1) & mask;
         }
     }
-    // True when `slot` currently holds `key`; validates a slot recorded earlier.
-    bool slot_holds(size_t slot, uint64_t key) const {
-        return slot < keys.size() && stamps[slot] == epoch && keys[slot] == key;
+    bool slot_holds(size_t entry, uint64_t key) const {
+        return entry < used && keys[entry] == key;
     }
-    const KmerPostingView& view_at(size_t slot) const { return views[slot]; }
-    size_t capacity() const { return keys.size(); }
-    // Prefetches what slot_holds and view_at read of `slot`.
-    void prefetch_slot(size_t slot) const {
-        if (slot >= keys.size()) return;
-        __builtin_prefetch(&keys[slot]);
-        __builtin_prefetch(&stamps[slot]);
-        const char* view = reinterpret_cast<const char*>(&views[slot]);
+    const KmerPostingView& view_at(size_t entry) const { return views[entry]; }
+    uint64_t key_at(size_t entry) const { return keys[entry]; }
+    size_t entry_count() const { return used; }
+    size_t capacity() const { return buckets.size(); }
+    void prefetch_slot(size_t entry) const {
+        if (entry >= used) return;
+        __builtin_prefetch(&keys[entry]);
+        const char* view = reinterpret_cast<const char*>(&views[entry]);
         __builtin_prefetch(view);
         __builtin_prefetch(view + sizeof(KmerPostingView) - 1);
     }
 
-    // Read-only access: unlike lookup(), never resolves a missing key or mutates the cache.
     bool find_cached_view(uint64_t key, KmerPostingView& view) const {
-        if (keys.empty()) return false;
-        size_t slot =
-            static_cast<size_t>(fa::cpu::detail::splitmix64(key)) & mask;
-        for (;;) {
-            if (stamps[slot] != epoch) return false;
-            if (keys[slot] == key) {
-                view = views[slot];
-                return true;
-            }
-            slot = (slot + 1) & mask;
-        }
+        const size_t entry = slot_of(key);
+        if (entry == npos) return false;
+        view = views[entry];
+        return true;
     }
-
 };
 
 struct ChainAnchorScratch {

@@ -77,8 +77,6 @@ bool RetainedSeedDensity::build(
   reverse_.clear();
   fine_forward_.clear();
   fine_reverse_.clear();
-  for (const std::uint32_t slot : remembered_slots_) entry_of_slot_[slot] = -1;
-  remembered_slots_.clear();
   validated_offsets_ = nullptr;
   validated_chrom_count_ = 0;
   if (index.empty() ||
@@ -96,10 +94,7 @@ bool RetainedSeedDensity::build(
   forward_.reserve(forward_count);
   reverse_.reserve(reverse_count);
 
-  // The key -> entry map. When the capture handed over each fine seed's cache
-  // slot, the cache's slot space is the map: one int32 per slot and no second
-  // hash table. A slot is trusted only after checking it still holds its key.
-  // Otherwise a flat map is used; both paths produce the same entries.
+  // Captured IDs already number the keys. Other callers use the flat map.
   const bool slot_keyed =
       lookup_cache != nullptr && fine_forward_slots != nullptr &&
       fine_reverse_slots != nullptr && fine_forward != nullptr &&
@@ -110,9 +105,10 @@ bool RetainedSeedDensity::build(
   // On the slot-keyed path `by_key` holds only keys the cache does not.
   FlatInt64Map<std::uint32_t> by_key;
   if (slot_keyed) {
-    if (entry_of_slot_.size() != lookup_cache->capacity())
-      entry_of_slot_.assign(lookup_cache->capacity(), -1);
-    by_key.reserve(16);
+    entries_.reserve(lookup_cache->entry_count() + input_seed_records);
+    for (std::size_t entry = 0; entry < lookup_cache->entry_count(); ++entry)
+      entries_.push_back(RetainedSeedDensityEntry{
+          lookup_cache->key_at(entry), lookup_cache->view_at(entry)});
   } else {
     by_key.reserve(input_seed_records + 1);
   }
@@ -125,19 +121,16 @@ bool RetainedSeedDensity::build(
       std::size_t slot = slot_hint;
       if (!lookup_cache->slot_holds(slot, key)) slot = lookup_cache->slot_of(key);
       slot_out = slot;
-      if (slot != ChainSeedLookupCache::npos) return entry_of_slot_[slot];
+      if (slot != ChainSeedLookupCache::npos)
+        return static_cast<std::int32_t>(slot);
     }
     auto found = by_key.find(static_cast<std::int64_t>(key));
     return found == by_key.end() ? -1 : static_cast<std::int32_t>(found->second);
   };
   const auto remember = [&](std::uint64_t key, std::size_t slot,
                             std::uint32_t entry_index) {
-    if (slot_keyed && slot != ChainSeedLookupCache::npos) {
-      entry_of_slot_[slot] = static_cast<std::int32_t>(entry_index);
-      remembered_slots_.push_back(static_cast<std::uint32_t>(slot));
-    } else {
+    if (!slot_keyed || slot == ChainSeedLookupCache::npos)
       by_key[static_cast<std::int64_t>(key)] = entry_index;
-    }
   };
   bool valid = true;
   auto ingest = [&](const std::vector<ChainWindowRetainedSeed>* input,
@@ -164,9 +157,14 @@ bool RetainedSeedDensity::build(
             RetainedSeedDensityEntry{retained.seed.key, retained.view});
       } else {
         entry_index = static_cast<std::uint32_t>(held);
-        if (!compatible_views(entries_[entry_index].view, retained.view))
-          valid = false;
+        if (entries_[entry_index].retained) {
+          if (!compatible_views(entries_[entry_index].view, retained.view))
+            valid = false;
+        } else {
+          entries_[entry_index].view = retained.view;
+        }
       }
+      entries_[entry_index].retained = true;
       output.push_back(
           RetainedSeedRef{retained.seed, entry_index, retained.rescued});
       if (retained.rescued) entries_[entry_index].rescued = true;
@@ -211,7 +209,7 @@ bool RetainedSeedDensity::build(
           slot_keyed ? static_cast<std::size_t>((*slots)[position])
                      : ChainSeedLookupCache::npos,
           slot);
-      if (held >= 0) return held;
+      if (held >= 0) return entries_[held].view.found() ? held : -1;
       KmerPostingView view;
       if (slot != ChainSeedLookupCache::npos) {
         view = lookup_cache->view_at(slot);
@@ -248,7 +246,7 @@ bool RetainedSeedDensity::build(
       if (!slot_keyed || position >= count) return;
       const std::size_t slot = (*slots)[position];
       lookup_cache->prefetch_slot(slot);
-      if (slot < entry_of_slot_.size()) __builtin_prefetch(&entry_of_slot_[slot]);
+      if (slot < entries_.size()) __builtin_prefetch(&entries_[slot]);
     };
     if (!mirrored)
       for (std::size_t position = 0; position < kPrefetchAhead; ++position)
@@ -295,15 +293,10 @@ bool RetainedSeedDensity::build(
 }
 
 void RetainedSeedDensity::release_excess_for_read(std::size_t read_len) {
-  // entry_of_slot_ follows the lookup cache's capacity, which the cache
-  // bounds itself.
   const std::size_t retain = 4 * std::max<std::size_t>(4096, read_len / 2);
   const auto release = [retain](auto& buffer) {
     if (buffer.capacity() > retain) std::decay_t<decltype(buffer)>().swap(buffer);
   };
-  for (const std::uint32_t slot : remembered_slots_) entry_of_slot_[slot] = -1;
-  remembered_slots_.clear();
-  release(remembered_slots_);
   release(entries_);
   release(forward_);
   release(reverse_);
