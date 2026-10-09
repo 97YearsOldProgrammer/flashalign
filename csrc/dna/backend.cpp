@@ -1146,9 +1146,10 @@ AlignResult map_read(const DnaContext& base_dctx,
           &scratch.fwd.retained_seeds, &scratch.rc.retained_seeds,
           shared_fwd_syncmer_seeds, shared_rc_syncmer_seeds, lookup_cache,
           query_seed_pool.captured_slots(DnaQuerySeedStrand::Forward),
-          query_seed_pool.captured_slots(DnaQuerySeedStrand::Reverse));
+          query_seed_pool.captured_slots(DnaQuerySeedStrand::Reverse),
+          worker_scratch.seed_density);
       placement_chaining_ran = true;
-      dctx.inversion_gate_seeds = placement_chaining.inversion_gate_seeds.get();
+      dctx.inversion_gate_seeds = placement_chaining.inversion_gate_seeds;
       placement_family = placement_chaining.family;
     }
   }

@@ -19,7 +19,6 @@
 
 #include <cstdint>
 #include <cstddef>
-#include <memory>
 #include <vector>
 
 namespace fa::cpu::lr {
@@ -133,9 +132,10 @@ struct DnaPlacementChainingResult {
   std::vector<DnaRivalExactChain> rival_exact;
   // Whole-query chains built for the MAPQ rivals, reused ones excluded.
   int mapq_rival_chains = 0;
-  // The read's seed density, kept past placement when realization gates the
-  // late inversion probe on it (inv_local_chain.h); null otherwise.
-  std::shared_ptr<const RetainedSeedDensity> inversion_gate_seeds;
+  // The read's seed density when realization gates the late inversion probe
+  // on it (inv_local_chain.h); null otherwise. It is the caller's and lives
+  // until the caller's next build.
+  const RetainedSeedDensity* inversion_gate_seeds = nullptr;
   std::int64_t initial_score = 0;
   int initial_blocks = 0;
   bool selection_changed = false;
@@ -184,6 +184,7 @@ DnaPlacementChainingResult build_dna_placement_chains(
     const std::vector<QuerySeed>* fine_reverse_seeds,
     ChainSeedLookupCache* lookup_cache,
     const std::vector<std::uint32_t>* fine_forward_slots,
-    const std::vector<std::uint32_t>* fine_reverse_slots);
+    const std::vector<std::uint32_t>* fine_reverse_slots,
+    RetainedSeedDensity& seed_index);
 
 } // namespace fa::cpu::lr

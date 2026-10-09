@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <type_traits>
 #include <utility>
 
 namespace fa::cpu::lr {
@@ -76,6 +77,8 @@ bool RetainedSeedDensity::build(
   reverse_.clear();
   fine_forward_.clear();
   fine_reverse_.clear();
+  for (const std::uint32_t slot : remembered_slots_) entry_of_slot_[slot] = -1;
+  remembered_slots_.clear();
   validated_offsets_ = nullptr;
   validated_chrom_count_ = 0;
   if (index.empty() ||
@@ -107,7 +110,8 @@ bool RetainedSeedDensity::build(
   // On the slot-keyed path `by_key` holds only keys the cache does not.
   FlatInt64Map<std::uint32_t> by_key;
   if (slot_keyed) {
-    entry_of_slot_.assign(lookup_cache->capacity(), -1);
+    if (entry_of_slot_.size() != lookup_cache->capacity())
+      entry_of_slot_.assign(lookup_cache->capacity(), -1);
     by_key.reserve(16);
   } else {
     by_key.reserve(input_seed_records + 1);
@@ -128,10 +132,12 @@ bool RetainedSeedDensity::build(
   };
   const auto remember = [&](std::uint64_t key, std::size_t slot,
                             std::uint32_t entry_index) {
-    if (slot_keyed && slot != ChainSeedLookupCache::npos)
+    if (slot_keyed && slot != ChainSeedLookupCache::npos) {
       entry_of_slot_[slot] = static_cast<std::int32_t>(entry_index);
-    else
+      remembered_slots_.push_back(static_cast<std::uint32_t>(slot));
+    } else {
       by_key[static_cast<std::int64_t>(key)] = entry_index;
+    }
   };
   bool valid = true;
   auto ingest = [&](const std::vector<ChainWindowRetainedSeed>* input,
@@ -184,6 +190,7 @@ bool RetainedSeedDensity::build(
 
   // Per strand, the tandem fine seeds by (read_pos, key).
   std::vector<std::pair<int, std::uint64_t>> tandem_seeds[2];
+  fine_entry_.clear();
   auto ingest_fine = [&](const std::vector<QuerySeed>* input,
                          const std::vector<std::uint32_t>* slots, int strand,
                          std::vector<RetainedSeedRef>& output) {
@@ -192,36 +199,72 @@ bool RetainedSeedDensity::build(
       valid = false;
       return;
     }
-    output.reserve(input->size());
-    for (std::size_t position = 0; position < input->size(); ++position) {
-      const QuerySeed& seed = (*input)[position];
+    const std::size_t count = input->size();
+    output.reserve(count);
+    // The entry of a seed's key, made on its first sight; -1 when the key's
+    // view is not found, or on a failure, which clears `valid`.
+    const auto resolve = [&](const QuerySeed& seed,
+                             std::size_t position) -> std::int64_t {
       std::size_t slot = ChainSeedLookupCache::npos;
       const std::int32_t held = entry_of(
           seed.key,
           slot_keyed ? static_cast<std::size_t>((*slots)[position])
                      : ChainSeedLookupCache::npos,
           slot);
-      std::uint32_t entry_index = 0;
-      if (held < 0) {
-        KmerPostingView view;
-        if (slot != ChainSeedLookupCache::npos) {
-          view = lookup_cache->view_at(slot);
-        } else if (!lookup_cache->find_cached_view(seed.key, view)) {
-          valid = false;
-          continue;
-        }
-        if (!view.found()) continue;
-        if (entries_.size() >= static_cast<std::size_t>(
-                                   std::numeric_limits<std::uint32_t>::max())) {
-          valid = false;
-          continue;
-        }
-        entry_index = static_cast<std::uint32_t>(entries_.size());
-        remember(seed.key, slot, entry_index);
-        entries_.push_back(RetainedSeedDensityEntry{seed.key, view});
-      } else {
-        entry_index = static_cast<std::uint32_t>(held);
+      if (held >= 0) return held;
+      KmerPostingView view;
+      if (slot != ChainSeedLookupCache::npos) {
+        view = lookup_cache->view_at(slot);
+      } else if (!lookup_cache->find_cached_view(seed.key, view)) {
+        valid = false;
+        return -1;
       }
+      if (!view.found()) return -1;
+      if (entries_.size() >= static_cast<std::size_t>(
+                                 std::numeric_limits<std::uint32_t>::max())) {
+        valid = false;
+        return -1;
+      }
+      const auto entry_index = static_cast<std::uint32_t>(entries_.size());
+      remember(seed.key, slot, entry_index);
+      entries_.push_back(RetainedSeedDensityEntry{seed.key, view});
+      return entry_index;
+    };
+    // The reverse stream holds the forward stream's keys in reverse order
+    // (query_seed_pool.h). A key resolves to one entry, or to none, so where
+    // the keys mirror, a reverse seed takes its forward mirror's entry.
+    const bool mirrored =
+        strand == 1 && valid && fine_forward != nullptr &&
+        fine_entry_.size() == count &&
+        std::equal(input->begin(), input->end(), fine_forward->rbegin(),
+                   [](const QuerySeed& left, const QuerySeed& right) {
+                     return left.key == right.key;
+                   });
+    if (strand == 0) fine_entry_.assign(count, -1);
+    // The seeds' slots are known in advance: the slot lines of the seed
+    // kPrefetchAhead on are requested now, so their misses overlap.
+    constexpr std::size_t kPrefetchAhead = 16;
+    const auto prefetch = [&](std::size_t position) {
+      if (!slot_keyed || position >= count) return;
+      const std::size_t slot = (*slots)[position];
+      lookup_cache->prefetch_slot(slot);
+      if (slot < entry_of_slot_.size()) __builtin_prefetch(&entry_of_slot_[slot]);
+    };
+    if (!mirrored)
+      for (std::size_t position = 0; position < kPrefetchAhead; ++position)
+        prefetch(position);
+    for (std::size_t position = 0; position < count; ++position) {
+      const QuerySeed& seed = (*input)[position];
+      std::int64_t entry = -1;
+      if (mirrored) {
+        entry = fine_entry_[count - 1 - position];
+      } else {
+        prefetch(position + kPrefetchAhead);
+        entry = resolve(seed, position);
+        if (strand == 0) fine_entry_[position] = entry;
+      }
+      if (entry < 0) continue;
+      const auto entry_index = static_cast<std::uint32_t>(entry);
       const std::vector<std::pair<int, std::uint64_t>>& twins = rescued[strand];
       const bool twin =
           !twins.empty() &&
@@ -249,6 +292,24 @@ bool RetainedSeedDensity::build(
   }
 
   return true;
+}
+
+void RetainedSeedDensity::release_excess_for_read(std::size_t read_len) {
+  // entry_of_slot_ follows the lookup cache's capacity, which the cache
+  // bounds itself.
+  const std::size_t retain = 4 * std::max<std::size_t>(4096, read_len / 2);
+  const auto release = [retain](auto& buffer) {
+    if (buffer.capacity() > retain) std::decay_t<decltype(buffer)>().swap(buffer);
+  };
+  for (const std::uint32_t slot : remembered_slots_) entry_of_slot_[slot] = -1;
+  remembered_slots_.clear();
+  release(remembered_slots_);
+  release(entries_);
+  release(forward_);
+  release(reverse_);
+  release(fine_forward_);
+  release(fine_reverse_);
+  release(fine_entry_);
 }
 
 KmerPostingIntervalView RetainedSeedDensity::slice(

@@ -287,6 +287,15 @@ struct ChainSeedLookupCache {
     }
     const KmerPostingView& view_at(size_t slot) const { return views[slot]; }
     size_t capacity() const { return keys.size(); }
+    // Prefetches what slot_holds and view_at read of `slot`.
+    void prefetch_slot(size_t slot) const {
+        if (slot >= keys.size()) return;
+        __builtin_prefetch(&keys[slot]);
+        __builtin_prefetch(&stamps[slot]);
+        const char* view = reinterpret_cast<const char*>(&views[slot]);
+        __builtin_prefetch(view);
+        __builtin_prefetch(view + sizeof(KmerPostingView) - 1);
+    }
 
     // Read-only access: unlike lookup(), never resolves a missing key or mutates the cache.
     bool find_cached_view(uint64_t key, KmerPostingView& view) const {
