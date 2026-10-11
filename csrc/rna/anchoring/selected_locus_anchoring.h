@@ -65,6 +65,11 @@ mirror_locus_query_orientation(const placement::CoarseLocus& locus,
   return mirror;
 }
 
+// The fine chain's parameters for a harvest under `options`; k is the index's seed
+// length.
+chaining::SplicedChainParams rank1_anchor_path_params(
+    int k, const Rank1HarvestOptions& options);
+
 // `posting_memo` is the caller's per-read memo, shared by both strand streams. It only
 // saves posting probes across the read's harvests; the result is the same without it.
 Rank1HarvestResult harvest_rank1(

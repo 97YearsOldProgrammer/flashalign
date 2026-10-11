@@ -515,7 +515,6 @@ private:
     opts.cigar_local_interval_anchor_chain_max_gap =
         mapping.cigar_local_interval_anchor_chain_max_gap;
     opts.fine_chain_band = mapping.cigar_dp_bw;
-    opts.query_partition = mapping.query_partition;
     if (rna_mapping) {
       opts.rival_lifecycle.pri_ratio = rna_mapping->rival_pri_ratio;
       opts.rival_lifecycle.min_diff = rna_mapping->rival_min_diff;

@@ -34,6 +34,8 @@ bool rna_chain_mapq_admissible(const RnaChainMapqEvidence& evidence,
   // A shadow is the committed placement itself.
   if (rival.shadow)
     return false;
+  if (evidence.parent_rule && rival.chained)
+    return rival.parented;
   const bool rival_span = rival.q_begin >= 0 && rival.q_end > rival.q_begin;
   const bool winner_span = evidence.winner_q_begin >= 0 &&
                            evidence.winner_q_end > evidence.winner_q_begin;
@@ -154,14 +156,15 @@ int rna_chain_mapq(const RnaChainMapqEvidence& evidence,
     if (!(rival.realized_dp || rival.owns_dp2))
       x_floor = std::max(x_floor, verdict.strength);
   }
+  if (evidence.parent_rule)
+    n_sub = evidence.parent_n_sub;
   // minimap2's pen, with the query-coverage brake as a third limb in place of the
   // rep_len discount.
   const double pen_s1 = evidence.f1 > 100 ? 1.0 : 0.01 * f1;
   double pen =
       evidence.cnt > 10 ? 1.0 : 0.1 * static_cast<double>(evidence.cnt);
   pen = std::min(pen_s1, pen);
-  // The denominator is read_len unless the evidence names its own (a second family's
-  // realized hull).
+  // The denominator is read_len unless the evidence names its own (a piece's region).
   const double qcov =
       static_cast<double>(evidence.selected_query_covered_bases) /
       static_cast<double>(std::max(1, evidence.qcov_bases > 0

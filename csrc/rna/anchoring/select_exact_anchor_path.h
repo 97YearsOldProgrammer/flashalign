@@ -7,6 +7,7 @@
 #include "skeleton_harvest.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace fa {
 namespace cpu {
@@ -24,11 +25,22 @@ struct SiblingChainStats {
   int32_t chains_total = -1;  // how many chains the recurrence returned
 };
 
+// A chain of the window other than the selected one that does not compete with it under
+// mask_level: its own path over the same pool, and its own competing sibling.
+struct DisjointAnchorPath {
+  ExactAnchorPath bundle;
+  SiblingChainStats siblings;
+};
+
+// `disjoint`, when non-null, is cleared and, on an accepted selection, receives every
+// other chain that does not compete with the selected one, in the recurrence's order; a
+// chain whose path fails validation is left out.
 ExactAnchorPathResult select_exact_anchor_path(
     uint64_t read_key, int32_t query_length, int32_t reference_id,
     bool mapping_reverse, const CandidatePool& pool,
     const chaining::SplicedChainParams& params,
-    SiblingChainStats* siblings = nullptr);
+    SiblingChainStats* siblings = nullptr,
+    std::vector<DisjointAnchorPath>* disjoint = nullptr);
 
 }  // namespace rna
 }  // namespace lr

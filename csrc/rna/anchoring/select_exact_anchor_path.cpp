@@ -42,7 +42,10 @@ RnaQuerySpan chain_query_span(const chaining::ChainResult& chained,
 ExactAnchorPathResult select_exact_anchor_path(
     uint64_t read_key, int32_t query_length, int32_t reference_id,
     bool mapping_reverse, const CandidatePool& pool,
-    const chaining::SplicedChainParams& params, SiblingChainStats* siblings) {
+    const chaining::SplicedChainParams& params, SiblingChainStats* siblings,
+    std::vector<DisjointAnchorPath>* disjoint) {
+  if (disjoint)
+    disjoint->clear();
   ExactAnchorPathResult result;
   ExactAnchorPath& bundle = result.bundle;
   bundle.read_key = read_key;
@@ -190,6 +193,62 @@ ExactAnchorPathResult select_exact_anchor_path(
   if (!validate_exact_anchor_path(bundle, &validation_refusal)) {
     result.refused = true;
     result.refusal = validation_refusal;
+  }
+  if (disjoint && !result.refused) {
+    const RnaQuerySpan winner_span = chain_query_span(chained, selected);
+    std::vector<RnaQuerySpan> spans(chained.chains.size());
+    for (size_t i = 0; i < chained.chains.size(); ++i)
+      spans[i] = chain_query_span(chained, chained.chains[i]);
+    for (size_t i = 0; i < chained.chains.size(); ++i) {
+      if (i == static_cast<size_t>(best) ||
+          rna_query_spans_compete(winner_span, spans[i]))
+        continue;
+      const chaining::Chain& chain = chained.chains[i];
+      DisjointAnchorPath piece;
+      ExactAnchorPath& path = piece.bundle;
+      path.read_key = bundle.read_key;
+      path.query_length = bundle.query_length;
+      path.reference_id = bundle.reference_id;
+      path.mapping_reverse = bundle.mapping_reverse;
+      path.candidate_pool_hash = bundle.candidate_pool_hash;
+      path.selected_pool_anchors = bundle.selected_pool_anchors;
+      path.anchor_path_score = chain.score;
+      bool ok = true;
+      for (int32_t chained_index : chain.idx) {
+        if (chained_index < 0 ||
+            static_cast<size_t>(chained_index) >= chained.anchors.size() ||
+            chained.anchors[static_cast<size_t>(chained_index)].id < 0) {
+          ok = false;
+          break;
+        }
+        const auto found = raw_by_id.find(static_cast<uint32_t>(
+            chained.anchors[static_cast<size_t>(chained_index)].id));
+        if (found == raw_by_id.end()) {
+          ok = false;
+          break;
+        }
+        path.selected_raw_indices.push_back(found->second);
+      }
+      int count = 0;
+      if (!ok ||
+          !mapping::checked_size_to_int(path.selected_raw_indices.size(), count))
+        continue;
+      path.anchor_path_anchor_count = static_cast<uint32_t>(count);
+      path.anchor_path_hash = hash_exact_anchor_path(path);
+      if (!validate_exact_anchor_path(path, nullptr))
+        continue;
+      // Its own competing sibling, by the rule the selected chain's uses.
+      piece.siblings.chains_total = static_cast<int32_t>(chained.chains.size());
+      for (size_t j = 0; j < chained.chains.size(); ++j) {
+        if (j == i || chained.chains[j].score <= piece.siblings.sib_score ||
+            !rna_query_spans_compete(spans[i], spans[j]))
+          continue;
+        piece.siblings.sib_score = chained.chains[j].score;
+        piece.siblings.sib_count =
+            static_cast<int32_t>(chained.chains[j].idx.size());
+      }
+      disjoint->push_back(std::move(piece));
+    }
   }
   return result;
 }

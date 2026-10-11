@@ -30,35 +30,6 @@ bool rna_coprimary_admitted(int chain_score, int chain_anchors,
          uncovered_query_bases >= kRnaCoprimaryMinQueryBases;
 }
 
-bool rna_chimera_query_disjoint(RnaQuerySpan a, RnaQuerySpan b) noexcept {
-  const auto measured = [](RnaQuerySpan span) noexcept {
-    return span.begin >= 0 && span.end > span.begin;
-  };
-  // Censored geometry is not disjointness; an unmeasurable hull is not emitted.
-  if (!measured(a) || !measured(b))
-    return false;
-  const int overlap = std::min(a.end, b.end) - std::max(a.begin, b.begin);
-  if (overlap <= 0)
-    return true;
-  const int shorter = std::min(a.end - a.begin, b.end - b.begin);
-  // Integer floor: overlap at most shorter * numerator / denominator.
-  const std::int64_t threshold =
-      (static_cast<std::int64_t>(shorter) *
-       static_cast<std::int64_t>(kRnaChimeraOverlapNumerator)) /
-      static_cast<std::int64_t>(kRnaChimeraOverlapDenominator);
-  return static_cast<std::int64_t>(overlap) <= threshold;
-}
-
-bool rna_chimera_family_admitted(std::optional<int> dp_segment0,
-                                 RnaQuerySpan hull,
-                                 int minimum_dp_maximum) noexcept {
-  if (!dp_segment0.has_value() || *dp_segment0 < minimum_dp_maximum)
-    return false;
-  if (hull.begin < 0 || hull.end <= hull.begin)
-    return false;
-  return hull.end - hull.begin >= kRnaChimeraMinQueryBases;
-}
-
 bool rna_rival_queue_before(const RnaRealizedHypothesis& a,
                             const RnaRealizedHypothesis& b) noexcept {
   if (a.chain_score != b.chain_score)

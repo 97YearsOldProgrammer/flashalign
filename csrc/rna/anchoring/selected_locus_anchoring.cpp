@@ -137,18 +137,25 @@ Rank1HarvestResult harvest_rank1(
   result.regions = std::move(region_result.regions);
   result.harvest_params = harvest_params;
 
-  result.anchor_path_params.bw = std::max(1, options.chain_band);
-  result.anchor_path_params.max_dist_x = std::max(
-      result.anchor_path_params.bw,
-      options.max_intron > 0 ? options.max_intron : options.chain_query_gap);
-  result.anchor_path_params.max_dist_y = std::max(1, options.chain_query_gap);
-  result.anchor_path_params.min_cnt = std::max(1, options.chain_min_count);
-  result.anchor_path_params.min_sc = std::max(1, options.chain_min_score);
-  result.anchor_path_params.chn_pen_gap =
-      options.chain_gap_penalty > 0.0f ? options.chain_gap_penalty
-                                       : 0.008f * static_cast<float>(index.k());
-  result.anchor_path_params.chn_pen_skip = 0.0f;
+  result.anchor_path_params = rank1_anchor_path_params(index.k(), options);
   return result;
+}
+
+chaining::SplicedChainParams rank1_anchor_path_params(
+    int k, const Rank1HarvestOptions& options) {
+  chaining::SplicedChainParams params;
+  params.bw = std::max(1, options.chain_band);
+  params.max_dist_x = std::max(
+      params.bw,
+      options.max_intron > 0 ? options.max_intron : options.chain_query_gap);
+  params.max_dist_y = std::max(1, options.chain_query_gap);
+  params.min_cnt = std::max(1, options.chain_min_count);
+  params.min_sc = std::max(1, options.chain_min_score);
+  params.chn_pen_gap = options.chain_gap_penalty > 0.0f
+                           ? options.chain_gap_penalty
+                           : 0.008f * static_cast<float>(k);
+  params.chn_pen_skip = 0.0f;
+  return params;
 }
 
 } // namespace rna

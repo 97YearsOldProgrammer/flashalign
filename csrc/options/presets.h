@@ -331,9 +331,6 @@ inline void set_splice_fields(
     set_dna_long_platform_fields(
         mapping.base, common,
         dna_preset_profile(hq ? DnaPresetKind::HiFi : DnaPresetKind::Ont));
-    // The query-tile objective is DNA-only.
-    mapping.base.query_partition =
-        ::fa::cpu::voting::QueryPartitionParameters{};
     // RNA diagonals move with splicing, not indel drift, so RNA uses the
     // fixed vote width.
     mapping.base.vote_diag_bin_width_adaptive = false;
@@ -366,6 +363,8 @@ inline void set_splice_fields(
     mapping.base.cigar_dp_bw = 200000;
     mapping.base.cigar_dp_bw_long = 200000;
     mapping.base.cigar_dp_max_gap = 2000;
+    // minimap2's max_gap under splice is also the fine chain's query gap.
+    mapping.base.cigar_local_interval_anchor_chain_max_gap = 2000;
     mapping.splice_transition = 0;
     // The penalty is used only by ksw2's scored-splice-site mode, which is
     // not exposed.

@@ -54,6 +54,9 @@ struct SpliceRegionEvidence {
   int matches = 0;
   int dp_maximum = 0;
   bool is_spliced = false;
+  // The segment's own chain score: the score it was handed less what its
+  // continuation took (minimap2's mm_split_reg).
+  int chain_score = 0;
 };
 
 struct RnaSpliceHypothesisResult {

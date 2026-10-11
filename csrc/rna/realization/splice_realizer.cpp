@@ -227,7 +227,7 @@ RnaSpliceHypothesisResult run_hypothesis(
     hypothesis.segment_cigars.push_back(std::move(raw.cigar));
     hypothesis.region_evidence.push_back({
         raw.query_begin, raw.query_end, raw.region_anchor_count,
-        raw.matches, raw.dp_maximum, raw.is_spliced});
+        raw.matches, raw.dp_maximum, raw.is_spliced, raw.chain_score});
 
     if (!raw.continuation.present()) break;
     if (raw.continuation.selected_begin <= selected_begin ||

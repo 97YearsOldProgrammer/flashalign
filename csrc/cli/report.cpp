@@ -142,8 +142,6 @@ std::string resolved_config_text(const AlignOptions& opt,
   const auto dp_src = [&](const std::optional<int>& o) {
     return src(o.has_value(), "preset");
   };
-  // RNA presets leave the tile objective at its struct defaults.
-  const char* const tile_owner = is_rna ? "builtin" : "preset";
 
   row("mode", is_rna ? "rna_long" : "dna_long", "resolved");
   row("preset", opt.preset, opt.preset_source.c_str());
@@ -244,29 +242,29 @@ std::string resolved_config_text(const AlignOptions& opt,
       src(opt.vote_diag_slope_den.has_value(), "preset"));
   row("vote_diag_width_max", i2s(mapping.vote_diag_width_max),
       src(opt.vote_diag_width_max.has_value(), "preset"));
-  row("tile_score.hit", i2s(mapping.query_partition.supported_tile_reward),
-      src(opt.tile_supported_reward.has_value(), tile_owner));
-  row("tile_score.block", i2s(mapping.query_partition.block_open_cost),
-      src(opt.tile_block_open_cost.has_value(), tile_owner));
-  row("tile_score.null", i2s(mapping.query_partition.null_tile_cost),
-      src(opt.tile_null_cost.has_value(), tile_owner));
-  row("tile_score.miss",
-      i2s(mapping.query_partition.unsupported_ownership_cost),
-      src(opt.tile_unsupported_cost.has_value(), tile_owner));
-  row("partition.min_tiles",
-      i2s(mapping.query_partition.minimum_supported_tiles_per_non_null_block),
-      tile_owner);
-  // The splice presets partition into their own 128 tiles.
-  row("partition.tiles", i2s(mapping.query_tiles),
-      is_rna ? "fixed" : src(opt.tiles.has_value(), "preset"));
-  // Ratio admission compares masks on at most kMaxAdmissionQueryTiles tiles.
-  if (!is_rna)
+  if (!is_rna) {
+    row("tile_score.hit", i2s(mapping.query_partition.supported_tile_reward),
+        src(opt.tile_supported_reward.has_value(), "preset"));
+    row("tile_score.block", i2s(mapping.query_partition.block_open_cost),
+        src(opt.tile_block_open_cost.has_value(), "preset"));
+    row("tile_score.null", i2s(mapping.query_partition.null_tile_cost),
+        src(opt.tile_null_cost.has_value(), "preset"));
+    row("tile_score.miss",
+        i2s(mapping.query_partition.unsupported_ownership_cost),
+        src(opt.tile_unsupported_cost.has_value(), "preset"));
+    row("partition.min_tiles",
+        i2s(mapping.query_partition.minimum_supported_tiles_per_non_null_block),
+        "preset");
+    row("partition.tiles", i2s(mapping.query_tiles),
+        src(opt.tiles.has_value(), "preset"));
+    // Ratio admission compares masks on at most kMaxAdmissionQueryTiles tiles.
     row("partition.admission_tiles",
         mapping.vote_admission_ratio > 0.0
             ? i2s(std::min(mapping.query_tiles,
                            fa::cpu::voting::kMaxAdmissionQueryTiles))
             : std::string("none (count admission)"),
         "derived");
+  }
   row("mapq.output_range", "0..60", "fixed");
 
   // On a splice preset, the fine chain's query gap.
@@ -435,19 +433,13 @@ std::string resolved_config_text(const AlignOptions& opt,
         src(opt.pri_ratio.has_value(), "builtin"));
     row("rna_rival.min_diff", i2s(rna->rival_min_diff),
         src(opt.rna_rival_min_diff.has_value(), "builtin"));
-    // Fixed thresholds are printed too, tagged [fixed]. First the
-    // co-primary floor, then the chimeric emission floor.
+    // Fixed thresholds are printed too, tagged [fixed]: the co-primary floor,
+    // then the query a second-pass placement must explain.
     row("rna_rival.chim_score",
         i2s(fa::cpu::lr::rna::kRnaCoprimaryMinChainScore), "fixed");
     row("rna_rival.chim_anch", i2s(fa::cpu::lr::rna::kRnaCoprimaryMinAnchors),
         "fixed");
     row("rna_rival.chim_qbp", i2s(fa::cpu::lr::rna::kRnaCoprimaryMinQueryBases),
-        "fixed");
-    row("rna_rival.chimera_max_families",
-        i2s(fa::cpu::lr::rna::kRnaChimeraMaxFamilies), "fixed");
-    row("rna_rival.chimera_overlap",
-        i2s(fa::cpu::lr::rna::kRnaChimeraOverlapNumerator) + "/" +
-            i2s(fa::cpu::lr::rna::kRnaChimeraOverlapDenominator),
         "fixed");
     row("rna_rival.chimera_min_qbp",
         i2s(fa::cpu::lr::rna::kRnaChimeraMinQueryBases), "fixed");

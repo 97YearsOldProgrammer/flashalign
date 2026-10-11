@@ -223,13 +223,7 @@ leave that chain unchanged. The band is
 .BR \-b 's
 first value for the dense chains and its second for the screening chain.
 Under a splice preset it bounds base alignment and is also the maximum
-query gap of the fine chain, which is 20000 under
-.B splice
-and 10000 under
-.B splice:hq
-when
-.B \-g
-is not given; there
+query gap of the fine chain; there
 .B \-G
 bounds introns.
 Untyped,
@@ -237,7 +231,7 @@ Untyped,
 uses 5000 for base alignment and 20000 for chaining,
 .B lr:hq
 10000 for both, the assembly presets 10000 and 20000, and the splice presets
-2000 for base alignment; a typed
+2000 for both; a typed
 .I NUM
 sets both.
 .I NUM
@@ -458,7 +452,7 @@ at least
 Above 2048 tiles, candidates are admitted by comparing their supports on 2048
 tiles. The partition's work grows with
 .IR INT .
-DNA presets only; the splice presets keep 128.
+DNA presets only.
 .TP
 .B \-\-tile\-score \fIhit\fR=\fIINT\fR,\fIblock\fR=\fIINT\fR,\fInull\fR=\fIINT\fR,\fImiss\fR=\fIINT\fR
 Objective of the exact query partition, which decides for each of the read's
@@ -551,7 +545,9 @@ it may not exceed
 .IR INT1 .
 .TP
 .BI \-S \ INT
-Minimal peak DP alignment score to output [80]. Under a DNA preset an
+Minimal peak DP alignment score to output [80]. Under a splice preset it is
+also the floor of a supplementary piece, which needs 3 anchors and 40 matching
+bases besides; the primary is exempt. Under a DNA preset an
 alignment also needs at least
 .B \-m
 (40) matching bases; a value of 0 or less turns off the score test, not the base
@@ -824,7 +820,7 @@ Its alignments are scored with minimap2's map-hifi scoring
 Long-read spliced alignment
 .RB ( \-k15
 .B \-s10 \-\-min\-support 2 \-A1 \-B2 \-O2,32 \-E1,0 \-z200,100 \-S80
-.B \-\-min\-intron 20 \-G200k \-ub \-\-junc\-bonus 9 \-p0.8
+.B \-\-min\-intron 20 \-g2000 \-G200k \-ub \-\-junc\-bonus 9 \-p0.8
 .BR \-N5 ).
 In the splice mode a long deletion is taken as an intron and represented as the
 .RB ` N '
@@ -843,9 +839,7 @@ Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq
 .BR \-O6,24 ).
 It differs from
 .B splice
-in scoring and also in the vote's diagonal bin (48 against 64), the fine
-chain's query gap (10000 against 20000; see
-.BR \-g )
+in scoring and also in the vote's diagonal bin (48 against 64)
 and the MAPQ coverage threshold (0.70 against 0.55).
 .TP
 .B asm5

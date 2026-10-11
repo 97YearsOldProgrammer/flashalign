@@ -1,7 +1,7 @@
 // RnaBackend::map_read: vote capture, exon peaks, the coarse locus catalogue and the
 // rank-1 exact anchor path, then either the map-only election and projection with the
-// chain MAPQ or splice realization with the rival lifecycle and the query partition's
-// second families.
+// chain MAPQ or splice realization with the rival lifecycle and the supplementary
+// pieces of minimap2's parent rule.
 #include "backend.h"
 
 #include "result.h"
@@ -23,8 +23,9 @@
 #include "realization/splice_realizer.h" // native fixed exact-anchor-path splice realization
 #include "realization/rank2_arbitration.h" // realized_primary_dp_maximum
 #include "realization/rival_lifecycle.h" // rival realization lifecycle
+#include "realization/rna_parent.h"     // minimap2's parent rule
 #include "placement/coarse_chain.h"      // coarse locus-envelope selection
-#include "query_partition.h" // the query partition below the MAPQ line
+#include "query_partition.h" // the re-vote, the leftover and the segment geometry
 
 #include <algorithm>
 #include <climits>
@@ -263,34 +264,6 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
       [](rna::Rank1HarvestResult& harvest) -> const rna::CandidatePool& {
     return harvest.opposite_pool;
   };
-  // A query-partition nominee's window restriction, applied to each routed pool in its
-  // own lane by the same routine as a single pool (restrict_harvest_to_query_window).
-  const auto restrict_routed_pools = [&](rna::Rank1HarvestResult& harvest,
-                                         const rna::RnaQuerySpan& window,
-                                         bool nominated_reverse) {
-    if (!harvest.routed)
-      return;
-    const auto narrow = [&](rna::CandidatePool& pool, bool pool_reverse) {
-      if (pool.refused)
-        return;
-      rna::Rank1HarvestResult shim;
-      shim.bounded_pool = std::move(pool);
-      shim.regions = harvest.regions;
-      shim.harvest_params = harvest.harvest_params;
-      shim.work.postings_skipped_occurrence =
-          harvest.work.postings_skipped_occurrence;
-      rna::restrict_harvest_to_query_window(shim, window, pool_reverse,
-                                            read_len, k);
-      pool = std::move(shim.bounded_pool);
-      if (shim.refused) {
-        pool.refused = true;
-        pool.refusal = shim.refusal;
-      }
-    };
-    narrow(harvest.nominated_pool, nominated_reverse);
-    narrow(harvest.opposite_pool, !nominated_reverse);
-  };
-
   // Pre-chaining query-frame election: where the pool's band margin is decisive only the
   // elected frame is chained; an elected frame that refuses escalates to the other, and
   // kAmbiguous chains both and lets the chain scores decide.
@@ -328,19 +301,12 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
     int reference_id = -1;
     bool repaired = false;
   };
-  // One catalogue entry's harvest and chain, shared by the rival scan and the query
-  // partition's nominees so every window goes through the same routine (harvest, frame
-  // election, orientation repair, summary). `query_window`, when non-null, restricts the
-  // pool to the anchors explaining that forward-frame stretch of the read (nominees
-  // only). `skeleton_peaks` is the peak vector `peak_indices` names (the read's own by
-  // default). `committed_geometry` is the committed chain's geometry for the shadow
-  // rule; null while the committed chain is not fixed.
+  // One catalogue entry's harvest and chain (harvest, frame election, orientation
+  // repair, summary). `committed_geometry` is the committed chain's geometry for the
+  // shadow rule; null while the committed chain is not fixed.
   const auto chain_one_rival =
       [&](const rna::placement::CoarseLocus& rival_locus, int catalogue_index,
-          const rna::RnaQuerySpan* query_window = nullptr,
-          const std::vector<rna::placement::CoarseDiagonalPeak>*
-              skeleton_peaks = nullptr,
-          const rna::RnaSegmentGeometry* committed_geometry = nullptr) {
+          const rna::RnaSegmentGeometry* committed_geometry) {
         ProductionRival entry;
         entry.rival.candidate = catalogue_index;
         entry.rival.rank_score = rival_locus.rank_score;
@@ -364,17 +330,8 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
               entry.refusal = "rival_no_strand_seeds";
             } else {
               rna::Rank1HarvestResult rival_harvest = rna::harvest_rank1(
-                  *rctx.ref.index, rival_seeds, rival_locus,
-                  skeleton_peaks != nullptr ? *skeleton_peaks : peaks, read_len,
+                  *rctx.ref.index, rival_seeds, rival_locus, peaks, read_len,
                   rival_chr_len, harvest_options, &postings);
-              // The chain reads only the nominee's window.
-              if (query_window != nullptr) {
-                rna::restrict_harvest_to_query_window(
-                    rival_harvest, *query_window, rival_locus.reverse, read_len,
-                    k);
-                restrict_routed_pools(rival_harvest, *query_window,
-                                      rival_locus.reverse);
-              }
               if (rival_harvest.refused) {
                 entry.refusal =
                     rna::anchoring_refusal_name(rival_harvest.refusal);
@@ -529,8 +486,7 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
           if (i == committed_index)
             continue;
           ProductionRival entry =
-              chain_one_rival(loci[i], static_cast<int>(i), nullptr, nullptr,
-                              committed_geometry);
+              chain_one_rival(loci[i], static_cast<int>(i), committed_geometry);
           evidence.rivals.push_back(entry.rival);
           rivals_out.push_back(std::move(entry));
         }
@@ -538,7 +494,7 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
 
   // Stage 4: rank 1 of the catalogue, one attempt per coarse pass: the budgeted
   // catalogue's rank 1 and, if that refuses, the second pass's. Everything downstream
-  // (rivals, MAPQ, realization, lifecycle, partition) runs on whichever catalogue placed
+  // (rivals, MAPQ, realization, lifecycle, pieces) runs on whichever catalogue placed
   // the read. All per-attempt state is reset at the top of the loop.
   int chr = -1;
   bool fine_accepted = false;
@@ -707,8 +663,7 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
 
     // The rescue floor: a second-pass placement is a rescue, and Stage 4's chain floor
     // accepts very short chains, so it must explain at least kRnaChimeraMinQueryBases
-    // query bases, the floor every partition family clears. First-pass placements are
-    // exempt.
+    // query bases. First-pass placements are exempt.
     if (coarse_pass == 2 && selected_path_summary.last_query_end -
                                     selected_path_summary.first_query_begin <
                                 rna::kRnaChimeraMinQueryBases) {
@@ -935,34 +890,207 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
       };
   // The rival set, chained once for the lifecycle and reused by the MAPQ.
   std::vector<ProductionRival> production_rivals;
-  // The query partition's chain storage (query_partition.h). A separate vector because
-  // hypotheses borrow raw pointers into `production_rivals`, which must not grow;
-  // reserved once before anything points into it.
-  std::vector<ProductionRival> partition_rivals;
-  // Parallel to `partition_rivals`: the best vote competing with each harvested window
-  // (RnaExplainWindow::competing_vote; 0 for a contender), read by that family's MAPQ.
-  std::vector<std::int64_t> partition_competing;
-  // Where the partition's hypotheses begin in `hypotheses`. They are appended last and
-  // contiguously, so this indexes `partition_competing`.
-  std::size_t partition_first_hypothesis = 0;
+  // The leftover's chains, which their hypotheses borrow.
+  std::vector<ProductionRival> leftover_rivals;
   std::vector<rna::RnaRealizedHypothesis> hypotheses;
   // The demoted incumbent's realization, parked here on an adoption. Element 0's
-  // `result` stays empty by the borrowed-storage contract (rival_lifecycle.h), which the
-  // second-family pricing relies on. Read only by the runner-up attach.
+  // `result` stays empty by the borrowed-storage contract (rival_lifecycle.h). Read by
+  // the pieces and the runner-up attach.
   rna::RnaSpliceRealizationResult demoted_incumbent;
-  // Per hypothesis: whether an emitted second family already put that locus on the
-  // wire. Empty when no family was emitted.
+  // Per hypothesis: whether a printed piece already put that locus on the wire.
   std::vector<char> locus_on_wire;
   std::size_t lifecycle_elected = 0;
   std::optional<std::size_t> lifecycle_dp2_owner;
   // Whether the rank recalibration repriced this read; selects the election rule.
   bool rank_recal_fired = false;
+  // The parent rule's chain-stage hits (owner = hypothesis index), in the queue's order.
+  std::vector<rna::RnaParentHit> parent_chain_hits;
+  // The supplementary pieces: an after-DP primary outside the elected family, its count
+  // of children and dp_max2 without its shadows, the hypotheses owning its children at
+  // either stage, and the first child at dp_max2.
+  struct PieceRegion {
+    rna::RnaParentHit region;
+    std::vector<std::size_t> children;
+    std::optional<std::size_t> dp2_owner;
+    // Its hypothesis and every hypothesis at its place, kept off the runner-ups.
+    std::vector<std::size_t> place;
+  };
+  std::vector<PieceRegion> pieces;
+  // minimap2's mask_level and sub_diff (2a + b) for the parent rule.
+  constexpr float kParentMaskLevel = 0.5f;
+  const int parent_sub_diff = 2 * rctx.opts.splice_controller.match +
+                              rctx.opts.splice_controller.mismatch;
+  // mm_set_parent over hits already in their stage's order, less the hits whose owner
+  // `left_out` marks.
+  const auto parent_regions = [&](const std::vector<rna::RnaParentHit>& ordered,
+                                  const std::vector<char>* left_out) {
+    std::vector<rna::RnaParentHit> regions;
+    regions.reserve(ordered.size());
+    for (const rna::RnaParentHit& hit : ordered) {
+      const std::size_t owner = static_cast<std::size_t>(hit.owner);
+      if (left_out != nullptr && hit.owner >= 0 && owner < left_out->size() &&
+          (*left_out)[owner] != 0)
+        continue;
+      regions.push_back(hit);
+    }
+    rna::rna_parent_set(regions, kParentMaskLevel, parent_sub_diff);
+    return regions;
+  };
+  // A chained hypothesis's place for the shadow rule; false without a chain.
+  const auto shadow_geometry = [&](const rna::RnaRealizedHypothesis& h,
+                                   rna::RnaSegmentGeometry& g) {
+    if (!h.chained || h.summary == nullptr ||
+        h.summary->last_reference_end <= h.summary->first_reference_begin)
+      return false;
+    g.reference_id = h.reference_id;
+    g.reverse = h.reverse;
+    g.reference_begin = static_cast<std::uint64_t>(
+        std::max(0, h.summary->first_reference_begin));
+    g.reference_end = static_cast<std::uint64_t>(
+        std::max(0, h.summary->last_reference_end));
+    g.forward_span = rna::rna_forward_query_span(h.q_begin, h.q_end,
+                                                 h.reverse, read_len);
+    return true;
+  };
+  const auto same_place = [&](std::size_t a, std::size_t b) {
+    rna::RnaSegmentGeometry ga;
+    rna::RnaSegmentGeometry gb;
+    return shadow_geometry(hypotheses[a], ga) &&
+           shadow_geometry(hypotheses[b], gb) &&
+           rna::rna_same_place(ga, gb, max_intron);
+  };
+  // Hypothesis i's realized regions, one per segment of `result`, as the parent rule
+  // reads them.
+  const auto append_dp_hits = [&](std::size_t i,
+                                  const rna::RnaSpliceRealizationResult& result,
+                                  std::vector<rna::RnaParentHit>& hits) {
+    const rna::RnaRealizedHypothesis& h = hypotheses[i];
+    const rna::RnaSpliceHypothesisResult* winner =
+        rna::rna_winning_hypothesis(result);
+    if (winner == nullptr)
+      return;
+    for (std::size_t s = 0; s < winner->segments.size(); ++s) {
+      const rna::SpliceRegionEvidence& evidence = winner->region_evidence[s];
+      const AlignResult& segment = winner->segments[s];
+      const std::vector<std::uint32_t>& cigar = winner->segment_cigars[s];
+      rna::RnaParentHit hit;
+      hit.qs = evidence.query_begin;
+      hit.qe = evidence.query_end;
+      hit.score = evidence.chain_score;
+      hit.cnt = evidence.region_anchor_count;
+      hit.rid = h.reference_id;
+      hit.rs = segment.pos;
+      hit.re = segment.target_end;
+      hit.has_dp = true;
+      hit.dp_max = evidence.dp_maximum;
+      hit.accounting.matches = segment.matches;
+      hit.accounting.mismatches = segment.mismatches;
+      hit.accounting.ambiguities = segment.ambiguities;
+      hit.accounting.cigar = cigar.data();
+      hit.accounting.cigar_len = cigar.size();
+      hit.accounting_ok = segment.alignment_accounting_valid && !cigar.empty();
+      hit.owner = static_cast<int>(i);
+      hit.catalogue = h.catalogue_index;
+      hit.segment = static_cast<int>(s);
+      hits.push_back(hit);
+    }
+  };
+  // The after-election parent rule's input, kept for the leftover's rerun: its regions
+  // in order (the elected family's first), the hypotheses it leaves out, and the chain
+  // stage's regions.
+  std::vector<rna::RnaParentHit> pieces_dp_input;
+  std::vector<char> pieces_left_out;
+  std::vector<rna::RnaParentHit> pieces_chain;
+  // The pieces from the after-election regions `dp` and the chain stage's `chain`,
+  // rebuilt from scratch: every after-DP primary but the elected family's own regions, in
+  // hit order, unless its hypothesis is at the place of a printed record. Its children
+  // less its shadows are counted as mm_set_parent counts them.
+  const auto decide_pieces = [&](const std::vector<rna::RnaParentHit>& dp,
+                                 const std::vector<rna::RnaParentHit>& chain) {
+    pieces.clear();
+    for (std::size_t j = 1; j < dp.size(); ++j) {
+      const rna::RnaParentHit& region = dp[j];
+      const std::size_t owner = static_cast<std::size_t>(region.owner);
+      if (region.parent != static_cast<int>(j) || owner == lifecycle_elected ||
+          same_place(owner, lifecycle_elected))
+        continue;
+      if (std::any_of(pieces.begin(), pieces.end(),
+                      [&](const PieceRegion& printed) {
+                        const std::size_t other =
+                            static_cast<std::size_t>(printed.region.owner);
+                        return other != owner && same_place(other, owner);
+                      }))
+        continue;
+      PieceRegion piece;
+      piece.region = region;
+      piece.region.n_sub = 0;
+      piece.region.dp_max2 = 0;
+      const auto add_child = [&](std::size_t child_owner) {
+        if (child_owner != owner &&
+            std::find(piece.children.begin(), piece.children.end(),
+                      child_owner) == piece.children.end())
+          piece.children.push_back(child_owner);
+      };
+      for (std::size_t c = j + 1; c < dp.size(); ++c) {
+        const rna::RnaParentHit& child = dp[c];
+        const std::size_t child_owner = static_cast<std::size_t>(child.owner);
+        if (child.parent != static_cast<int>(j) ||
+            (child_owner != owner && same_place(owner, child_owner)))
+          continue;
+        const int si = child.qs;
+        const int ei = child.qe;
+        const int sj = region.qs;
+        const int ej = region.qe;
+        const int min = std::min(ej - sj, ei - si);
+        const int ol = si < sj ? (ei < sj ? 0 : ei < ej ? ei - sj : ej - sj)
+                               : (ej < si ? 0 : ej < ei ? ej - si : ei - si);
+        bool cnt_sub = child.cnt >= region.cnt;
+        if (region.has_dp && child.has_dp &&
+            (region.rid != child.rid || region.rs != child.rs ||
+             region.re != child.re || ol != min)) {
+          piece.region.dp_max2 = std::max(piece.region.dp_max2, child.dp_max);
+          if (region.dp_max - child.dp_max <= parent_sub_diff)
+            cnt_sub = true;
+        }
+        if (cnt_sub)
+          ++piece.region.n_sub;
+        add_child(child_owner);
+      }
+      for (std::size_t c = j + 1; c < dp.size() && !piece.dp2_owner; ++c) {
+        const rna::RnaParentHit& child = dp[c];
+        const std::size_t child_owner = static_cast<std::size_t>(child.owner);
+        if (child.parent == static_cast<int>(j) && piece.region.dp_max2 > 0 &&
+            child.dp_max == piece.region.dp_max2 && child_owner != owner &&
+            !same_place(owner, child_owner))
+          piece.dp2_owner = child_owner;
+      }
+      // Its chain's chain-stage children, when that chain was a primary there.
+      for (std::size_t e = 0; e < chain.size(); ++e) {
+        if (static_cast<std::size_t>(chain[e].owner) != owner)
+          continue;
+        if (chain[e].parent == static_cast<int>(e))
+          for (std::size_t c = e + 1; c < chain.size(); ++c) {
+            const std::size_t child_owner =
+                static_cast<std::size_t>(chain[c].owner);
+            if (chain[c].parent == static_cast<int>(e) &&
+                !same_place(owner, child_owner))
+              add_child(child_owner);
+          }
+        break;
+      }
+      piece.place.push_back(owner);
+      for (std::size_t i = 0; i < hypotheses.size(); ++i)
+        if (i != owner && same_place(owner, i))
+          piece.place.push_back(i);
+      pieces.push_back(std::move(piece));
+    }
+  };
 
   // The rival realization lifecycle, in minimap2's order: chain the rivals, classify
   // each against the incumbent by forward-frame query geometry, admit by the retention
-  // band (competitors) or the co-primary floor, realize a bounded number of competitors,
-  // elect the primary on the realized DP maximum, and hand the demoted maxima to the
-  // MAPQ as dp2.
+  // band (competitors) or the co-primary floor, realize a bounded number of competitors
+  // and the chain-stage co-primaries, elect the primary on the realized DP maximum, and
+  // hand the demoted maxima to the MAPQ as dp2.
   if (path_coverage_ok) {
     // (1) The rival chains, taken once in the rank-1 frame; the MAPQ below reuses them.
     rna::RnaChainMapqEvidence lifecycle_frame;
@@ -1056,8 +1184,7 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
             rna::anchor_union_query_coverage(*h.bundle, h.query_covered_bases);
         if (h.klass == rna::RnaRivalClass::CoPrimary) {
           // A co-primary explains different query bases, so it is neither an election
-          // candidate nor dp2/n_sub evidence. Admission makes it eligible for the
-          // second-family block, realized after the primary's MAPQ is fixed.
+          // candidate nor dp2/n_sub evidence; its admission is read by the traces only.
           h.admitted = rna::rna_coprimary_admitted(
               h.chain_score, h.chain_anchors,
               rna::rna_uncovered_query_bases(incumbent_span, rival_span));
@@ -1090,6 +1217,52 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
         static_cast<std::size_t>(std::max(0, lifecycle_cfg.realize_max));
     if (queue.size() > realize_budget)
       queue.resize(realize_budget);
+    // The chain-stage co-primaries: mm_set_parent over the incumbent and every chained
+    // rival with a reportable anchor union, shadows left out, in the queue's order. Each
+    // primary the queue does not hold is realized after it, outside its budget, and
+    // classed a co-primary: it takes no part in the election, the recalibration, the
+    // dp2 owner, the MAPQ's prices or the runner-ups.
+    {
+      std::vector<std::size_t> order;
+      for (std::size_t i = 0; i < hypotheses.size(); ++i) {
+        const rna::RnaRealizedHypothesis& h = hypotheses[i];
+        if (i == 0 || (h.chained && h.bundle != nullptr && h.coverage_ok &&
+                       !h.shadow))
+          order.push_back(i);
+      }
+      std::stable_sort(order.begin(), order.end(),
+                       [&hypotheses](std::size_t a, std::size_t b) {
+                         return rna::rna_rival_queue_before(hypotheses[a],
+                                                            hypotheses[b]);
+                       });
+      parent_chain_hits.reserve(order.size());
+      for (const std::size_t i : order) {
+        const rna::RnaRealizedHypothesis& h = hypotheses[i];
+        rna::RnaParentHit hit;
+        const rna::RnaQuerySpan span =
+            rna::rna_forward_query_span(h.q_begin, h.q_end, h.reverse, read_len);
+        hit.qs = span.begin;
+        hit.qe = span.end;
+        hit.score = h.chain_score;
+        hit.cnt = h.chain_anchors;
+        hit.rid = h.reference_id;
+        hit.rs = h.summary->first_reference_begin;
+        hit.re = h.summary->last_reference_end;
+        hit.owner = static_cast<int>(i);
+        hit.catalogue = h.catalogue_index;
+        parent_chain_hits.push_back(hit);
+      }
+      const std::vector<rna::RnaParentHit> regions =
+          parent_regions(parent_chain_hits, nullptr);
+      for (std::size_t j = 0; j < regions.size(); ++j) {
+        const std::size_t i = static_cast<std::size_t>(regions[j].owner);
+        if (regions[j].parent != static_cast<int>(j) || i == 0 ||
+            std::find(queue.begin(), queue.end(), i) != queue.end())
+          continue;
+        hypotheses[i].klass = rna::RnaRivalClass::CoPrimary;
+        queue.push_back(i);
+      }
+    }
     if (!queue.empty()) {
     }
 
@@ -1153,12 +1326,16 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
       };
 
       // The dp leader and runner-up, as the election orders them: argmax on the realized
-      // maximum, ties to the lower catalogue index. Only admitted competitors are
-      // realized, so this is minimap2's aligned-hit set.
+      // maximum, ties to the lower catalogue index. Only the realized competitors count,
+      // not the co-primaries, so this is minimap2's aligned-hit set.
+      const auto off_scale = [](const rna::RnaRealizedHypothesis& h) {
+        return !h.realized || !h.dp_maximum.has_value() || *h.dp_maximum <= 0 ||
+               h.klass == rna::RnaRivalClass::CoPrimary;
+      };
       std::size_t leader = hypotheses.size();
       for (std::size_t i = 0; i < hypotheses.size(); ++i) {
         const rna::RnaRealizedHypothesis& h = hypotheses[i];
-        if (!h.realized || !h.dp_maximum.has_value() || *h.dp_maximum <= 0)
+        if (off_scale(h))
           continue;
         if (leader == hypotheses.size() ||
             *h.dp_maximum > *hypotheses[leader].dp_maximum ||
@@ -1172,7 +1349,7 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
           if (i == leader)
             continue;
           const rna::RnaRealizedHypothesis& h = hypotheses[i];
-          if (!h.realized || !h.dp_maximum.has_value() || *h.dp_maximum <= 0)
+          if (off_scale(h))
             continue;
           second_dp = std::max(second_dp, *h.dp_maximum);
         }
@@ -1198,7 +1375,7 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
           bool recal_complete = true;
           for (std::size_t i = 0; i < hypotheses.size(); ++i) {
             const rna::RnaRealizedHypothesis& h = hypotheses[i];
-            if (!h.realized || !h.dp_maximum.has_value() || *h.dp_maximum <= 0)
+            if (off_scale(h))
               continue;
             rna::RnaRankRecalAccounting accounting;
             if (!recal_accounting(i, accounting)) {
@@ -1227,21 +1404,6 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
                             : rna::rna_elect_primary_hypothesis(hypotheses);
     // The shadow rule again, against the elected hypothesis: the winner's shadows may
     // include the demoted incumbent or a tie rival. The election is not touched.
-    const auto shadow_geometry = [&](const rna::RnaRealizedHypothesis& h,
-                                     rna::RnaSegmentGeometry& g) {
-      if (!h.chained || h.summary == nullptr ||
-          h.summary->last_reference_end <= h.summary->first_reference_begin)
-        return false;
-      g.reference_id = h.reference_id;
-      g.reverse = h.reverse;
-      g.reference_begin = static_cast<std::uint64_t>(
-          std::max(0, h.summary->first_reference_begin));
-      g.reference_end = static_cast<std::uint64_t>(
-          std::max(0, h.summary->last_reference_end));
-      g.forward_span = rna::rna_forward_query_span(h.q_begin, h.q_end,
-                                                   h.reverse, read_len);
-      return true;
-    };
     rna::RnaSegmentGeometry winner_geometry;
     if (shadow_geometry(hypotheses[lifecycle_elected], winner_geometry)) {
       for (std::size_t i = 0; i < hypotheses.size(); ++i) {
@@ -1255,6 +1417,58 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
     }
     lifecycle_dp2_owner =
         rna::rna_select_dp2_owner(hypotheses, lifecycle_elected);
+    // The pieces, after the election: every realized region, repriced by
+    // mm_update_dp_max and in mm_hit_sort's order with the elected family's regions
+    // first (they own the query they cover), through mm_set_parent less the elected
+    // family's shadows. A region outside the elected family stays only if it passes
+    // minimap2's region filter, before and after the repricing (mm_filter_regs in
+    // mm_align_skeleton). The election and the MAPQ do not read it.
+    {
+      const int elected_owner = static_cast<int>(lifecycle_elected);
+      // Every segment of every realized hypothesis; a refused or empty realization has
+      // no region.
+      std::vector<rna::RnaParentHit> dp_hits;
+      for (std::size_t i = 0; i < hypotheses.size(); ++i)
+        if (i == 0 || hypotheses[i].realized)
+          append_dp_hits(i, i == 0 ? realized : hypotheses[i].result, dp_hits);
+      const auto filter_regions = [&]() {
+        const auto passes = [&](const rna::RnaParentHit& hit) {
+          if (hit.owner == elected_owner)
+            return true;
+          const std::size_t i = static_cast<std::size_t>(hit.owner);
+          const rna::RnaSpliceHypothesisResult* winner =
+              rna::rna_winning_hypothesis(i == 0 ? realized : hypotheses[i].result);
+          rna::SpliceRegionEvidence evidence =
+              winner->region_evidence[static_cast<std::size_t>(hit.segment)];
+          evidence.dp_maximum = hit.dp_max;
+          return rna::classify_splice_region(evidence, read_len,
+                                             rctx.opts.splice_controller) ==
+                 rna::SpliceRegionReject::None;
+        };
+        dp_hits.erase(
+            std::stable_partition(dp_hits.begin(), dp_hits.end(), passes),
+            dp_hits.end());
+      };
+      filter_regions();
+      rna::rna_parent_update_dp_max(
+          read_len, rna::kRnaRankRecalMinReadLen, dp_hits,
+          static_cast<float>(rna::kRnaRankRecalFrac),
+          rctx.opts.splice_controller.match,
+          rctx.opts.splice_controller.mismatch);
+      filter_regions();
+      rna::rna_parent_hit_sort(dp_hits);
+      std::stable_partition(dp_hits.begin(), dp_hits.end(),
+                            [elected_owner](const rna::RnaParentHit& hit) {
+                              return hit.owner == elected_owner;
+                            });
+      std::vector<char> left_out(hypotheses.size(), 0);
+      for (std::size_t i = 0; i < hypotheses.size(); ++i)
+        left_out[i] = i != lifecycle_elected && hypotheses[i].shadow ? 1 : 0;
+      pieces_chain = parent_regions(parent_chain_hits, &left_out);
+      decide_pieces(parent_regions(dp_hits, &left_out), pieces_chain);
+      pieces_dp_input = std::move(dp_hits);
+      pieces_left_out = std::move(left_out);
+    }
     if (lifecycle_elected != 0) {
       rna::RnaRealizedHypothesis& winner = hypotheses[lifecycle_elected];
       // Keep the incumbent's realization before it is overwritten: on an adoption it is
@@ -1296,9 +1510,9 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
   // sib_f2, rs1 and dp1, and the demoted incumbent becomes a chained rival owning dp2.
   int cigar_chain_mapq = 0;
   const int* chain_mapq_ptr = nullptr;
-  // The second-family store, outside the coverage guard because `chimeric_families`
-  // borrows into it and both must outlive the commit. Filled only inside the guard: a
-  // read that cannot be priced gets no second family.
+  // The pieces' store, outside the coverage guard because `chimeric_families` borrows
+  // into it and both must outlive the commit. Filled only inside the guard: a read that
+  // cannot be priced gets no piece.
   std::vector<rna::RnaSpliceRealizationResult> chimeric_results;
   std::vector<rna::RnaChimericFamily> chimeric_families;
   // Meaningful exactly when chain_mapq_ptr is set.
@@ -1368,699 +1582,263 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
                        lifecycle_dp2_owner.has_value() &&
                        *lifecycle_dp2_owner == i;
       // A realized rival is already bounded by rho = dp2/dp1 and stays out of x_floor;
-      // a chained-only or censored rival enters it.
+      // a chained-only or censored rival enters it, and so does a co-primary, realized
+      // for the pieces rather than as a price.
       rival.realized_dp = other.realized && other.dp_maximum.has_value() &&
-                          *other.dp_maximum > 0;
+                          *other.dp_maximum > 0 &&
+                          other.klass != rna::RnaRivalClass::CoPrimary;
       chain_evidence.rivals.push_back(rival);
     }
     cigar_chain_mapq = rna::rna_chain_mapq(chain_evidence, &primary_breakdown);
     chain_mapq_ptr = &cigar_chain_mapq;
 
-    // The query partition, run only after the primary's MAPQ is fixed: above this line
-    // every decision reads `hypotheses`, and a segment the catalogue never returned must
-    // not enter the election, the dp2 selection or the primary's rivals. The primary is
-    // its realized segments; the lifecycle's other chains, colinear staircases of the
-    // residue peaks and a re-vote over the unexplained query are candidates, and one
-    // exact partition of the read's tiles decides which segment explains which stretch
-    // (query_partition.h). Each window it returns is harvested and chained by
-    // chain_one_rival on that stretch, then realized, priced and emitted like a
-    // co-primary.
-    rna::RnaExplainResult explain;
-    // Every hypothesis the partition nominated (a window's harvest, or a unit chained as
-    // a contender), emitted strongest chain first.
-    struct ExplainNominee {
-      std::size_t hypothesis;
-      rna::RnaSegmentKind kind;
-      bool contender;
-    };
-    std::vector<ExplainNominee> explain_nominees;
-    // A contender's locus, built from its unit's peaks and borrowed by its hypothesis;
-    // reserved once before the first pointer is taken.
-    std::vector<rna::placement::CoarseLocus> contender_loci;
-    // The realized primary's geometry: the partition's pinned candidate, and
-    // the emission's other side of the colinearity rule.
-    rna::RnaSegmentGeometry primary_geometry;
+    // The leftover, after the primary's MAPQ: every forward interval of at least
+    // kRnaChimeraMinQueryBases that neither the primary's segments nor a piece covers is
+    // harvested from all its syncmers (rna_leftover_pools); each contig and lane's pool
+    // is chained by the lane's fine chain at minimap2's chain floor, each chain realized
+    // as a co-primary, and the after-election parent rule runs again with their regions
+    // behind the elected family's, in mm_hit_sort's order, so a primary among them is a
+    // piece. One pass.
     if (lifecycle_ran) {
-      // The realized primary hull, wider than the chain's span since the DP extends past
-      // its end anchors; the emission floor measures against it. Without one no second
-      // family is emitted, so nothing is harvested.
-      const std::optional<rna::RnaQuerySpan> realized_primary_hull =
-          rna::rna_realized_query_span(realized);
-      if (realized_primary_hull.has_value()) {
-        const AlignResult& realized_primary = realized.segments.front();
-        primary_geometry.reference_id = committed_chr;
-        primary_geometry.reverse = realized_primary.is_reverse;
-        primary_geometry.reference_begin =
-            static_cast<std::uint64_t>(std::max<std::int64_t>(
-                0, static_cast<std::int64_t>(realized_primary.pos)));
-        primary_geometry.reference_end =
-            static_cast<std::uint64_t>(std::max<std::int64_t>(
-                0, static_cast<std::int64_t>(realized_primary.target_end)));
-        primary_geometry.forward_span = *realized_primary_hull;
-        // One forward-frame query interval per realized primary segment, so the mask is
-        // what the primary aligned, not the gaps between.
-        std::vector<rna::RnaQuerySpan>& primary_segments =
-            worker_scratch.explain.segments;
-        primary_segments.clear();
+      std::vector<rna::RnaQuerySpan> intervals;
+      if (const std::optional<rna::RnaQuerySpan> primary_hull =
+              rna::rna_realized_query_span(realized)) {
+        std::vector<rna::RnaQuerySpan> segments;
         if (const rna::RnaSpliceHypothesisResult* winner =
-                rna::rna_winning_hypothesis(realized)) {
-          for (const rna::SpliceRegionEvidence& evidence :
-               winner->region_evidence)
-            primary_segments.push_back(
+                rna::rna_winning_hypothesis(realized))
+          for (const rna::SpliceRegionEvidence& evidence : winner->region_evidence)
+            segments.push_back(
                 rna::RnaQuerySpan{evidence.query_begin, evidence.query_end});
+        std::vector<rna::RnaQuerySpan> explained;
+        for (const PieceRegion& piece : pieces)
+          explained.push_back(rna::RnaQuerySpan{piece.region.qs, piece.region.qe});
+        rna::rna_leftover_intervals(*primary_hull, segments, explained, read_len,
+                                    rna::kRnaChimeraMinQueryBases, intervals);
+      }
+      const int n_chr = seed_ctx.chr_names
+                            ? static_cast<int>(seed_ctx.chr_names->size())
+                            : 0;
+      std::vector<rna::RnaLeftoverPool> leftover_pools;
+      if (!intervals.empty() && n_chr > 0 &&
+          rna::rna_leftover_pools(seed_ctx, *fwd_seeds, capture.views, intervals,
+                                  read_len, k, n_chr, leftover_pools)) {
+        auto params =
+            rna::rank1_anchor_path_params(rctx.ref.index->k(), harvest_options);
+        params.min_cnt = rna::kRnaLeftoverChainMinCount;
+        params.min_sc = rna::kRnaLeftoverChainMinScore;
+        // Each pool's best chain and the chains that do not compete with it.
+        struct LeftoverChain {
+          rna::ExactAnchorPath bundle;
+          rna::SiblingChainStats siblings;
+          int reference_id;
+          bool reverse;
+        };
+        std::vector<LeftoverChain> chains;
+        std::vector<rna::DisjointAnchorPath> disjoint;
+        for (const rna::RnaLeftoverPool& pool : leftover_pools) {
+          rna::SiblingChainStats siblings;
+          rna::ExactAnchorPathResult path = rna::select_exact_anchor_path(
+              read_key, read_len, pool.reference_id, pool.reverse, pool.pool,
+              params, &siblings, &disjoint);
+          if (path.refused)
+            continue;
+          chains.push_back(LeftoverChain{std::move(path.bundle), siblings,
+                                         pool.reference_id, pool.reverse});
+          for (rna::DisjointAnchorPath& chain : disjoint)
+            chains.push_back(LeftoverChain{std::move(chain.bundle), chain.siblings,
+                                           pool.reference_id, pool.reverse});
         }
-        // Every non-elected hypothesis the lifecycle chained, the demoted incumbent
-        // included, is a candidate on its anchors.
-        std::vector<rna::RnaExplainChained> chained;
-        chained.reserve(hypotheses.size());
-        for (std::size_t i = 0; i < hypotheses.size(); ++i) {
-          if (i == lifecycle_elected)
+        // No reallocation below: the hypotheses borrow the stored chains.
+        leftover_rivals.reserve(chains.size());
+        const std::size_t first_leftover = hypotheses.size();
+        const int first_index = static_cast<int>(loci.size());
+        rna::RnaSegmentGeometry elected_geometry;
+        const bool elected_placed =
+            shadow_geometry(hypotheses[lifecycle_elected], elected_geometry);
+        for (LeftoverChain& chain : chains) {
+          ProductionRival entry;
+          if (!rna::summarize_exact_anchor_path(chain.bundle, entry.summary, nullptr))
             continue;
-          const rna::RnaRealizedHypothesis& h = hypotheses[i];
-          if (!h.chained || h.bundle == nullptr || h.locus == nullptr)
+          entry.rival.candidate =
+              first_index + static_cast<int>(leftover_rivals.size());
+          entry.rival.reverse = chain.reverse;
+          entry.rival.chained = true;
+          entry.rival.chain_score = chain.bundle.anchor_path_score;
+          entry.rival.chain_anchors =
+              static_cast<int>(chain.bundle.anchor_path_anchor_count);
+          entry.rival.q_begin = entry.summary.first_query_begin;
+          entry.rival.q_end = entry.summary.last_query_end;
+          entry.siblings = chain.siblings;
+          entry.reference_id = chain.reference_id;
+          entry.chained_path = std::move(chain.bundle);
+          entry.owns_path = true;
+          leftover_rivals.push_back(std::move(entry));
+          const ProductionRival& stored = leftover_rivals.back();
+          rna::RnaRealizedHypothesis h;
+          h.catalogue_index = stored.rival.candidate;
+          h.reference_id = stored.reference_id;
+          h.bundle = &stored.chained_path;
+          h.summary = &stored.summary;
+          h.siblings = stored.siblings;
+          h.chained = true;
+          h.chain_score = stored.rival.chain_score;
+          h.chain_anchors = stored.rival.chain_anchors;
+          h.q_begin = stored.rival.q_begin;
+          h.q_end = stored.rival.q_end;
+          h.reverse = stored.rival.reverse;
+          h.klass = rna::RnaRivalClass::CoPrimary;
+          h.coverage_ok =
+              rna::anchor_union_query_coverage(*h.bundle, h.query_covered_bases);
+          // At the elected family's place it is a shadow, left out as the rule leaves
+          // them.
+          rna::RnaSegmentGeometry geometry;
+          h.shadow = elected_placed && shadow_geometry(h, geometry) &&
+                     rna::rna_same_place(elected_geometry, geometry, max_intron);
+          hypotheses.push_back(std::move(h));
+          rna::RnaRealizedHypothesis& candidate = hypotheses.back();
+          rna::RnaSpliceRealizationRequest leftover_request = request;
+          if (!candidate.coverage_ok ||
+              !bind_realization_reference(leftover_request, candidate.reference_id))
             continue;
-          rna::RnaExplainChained entry;
-          entry.hypothesis_index = static_cast<int>(i);
-          entry.locus = h.locus;
-          entry.bundle = h.bundle;
-          entry.reverse = h.reverse;
-          entry.rank_score = h.rank_score;
-          entry.q_begin = h.q_begin;
-          entry.q_end = h.q_end;
-          chained.push_back(entry);
+          candidate.result =
+              rna::realize_exact_anchor_path(leftover_request, *candidate.bundle);
+          candidate.realized = true;
+          price_hypothesis(candidate, candidate.result);
         }
-        rna::rna_explain_collect(
-            seed_ctx, *fwd_seeds, capture.views, peaks, copt, primary_geometry,
-            committed_locus->rank_score, primary_segments, chained, read_len, k,
-            min_support, max_intron, worker_scratch.explain, explain);
-        // Storage for every harvest this stage makes (at most one contender per unit,
-        // then the windows), reserved once: `hypotheses` holds raw pointers into these
-        // vectors.
-        std::size_t units = 0;
-        for (const rna::RnaSegmentCandidate& candidate : explain.candidates)
-          if (candidate.kind == rna::RnaSegmentKind::Unit ||
-              candidate.kind == rna::RnaSegmentKind::Revote)
-            ++units;
-        const std::size_t harvest_capacity =
-            units + static_cast<std::size_t>(rna::kRnaExplainMaxWindows);
-        partition_rivals.reserve(harvest_capacity);
-        partition_competing.reserve(harvest_capacity);
-        contender_loci.reserve(units);
-        partition_first_hypothesis = hypotheses.size();
-        // One running catalogue index past the kept range, so the queue's total order
-        // still resolves ties by index.
-        int nominee_counter = 0;
-        // One nominee window, harvested and appended through chain_one_rival like a
-        // catalogue rival. Returns whether the co-primary floor admitted it.
-        // `skeleton_peaks`: the vector the locus's peak_indices name when not the
-        // read's own (the partition's unit peaks).
-        const auto harvest_nominee =
-            [&](rna::placement::CoarseLocus& nominated, int catalogue_index,
-                std::int64_t competing, rna::RnaQuerySpan window,
-                std::size_t twin_hypothesis,
-                const std::vector<rna::placement::CoarseDiagonalPeak>*
-                    skeleton_peaks) {
-              const std::vector<rna::placement::CoarseDiagonalPeak>&
-                  harvest_peaks =
-                      skeleton_peaks != nullptr ? *skeleton_peaks : peaks;
-              // The skeleton reads peak_indices as query-ordered anchor priority and
-              // the coarse sweep leaves them in reference order, so sort them as the
-              // selector does for kept loci. The colinear score and intron estimate
-              // stay unset.
-              std::stable_sort(
-                  nominated.peak_indices.begin(), nominated.peak_indices.end(),
-                  [&harvest_peaks](uint32_t a, uint32_t b) {
-                    const auto& pa = harvest_peaks[a];
-                    const auto& pb = harvest_peaks[b];
-                    if (pa.oriented_query_begin != pb.oriented_query_begin)
-                      return pa.oriented_query_begin < pb.oriented_query_begin;
-                    if (pa.reference_begin != pb.reference_begin)
-                      return pa.reference_begin < pb.reference_begin;
-                    return a < b;
-                  });
-              // Restricted to the nominee's window: otherwise the harvest's
-              // +/- max_intron pad hands the chain the committed locus's anchors and
-              // the path re-finds the primary.
-              partition_rivals.push_back(
-                  chain_one_rival(nominated, catalogue_index, &window,
-                                  skeleton_peaks, committed_geometry_ptr));
-              partition_competing.push_back(competing);
-              const ProductionRival& entry = partition_rivals.back();
-              rna::RnaRealizedHypothesis h;
-              h.catalogue_index = catalogue_index;
-              h.reference_id = entry.reference_id;
-              h.locus = entry.rival.chained || entry.repaired ? &entry.locus
-                                                              : &nominated;
-              // The vote evidence the partition computed for this window.
-              h.rank_score = entry.rival.rank_score;
-              h.bundle = entry.owns_path ? &entry.chained_path : nullptr;
-              h.summary = &entry.summary;
-              h.siblings = entry.siblings;
-              h.chained = entry.rival.chained;
-              h.chain_score = entry.rival.chain_score;
-              h.chain_anchors = entry.rival.chain_anchors;
-              h.q_begin = entry.rival.q_begin;
-              h.q_end = entry.rival.q_end;
-              h.reverse = entry.rival.reverse;
-              h.repaired = entry.repaired;
-              h.shadow = entry.rival.shadow;
-              h.partition_nominated = true;
-              h.twin_hypothesis = twin_hypothesis;
-              h.klass = rna::RnaRivalClass::CoPrimary;
-              if (h.chained && h.bundle != nullptr) {
-                h.coverage_ok = rna::anchor_union_query_coverage(
-                    *h.bundle, h.query_covered_bases);
-                // minimap2's chain floor only; the query the family adds is judged on
-                // its realized hull by the emission floor.
-                h.admitted = h.chain_score >= rna::kRnaCoprimaryMinChainScore &&
-                             h.chain_anchors >= rna::kRnaCoprimaryMinAnchors;
-              }
-              const bool admitted = h.admitted;
-              hypotheses.push_back(std::move(h));
-              return admitted;
-            };
-        int contenders_seen = 0;
-        // Contenders: a unit whose tiles compete with a chained hypothesis's is chained
-        // before the solve, on its own span, so a contested interval is decided chain
-        // against chain. At most kRnaExplainMaxContenders units, strongest vote first.
-        std::vector<std::size_t>& contender_order =
-            worker_scratch.explain.offer_order;
-        contender_order.clear();
-        for (std::size_t u = 0; u < explain.candidates.size(); ++u) {
-          const rna::RnaSegmentCandidate& unit = explain.candidates[u];
-          if (unit.kind != rna::RnaSegmentKind::Unit &&
-              unit.kind != rna::RnaSegmentKind::Revote)
-            continue;
-          const rna::RnaQuerySpan unit_span = unit.geometry.forward_span;
-          if (unit_span.begin < 0 || unit_span.end <= unit_span.begin)
-            continue;
-          if (rna::rna_explain_contender(explain, u) < 0)
-            continue;
-          contender_order.push_back(u);
-        }
-        std::stable_sort(contender_order.begin(), contender_order.end(),
-                         [&explain](std::size_t a, std::size_t b) {
-                           const auto& ca = explain.candidates[a];
-                           const auto& cb = explain.candidates[b];
-                           if (ca.vote_evidence != cb.vote_evidence)
-                             return ca.vote_evidence > cb.vote_evidence;
-                           if (ca.chain_evidence != cb.chain_evidence)
-                             return ca.chain_evidence > cb.chain_evidence;
-                           return a < b;
-                         });
-        // One contender per place: a unit at a chained hypothesis's place is that
-        // hypothesis's own evidence, and a second unit at a chosen contender's place is
-        // the same segment again.
-        {
-          std::size_t chosen = 0;
-          for (std::size_t i = 0; i < contender_order.size(); ++i) {
-            if (chosen >=
-                static_cast<std::size_t>(rna::kRnaExplainMaxContenders))
-              break;
-            const rna::RnaSegmentGeometry& geometry =
-                explain.candidates[contender_order[i]].geometry;
-            bool same_place = false;
-            for (std::size_t c = 1;
-                 c < explain.candidates.size() && !same_place; ++c)
-              if (explain.candidates[c].kind == rna::RnaSegmentKind::Chained)
-                same_place = rna::rna_same_place(
-                    geometry, explain.candidates[c].geometry, max_intron);
-            for (std::size_t j = 0; j < chosen && !same_place; ++j)
-              same_place = rna::rna_same_place(
-                  geometry, explain.candidates[contender_order[j]].geometry,
-                  max_intron);
-            if (same_place)
-              continue;
-            contender_order[chosen++] = contender_order[i];
-          }
-          contender_order.resize(chosen);
-        }
-        for (const std::size_t u : contender_order) {
-          const rna::RnaSegmentCandidate& unit = explain.candidates[u];
-          const rna::RnaQuerySpan unit_span = unit.geometry.forward_span;
-          contender_loci.push_back(
-              rna::rna_explain_unit_locus(explain, unit.staircase_index));
-          const int catalogue_index =
-              static_cast<int>(loci.size()) + nominee_counter++;
-          ++contenders_seen;
-          // Chained over the whole unexplained piece the unit lies in, like
-          // a window's harvest: the chain, not the unit's peaks, says how
-          // far the segment reaches.
-          const rna::RnaQuerySpan contender_piece =
-              rna::rna_explain_piece(worker_scratch.explain, unit_span);
-          harvest_nominee(
-              contender_loci.back(), catalogue_index, 0,
-              contender_piece.begin >= 0 ? contender_piece : unit_span,
-              static_cast<std::size_t>(-1), &explain.unit_peaks);
-          const std::size_t chained_index = hypotheses.size() - 1;
-          const rna::RnaRealizedHypothesis& h = hypotheses[chained_index];
-          if (h.chained && h.bundle != nullptr) {
-            rna::rna_explain_candidate_chained(
-                explain, u, static_cast<int>(chained_index), *h.bundle,
-                h.reverse, read_len, k, explain.candidates.front().support);
-            explain_nominees.push_back({chained_index, unit.kind, true});
-          }
-        }
-        rna::rna_explain_solve(copt, primary_geometry, primary_segments,
-                               read_len, k, max_intron, worker_scratch.explain,
-                               explain);
-        // The windows, in query order. A window owned by a contender reuses the
-        // contender's chain; one owned by a chained hypothesis is re-chained inside the
-        // window with that hypothesis as its twin (the same placement, never its rival).
-        for (std::size_t w = 0; w < explain.windows.size(); ++w) {
-          rna::RnaExplainWindow& window = explain.windows[w];
-          const int catalogue_index =
-              static_cast<int>(loci.size()) + nominee_counter++;
-          const bool contender = window.kind != rna::RnaSegmentKind::Chained &&
-                                 window.hypothesis_index >= 0;
-          if (contender) {
-            // The owner was chained on its own span before the solve; that chain is
-            // the family, and its competing vote is the window's.
-            const std::size_t owner =
-                static_cast<std::size_t>(window.hypothesis_index);
-            if (owner >= partition_first_hypothesis &&
-                owner - partition_first_hypothesis < partition_competing.size())
-              partition_competing[owner - partition_first_hypothesis] =
-                  window.competing_vote;
-            --nominee_counter;
-            continue;
-          }
-          const std::size_t twin =
-              window.hypothesis_index >= 0
-                  ? static_cast<std::size_t>(window.hypothesis_index)
-                  : static_cast<std::size_t>(-1);
-          harvest_nominee(window.locus, catalogue_index, window.competing_vote,
-                          window.piece, twin,
-                          window.unit_peaks ? &explain.unit_peaks : nullptr);
-          const std::size_t harvested = hypotheses.size() - 1;
-          // A contender chained over this window's stretch also answers to the window's
-          // competing vote; the emission takes the strongest chain either way.
-          for (const ExplainNominee& nominee : explain_nominees) {
-            if (!nominee.contender)
-              continue;
-            const rna::RnaRealizedHypothesis& ch =
-                hypotheses[nominee.hypothesis];
-            const rna::RnaQuerySpan contender_span =
-                rna::rna_forward_query_span(ch.q_begin, ch.q_end, ch.reverse,
-                                            read_len);
-            if (!rna::rna_query_spans_compete(window.span, contender_span))
-              continue;
-            if (nominee.hypothesis >= partition_first_hypothesis &&
-                nominee.hypothesis - partition_first_hypothesis <
-                    partition_competing.size()) {
-              std::int64_t& competing =
-                  partition_competing[nominee.hypothesis -
-                                      partition_first_hypothesis];
-              competing = std::max(competing, window.competing_vote);
-            }
-          }
-          explain_nominees.push_back({harvested, window.kind, false});
+        // Their regions that pass minimap2's region filter, sorted with the regions
+        // behind the elected family's, which stay first and unchanged.
+        std::vector<rna::RnaParentHit> added;
+        for (std::size_t i = first_leftover; i < hypotheses.size(); ++i)
+          if (hypotheses[i].realized)
+            append_dp_hits(i, hypotheses[i].result, added);
+        added.erase(
+            std::remove_if(
+                added.begin(), added.end(),
+                [&](const rna::RnaParentHit& hit) {
+                  rna::SpliceRegionEvidence evidence =
+                      rna::rna_winning_hypothesis(
+                          hypotheses[static_cast<std::size_t>(hit.owner)].result)
+                          ->region_evidence[static_cast<std::size_t>(hit.segment)];
+                  evidence.dp_maximum = hit.dp_max;
+                  return rna::classify_splice_region(evidence, read_len,
+                                                     rctx.opts.splice_controller) !=
+                         rna::SpliceRegionReject::None;
+                }),
+            added.end());
+        if (!added.empty()) {
+          const int elected_owner = static_cast<int>(lifecycle_elected);
+          std::vector<rna::RnaParentHit> regions = pieces_dp_input;
+          const auto family_end = std::find_if(
+              regions.begin(), regions.end(), [&](const rna::RnaParentHit& hit) {
+                return hit.owner != elected_owner;
+              });
+          std::vector<rna::RnaParentHit> rest(family_end, regions.end());
+          regions.erase(family_end, regions.end());
+          rest.insert(rest.end(), added.begin(), added.end());
+          rna::rna_parent_hit_sort(rest);
+          regions.insert(regions.end(), rest.begin(), rest.end());
+          std::vector<char> left_out = pieces_left_out;
+          left_out.resize(hypotheses.size(), 0);
+          for (std::size_t i = first_leftover; i < hypotheses.size(); ++i)
+            left_out[i] = hypotheses[i].shadow ? 1 : 0;
+          decide_pieces(parent_regions(regions, &left_out), pieces_chain);
         }
       }
     }
-    // The partition has finished appending, so the hypothesis vector has its final
-    // size.
+
     locus_on_wire.assign(hypotheses.size(), 0);
-
-    // The second families: the partition's nominees, realized and emitted. Everything
-    // here is downstream of the primary's price and writes nothing back onto
-    // `hypotheses`. A family is emitted when its realized hull explains at least
-    // kRnaChimeraMinQueryBases query bases no accepted segment explains, at the
-    // alignment quality the primary must meet. When no window survives, a contender
-    // (chained before the solve) is emitted only if it won a partition block.
-    if (lifecycle_ran && !explain_nominees.empty()) {
-      const std::optional<rna::RnaQuerySpan> primary_hull =
-          rna::rna_realized_query_span(realized);
-      if (primary_hull.has_value()) {
-        constexpr std::size_t kMaxFamilies =
-            static_cast<std::size_t>(rna::kRnaChimeraMaxFamilies);
-        // The accepted segments, primary first: their hulls, segment-0 prices and
-        // owning hypotheses. An accepted family is a co-family member of every later
-        // one, never its rival.
-        std::vector<rna::RnaQuerySpan> accepted_hulls;
-        std::vector<int> accepted_dp0;
-        std::vector<std::size_t> accepted_indices;
-        accepted_hulls.reserve(kMaxFamilies + 1);
-        accepted_dp0.reserve(kMaxFamilies);
-        accepted_indices.reserve(kMaxFamilies);
-        accepted_hulls.push_back(*primary_hull);
-        // Reserved once: `chimeric_families` holds raw pointers into this vector.
-        chimeric_results.reserve(kMaxFamilies);
-        chimeric_families.reserve(kMaxFamilies);
-        // Strongest chain first, minimap2's primary order. A chain competing at
-        // mask_level with an accepted hull is refused before it is realized.
-        std::vector<std::size_t> emission_order;
-        emission_order.reserve(explain_nominees.size());
-        for (std::size_t q = 0; q < explain_nominees.size(); ++q)
-          emission_order.push_back(q);
-        std::stable_sort(emission_order.begin(), emission_order.end(),
-                         [&](std::size_t a, std::size_t b) {
-                           const rna::RnaRealizedHypothesis& ha =
-                               hypotheses[explain_nominees[a].hypothesis];
-                           const rna::RnaRealizedHypothesis& hb =
-                               hypotheses[explain_nominees[b].hypothesis];
-                           if (ha.chain_score != hb.chain_score)
-                             return ha.chain_score > hb.chain_score;
-                           if (ha.chain_anchors != hb.chain_anchors)
-                             return ha.chain_anchors > hb.chain_anchors;
-                           // A tie between a window's own harvest and a
-                           // contender goes to the harvest: the solve nominated
-                           // it on the tiles it explains.
-                           if (explain_nominees[a].contender !=
-                               explain_nominees[b].contender)
-                             return !explain_nominees[a].contender;
-                           return a < b;
-                         });
-        for (const std::size_t q : emission_order) {
-          if (chimeric_families.size() >= kMaxFamilies)
-            break;
-          const std::size_t index = explain_nominees[q].hypothesis;
-          const rna::RnaRealizedHypothesis& candidate = hypotheses[index];
-          if (!candidate.admitted || candidate.bundle == nullptr)
-            continue;
-          // With no window left, a contender the solve gave no block was not chosen by
-          // the partition: it stays a hypothesis, a rival and runner-up of any other
-          // family. One that won a block stays eligible though the window filters
-          // dropped its window.
-          if (explain_nominees[q].contender && explain.windows.empty() &&
-              std::none_of(explain.candidates.begin(), explain.candidates.end(),
-                           [index](const rna::RnaSegmentCandidate& c) {
-                             return c.owns_block &&
-                                    c.hypothesis_index == static_cast<int>(index);
-                           }))
-            continue;
-          const rna::RnaQuerySpan candidate_span = rna::rna_forward_query_span(
-              candidate.q_begin, candidate.q_end, candidate.reverse, read_len);
-          {
-            bool competes = false;
-            for (const rna::RnaQuerySpan& accepted : accepted_hulls)
-              if (rna::rna_query_spans_compete(candidate_span, accepted))
-                competes = true;
-            if (competes) {
-              continue;
-            }
-          }
-          rna::RnaSpliceRealizationRequest chimeric_request = request;
-          // A contig that will not bind is a family skipped; the primary is unaffected.
-          if (!bind_realization_reference(chimeric_request,
-                                          candidate.reference_id)) {
-            continue;
-          }
-          rna::RnaSpliceRealizationResult chimeric_result;
-          if (candidate.realized) {
-            chimeric_result = candidate.result; // realized above, as a price
-          } else {
-            chimeric_result = rna::realize_exact_anchor_path(
-                chimeric_request, *candidate.bundle);
-          }
-          if (chimeric_result.refused || chimeric_result.segments.empty()) {
-            continue;
-          }
-          const std::optional<int> chimeric_dp0 =
-              rna::rna_segment0_dp_maximum(chimeric_result);
-          const std::optional<rna::RnaQuerySpan> chimeric_hull =
-              rna::rna_realized_query_span(chimeric_result);
-          const rna::RnaQuerySpan hull =
-              chimeric_hull.value_or(rna::RnaQuerySpan{});
-          if (!rna::rna_chimera_family_admitted(
-                  chimeric_dp0, hull,
-                  rctx.opts.splice_controller.minimum_dp_maximum)) {
-            continue;
-          }
-          // The floor: the query the family explains that no accepted segment does. No
-          // accepted segment may compete with it at mask_level either: then it is a
-          // second description of those bases, a rival, not a second primary.
-          std::int64_t exclusive = hull.end - hull.begin;
-          bool competes = false;
-          for (const rna::RnaQuerySpan& accepted : accepted_hulls) {
-            exclusive -= std::max(0, std::min(hull.end, accepted.end) -
-                                         std::max(hull.begin, accepted.begin));
-            if (rna::rna_query_spans_compete(hull, accepted))
-              competes = true;
-          }
-          if (competes || exclusive < rna::kRnaChimeraMinQueryBases) {
-            continue;
-          }
-
-          // This family's MAPQ, from the same formula with the family as the committed
-          // hypothesis: its chain supplies f1, cnt, sib_f2 and the winner span, its
-          // realization dp1 and identity, its hull the brake's denominator, and every
-          // other competing hypothesis becomes a rival. The primary's evidence is only
-          // read. Another hypothesis competes on its realized hull when it has one (the
-          // elected primary's is the primary hull), else on its chain span. Excluded
-          // throughout: the family itself, its twin and every accepted family.
-          const auto competition_span =
-              [&](std::size_t j) -> rna::RnaQuerySpan {
-            if (j == lifecycle_elected)
-              return *primary_hull;
-            const rna::RnaRealizedHypothesis& other = hypotheses[j];
-            if (other.aq_begin >= 0 && other.aq_end > other.aq_begin)
-              return rna::RnaQuerySpan{other.aq_begin, other.aq_end};
-            return rna::rna_forward_query_span(other.q_begin, other.q_end,
-                                               other.reverse, read_len);
-          };
-          // The family's place: its realized segments' reference hull on its strand. A
-          // hypothesis at the same place (rna_same_place) is a second description of
-          // this segment, not a rival.
-          const auto reference_hull =
-              [](const std::vector<AlignResult>& segments,
-                 rna::RnaSegmentGeometry& geometry) {
-                bool first_segment = true;
-                for (const AlignResult& segment : segments) {
-                  const std::uint64_t begin =
-                      static_cast<std::uint64_t>(std::max<std::int64_t>(
-                          0, static_cast<std::int64_t>(segment.pos)));
-                  const std::uint64_t end =
-                      static_cast<std::uint64_t>(std::max<std::int64_t>(
-                          0, static_cast<std::int64_t>(segment.target_end)));
-                  if (first_segment) {
-                    geometry.reference_begin = begin;
-                    geometry.reference_end = end;
-                    first_segment = false;
-                  } else {
-                    geometry.reference_begin =
-                        std::min(geometry.reference_begin, begin);
-                    geometry.reference_end =
-                        std::max(geometry.reference_end, end);
-                  }
-                }
-              };
-          rna::RnaSegmentGeometry family_geometry;
-          family_geometry.reference_id = candidate.reference_id;
-          family_geometry.reverse = chimeric_result.segments.front().is_reverse;
-          family_geometry.forward_span = hull;
-          reference_hull(chimeric_result.segments, family_geometry);
-          // A family that continues the primary (same contig and strand, query order
-          // agreeing with reference order at both ends, reference spans overlapping or
-          // within one legal intron) is an exon the realizer skipped or did not reach,
-          // not a second place. A family that steps back on the reference (a duplicated
-          // exon, a back-splice) stays.
-          if (rna::rna_segment_continuation(primary_geometry, family_geometry,
-                                            max_intron)) {
-            continue;
-          }
-          const auto hypothesis_geometry = [&](std::size_t j) {
-            const rna::RnaRealizedHypothesis& other = hypotheses[j];
-            rna::RnaSegmentGeometry geometry;
-            geometry.reference_id = other.reference_id;
-            geometry.reverse = other.reverse;
-            if (other.realized && !other.result.segments.empty()) {
-              geometry.reverse = other.result.segments.front().is_reverse;
-              reference_hull(other.result.segments, geometry);
-            } else if (other.chained && other.summary != nullptr &&
-                       other.summary->last_reference_end >
-                           other.summary->first_reference_begin) {
-              geometry.reference_begin = static_cast<std::uint64_t>(
-                  std::max(0, other.summary->first_reference_begin));
-              geometry.reference_end = static_cast<std::uint64_t>(
-                  std::max(0, other.summary->last_reference_end));
-            } else if (other.locus != nullptr) {
-              geometry.reference_begin = other.locus->reference_begin;
-              geometry.reference_end = other.locus->reference_end;
-            }
-            geometry.forward_span = competition_span(j);
-            return geometry;
-          };
-          const auto excluded = [&](std::size_t j) {
-            if (j == index || j == candidate.twin_hypothesis)
-              return true;
-            for (const std::size_t accepted : accepted_indices)
-              if (accepted == j)
-                return true;
-            return j != lifecycle_elected &&
-                   rna::rna_same_place(family_geometry, hypothesis_geometry(j),
-                                       max_intron);
-          };
-          // The family's runner-up, realized for the price only: the strongest admitted
-          // nominee whose chain competes with this hull at another place, as the
-          // lifecycle does for the primary (dp2 is realized evidence, never a chain
-          // score). One per family.
-          for (const std::size_t r : emission_order) {
-            const std::size_t j = explain_nominees[r].hypothesis;
-            if (excluded(j))
-              continue;
-            rna::RnaRealizedHypothesis& other = hypotheses[j];
-            if (!other.admitted || other.bundle == nullptr || other.realized)
-              continue;
-            if (!rna::rna_query_spans_compete(
-                    rna::rna_forward_query_span(other.q_begin, other.q_end,
-                                                other.reverse, read_len),
-                    hull))
-              continue;
-            rna::RnaSpliceRealizationRequest runner_request = request;
-            if (bind_realization_reference(runner_request,
-                                           other.reference_id)) {
-              other.result = rna::realize_exact_anchor_path(
-                  runner_request, *other.bundle);
-              other.realized = true;
-              price_hypothesis(other, other.result);
-            }
-            break;
-          }
-          // dp2: the largest positive realized DP maximum among the competing
-          // hypotheses and competing accepted families (priced by segment 0). Ascending
-          // order with a strict `>` gives ties to the lower index, as
-          // rna_select_dp2_owner does. 0 means nothing competes (branch B).
-          int family_dp2 = 0;
-          std::optional<std::size_t> family_dp2_owner;
-          for (std::size_t j = 0; j < hypotheses.size(); ++j) {
-            if (excluded(j))
-              continue;
-            const rna::RnaRealizedHypothesis& other = hypotheses[j];
-            if (!other.realized || !other.dp_maximum.has_value() ||
-                *other.dp_maximum <= 0)
-              continue;
-            // A shadow of the primary would count the primary's own maximum again.
-            if (other.shadow)
-              continue;
-            if (!rna::rna_query_spans_compete(candidate_span,
-                                              competition_span(j)))
-              continue;
-            if (*other.dp_maximum > family_dp2) {
-              family_dp2 = *other.dp_maximum;
-              family_dp2_owner = j;
-            }
-          }
-          for (std::size_t a = 0; a < accepted_dp0.size(); ++a) {
-            if (!rna::rna_query_spans_compete(candidate_span,
-                                              accepted_hulls[a + 1]))
-              continue;
-            if (accepted_dp0[a] > family_dp2) {
-              family_dp2 = accepted_dp0[a];
-              // Owned by no hypothesis, so no rival carries owns_dp2; the ratio
-              // still damps x.
-              family_dp2_owner.reset();
-            }
-          }
-          rna::RnaChainMapqEvidence family_evidence;
-          family_evidence.f1 = candidate.chain_score;
-          family_evidence.cnt = candidate.chain_anchors;
-          family_evidence.sib_f2 = candidate.siblings.sib_score;
-          family_evidence.winner_q_begin = candidate.q_begin;
-          family_evidence.winner_q_end = candidate.q_end;
-          family_evidence.rank1_score = candidate.rank_score;
-          // The demoted vote for this family: the largest vote competing with its
-          // window, among the partition's own candidates (competing_vote) and the
-          // competing hypotheses. 0 when nothing competes.
-          std::int64_t family_rank2 = 0;
-          if (index >= partition_first_hypothesis &&
-              index - partition_first_hypothesis < partition_competing.size())
-            family_rank2 =
-                partition_competing[index - partition_first_hypothesis];
-          for (std::size_t j = 0; j < hypotheses.size(); ++j) {
-            if (excluded(j))
-              continue;
-            if (rna::rna_query_spans_compete(candidate_span,
-                                             competition_span(j)))
-              family_rank2 = std::max(family_rank2, hypotheses[j].rank_score);
-          }
-          family_evidence.rank2_score = family_rank2;
-          family_evidence.read_len = read_len;
-          family_evidence.winner_reverse = candidate.reverse;
-          family_evidence.selected_query_covered_bases =
-              candidate.query_covered_bases;
-          // The brake divides by the family's hull, not the read length: a family
-          // explains a piece of the read by construction.
-          family_evidence.qcov_bases = hull.end - hull.begin;
-          // Every catalogue rival is chained, as for the primary.
-          family_evidence.unchained_zero = true;
-          family_evidence.dp1 = static_cast<double>(*chimeric_dp0);
-          if (family_dp2 > 0)
-            family_evidence.dp2 = static_cast<double>(family_dp2);
-          {
-            const AlignResult& family_primary =
-                chimeric_result.segments.front();
-            family_evidence.identity =
-                family_primary.alignment_accounting_valid &&
-                        family_primary.block_len > 0
-                    ? static_cast<double>(family_primary.matches) /
-                          static_cast<double>(family_primary.block_len)
-                    : 1.0;
-          }
-          // Scoring and calibration constants are the read's, taken from the
-          // primary's evidence.
-          family_evidence.match_sc = chain_evidence.match_sc;
-          family_evidence.sub_diff = chain_evidence.sub_diff;
-          family_evidence.qcov_tau = chain_evidence.qcov_tau;
-          family_evidence.disjoint_vote_damp =
-              chain_evidence.disjoint_vote_damp;
-          // The rivals: other hypotheses competing with the family for its query bases
-          // in the forward frame, the test that chose its dp2 and demoted vote. The
-          // formula's raw-span admission still applies.
-          family_evidence.rivals.reserve(hypotheses.size());
-          for (std::size_t j = 0; j < hypotheses.size(); ++j) {
-            if (excluded(j))
-              continue;
-            const rna::RnaRealizedHypothesis& other = hypotheses[j];
-            if (!rna::rna_query_spans_compete(candidate_span,
-                                              competition_span(j)))
-              continue;
-            rna::RnaChainMapqRival rival;
-            rival.candidate = other.catalogue_index;
-            rival.chained = other.chained;
-            rival.chain_score = other.chain_score;
-            rival.chain_anchors = other.chain_anchors;
-            rival.q_begin = other.q_begin;
-            rival.q_end = other.q_end;
-            rival.rank_score = other.rank_score;
-            rival.reverse = other.reverse;
-            rival.shadow = other.shadow;
-            rival.owns_dp2 = family_evidence.dp2 > 0.0 &&
-                             family_dp2_owner.has_value() &&
-                             *family_dp2_owner == j;
-            rival.realized_dp = other.realized &&
-                                other.dp_maximum.has_value() &&
-                                *other.dp_maximum > 0;
-            family_evidence.rivals.push_back(rival);
-          }
-          // The same pure out-parameter as the primary's.
-          rna::RnaChainMapqBreakdown family_breakdown;
-          const int family_mapq =
-              rna::rna_chain_mapq(family_evidence, &family_breakdown);
-
-          chimeric_results.push_back(std::move(chimeric_result));
-          rna::RnaChimericFamily family;
-          family.result = &chimeric_results.back();
-          family.mapq = family_mapq;
-          // cm:i and s1:i from this family's own chain, s2:i from its own rival set,
-          // never the primary's.
-          if (family_evidence.f1 > 0) {
-            family.chain_tags.chain_anchors = family_evidence.cnt;
-            family.chain_tags.chain_score = family_evidence.f1;
-            family.chain_tags.secondary_chain_score = family_breakdown.f2;
-          }
-          chimeric_families.push_back(family);
-          accepted_hulls.push_back(hull);
-          accepted_dp0.push_back(*chimeric_dp0);
-          accepted_indices.push_back(index);
-          // Record which loci this family put on the wire (its hypothesis, its twin,
-          // accepted families and everything at its place), so the runner-up attach
-          // does not print one again. For the incumbent the geometry is its chain span,
-          // not its realized hull.
-          for (std::size_t j = 0; j < locus_on_wire.size(); ++j)
-            if (excluded(j))
-              locus_on_wire[j] = 1;
+    // The pieces, each one flat supplementary record: its region's segment, priced by
+    // the chain MAPQ on its own region (dp_max, dp_max2, n_sub, identity),
+    // its hypothesis's chain and vote, its children as its rivals and its region's
+    // query span as the coverage brake's denominator.
+    if (lifecycle_ran && !pieces.empty()) {
+      const auto realization_of =
+          [&](std::size_t i) -> const rna::RnaSpliceRealizationResult& {
+        if (i == lifecycle_elected)
+          return realized;
+        if (i == 0)
+          return demoted_incumbent;
+        return hypotheses[i].result;
+      };
+      // Reserved once: `chimeric_families` borrows into `chimeric_results`.
+      chimeric_results.reserve(pieces.size());
+      chimeric_families.reserve(pieces.size());
+      for (const PieceRegion& piece : pieces) {
+        const rna::RnaParentHit& region = piece.region;
+        const std::size_t owner = static_cast<std::size_t>(region.owner);
+        const rna::RnaSpliceRealizationResult& result = realization_of(owner);
+        const std::size_t s = static_cast<std::size_t>(region.segment);
+        if (result.refused || s >= result.segments.size())
+          continue;
+        const AlignResult& segment = result.segments[s];
+        const rna::RnaRealizedHypothesis& candidate = hypotheses[owner];
+        rna::RnaChainMapqEvidence piece_evidence;
+        piece_evidence.f1 = candidate.chain_score;
+        piece_evidence.cnt = candidate.chain_anchors;
+        piece_evidence.sib_f2 = candidate.siblings.sib_score;
+        piece_evidence.winner_q_begin = candidate.q_begin;
+        piece_evidence.winner_q_end = candidate.q_end;
+        piece_evidence.rank1_score = candidate.rank_score;
+        // The demoted vote: the largest vote among its children.
+        for (const std::size_t c : piece.children)
+          piece_evidence.rank2_score =
+              std::max(piece_evidence.rank2_score, hypotheses[c].rank_score);
+        piece_evidence.read_len = read_len;
+        piece_evidence.winner_reverse = candidate.reverse;
+        piece_evidence.selected_query_covered_bases =
+            candidate.query_covered_bases;
+        piece_evidence.qcov_bases = region.qe - region.qs;
+        piece_evidence.unchained_zero = true;
+        if (region.dp_max > 0)
+          piece_evidence.dp1 = static_cast<double>(region.dp_max);
+        if (piece_evidence.dp1 > 0.0 && region.dp_max2 > 0)
+          piece_evidence.dp2 = static_cast<double>(region.dp_max2);
+        piece_evidence.identity =
+            segment.alignment_accounting_valid && segment.block_len > 0
+                ? static_cast<double>(segment.matches) /
+                      static_cast<double>(segment.block_len)
+                : 1.0;
+        piece_evidence.match_sc = chain_evidence.match_sc;
+        piece_evidence.sub_diff = chain_evidence.sub_diff;
+        piece_evidence.qcov_tau = chain_evidence.qcov_tau;
+        piece_evidence.disjoint_vote_damp = chain_evidence.disjoint_vote_damp;
+        piece_evidence.rivals.reserve(piece.children.size());
+        for (const std::size_t c : piece.children) {
+          const rna::RnaRealizedHypothesis& other = hypotheses[c];
+          rna::RnaChainMapqRival rival;
+          rival.candidate = other.catalogue_index;
+          rival.chained = other.chained;
+          rival.chain_score = other.chain_score;
+          rival.chain_anchors = other.chain_anchors;
+          rival.q_begin = other.q_begin;
+          rival.q_end = other.q_end;
+          rival.rank_score = other.rank_score;
+          rival.reverse = other.reverse;
+          rival.owns_dp2 = piece_evidence.dp2 > 0.0 && piece.dp2_owner == c;
+          rival.realized_dp = other.realized && other.dp_maximum.has_value() &&
+                              *other.dp_maximum > 0;
+          rival.parented = true;
+          piece_evidence.rivals.push_back(rival);
         }
+        piece_evidence.parent_rule = true;
+        piece_evidence.parent_n_sub = region.n_sub;
+        rna::RnaChainMapqBreakdown piece_breakdown;
+        const int piece_mapq =
+            rna::rna_chain_mapq(piece_evidence, &piece_breakdown);
+        rna::RnaSpliceRealizationResult piece_result;
+        piece_result.segments.push_back(segment);
+        chimeric_results.push_back(std::move(piece_result));
+        rna::RnaChimericFamily family;
+        family.result = &chimeric_results.back();
+        family.mapq = piece_mapq;
+        if (piece_evidence.f1 > 0) {
+          family.chain_tags.chain_anchors = piece_evidence.cnt;
+          family.chain_tags.chain_score = piece_evidence.f1;
+          family.chain_tags.secondary_chain_score = piece_breakdown.f2;
+        }
+        chimeric_families.push_back(family);
+        for (const std::size_t i : piece.place)
+          locus_on_wire[i] = 1;
       }
     }
   }
@@ -2152,10 +1930,9 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
     for (std::size_t i = 1; i < hypotheses.size(); ++i) {
       rna::RnaRealizedHypothesis& h = hypotheses[i];
       // Rivals of the committed record only: not the elected hypothesis (it is the
-      // record), not a partition nominee (a co-primary realized for a price), not a
-      // shadow.
+      // record), not a co-primary, not a shadow.
       if (i == lifecycle_elected || h.klass != rna::RnaRivalClass::Competitor ||
-          h.partition_nominated || !h.realized || on_wire(i) || !weighed(i))
+          !h.realized || on_wire(i) || !weighed(i))
         continue;
       collect(h.result, h);
     }

@@ -10,7 +10,6 @@
 #include "config.h"                          // rna::RnaConfig
 #include "realization/splice_controller.h"   // SpliceControllerOptions
 #include "realization/rival_lifecycle_config.h" // RnaRivalLifecycleConfig
-#include "../voting/query_partition.h"          // QueryPartitionParameters
 
 #include <memory>
 
@@ -27,10 +26,6 @@ struct ResolvedOptions {
   // unchanged by every hypothesis and continuation.
   SpliceControllerOptions splice_controller =
       ordinary_long_read_splice_options();
-
-  // Query-tile objective of the RNA query partition (query_partition.h), its only RNA
-  // reader. RNA keeps the struct's defaults.
-  ::fa::cpu::voting::QueryPartitionParameters query_partition;
 
   // Rank-1 harvest and exact-anchor-path chain options: the fine chain's query gap, which
   // -g sets, and its band, -r's first value.

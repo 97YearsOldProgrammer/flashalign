@@ -148,8 +148,8 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::DpZdrop, 'z', "", kPair, kStable, A,
          "INT[,INT]", SEC_ALIGN,
          "Z-drop score and inversion Z-drop score [800,200]", "", kBaseAlign},
-        // minimap2's -s. RNA admits a second family only when its DP maximum
-        // reaches it; a primary below it keeps its placement. DNA uses it as
+        // minimap2's -s. RNA prints a supplementary piece only when its DP
+        // maximum reaches it; a primary below it keeps its placement. DNA uses it as
         // the per-record emission floor when a CIGAR is realized, as
         // minimap2's mm_filter_regs; map-only ignores it.
         {OptionId::DpMinScore, 'S', "", kInt, kStable, A,

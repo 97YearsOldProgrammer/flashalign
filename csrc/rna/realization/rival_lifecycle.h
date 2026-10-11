@@ -4,7 +4,7 @@
 //      bases, a disjoint one is a co-primary, a different part of the read.
 //   2. Admit competitors by chain score (pri_ratio / min_diff), co-primaries by their
 //      own chain-quality floor.
-//   3. Realize the admitted competitors, bounded.
+//   3. Realize the admitted competitors, bounded, and the chain-stage co-primaries.
 //   4. Elect the primary on the realized DP maximum (mm_hit_sort on dp_max).
 //   5. Feed the demoted maxima to the MAPQ as dp2 / n_sub evidence.
 // This header is the pure policy; the backend owns storage, harvests, realizations and
@@ -17,9 +17,9 @@
 // the incumbent's (0) first. The catalogue is ordered by vote, then by minimap2's
 // read-seeded hash, so loci tied on votes too are decided by the hash.
 //
-// A co-primary never takes part in the election and never supplies dp2 or n_sub. An
-// admitted co-primary may be realized after the primary's MAPQ is fixed and emitted as a
-// second family with its own chain MAPQ; that writes nothing back onto the hypotheses.
+// A co-primary never takes part in the election and never supplies dp2 or n_sub. A
+// realized one may print as a supplementary piece with its own chain MAPQ; that writes
+// nothing back onto the hypotheses.
 #pragma once
 
 #include "splice_realizer.h"
@@ -83,13 +83,6 @@ struct RnaRealizedHypothesis {
   // Anchor-union query coverage of `bundle`, the commit's qcov input.
   std::uint64_t query_covered_bases = 0;
   bool coverage_ok = false;
-  // True only for a hypothesis the query partition appended after the primary's MAPQ
-  // was fixed; false for the incumbent and every catalogue rival.
-  bool partition_nominated = false;
-  // For a nominee re-chained from a hypothesis already in the vector: that hypothesis's
-  // index. The twin is the same placement, not a rival, and the family's pricing skips
-  // it. SIZE_MAX when there is none.
-  std::size_t twin_hypothesis = static_cast<std::size_t>(-1);
   // Lifecycle verdicts.
   RnaRivalClass klass = RnaRivalClass::Competitor;
   bool admitted = false;
@@ -132,26 +125,8 @@ inline constexpr int kRnaCoprimaryMinQueryBases = 50;
 bool rna_coprimary_admitted(int chain_score, int chain_anchors,
                             int uncovered_query_bases) noexcept;
 
-// Step 2c: the chimeric emission limits, stricter than the co-primary floor and applied
-// to realized geometry, since an emitted family must have been aligned, not merely
-// chained: at most kRnaChimeraMaxFamilies second families per read, each with a realized
-// hull of at least kRnaChimeraMinQueryBases. Fixed, not tunable.
-inline constexpr int kRnaChimeraMaxFamilies = 2;   // extra families per read
-                                                   // beyond the primary
-inline constexpr int kRnaChimeraOverlapNumerator = 1;
-inline constexpr int kRnaChimeraOverlapDenominator = 10;
+// The query a second-pass placement or rival must explain. Fixed, not tunable.
 inline constexpr int kRnaChimeraMinQueryBases = 100;
-
-// Both spans in the forward frame. Disjoint when the overlap is at most
-// floor(shorter / 10); a censored span on either side is not disjoint.
-bool rna_chimera_query_disjoint(RnaQuerySpan a, RnaQuerySpan b) noexcept;
-
-// A realized second family's quality bar: a segment-0 DP maximum of at least
-// `minimum_dp_maximum` (-S; a primary below it keeps its placement) and a hull
-// covering at least kRnaChimeraMinQueryBases.
-bool rna_chimera_family_admitted(std::optional<int> dp_segment0,
-                                 RnaQuerySpan hull,
-                                 int minimum_dp_maximum) noexcept;
 
 // Step 3: the realization queue's total order: chain score, then anchor count, then
 // catalogue index. Total, so the bounded budget never depends on the sort.

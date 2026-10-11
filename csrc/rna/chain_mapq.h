@@ -93,6 +93,9 @@ struct RnaChainMapqRival {
   // lifecycle but never supplies dp2 and is inadmissible to the formula (x, x_floor, f2,
   // n_sub, tie). Set in backend.cpp against the committed and the elected chain.
   bool shadow = false;
+  // Under RnaChainMapqEvidence::parent_rule: a region of this rival was a child of the
+  // priced region (rna_parent.h).
+  bool parented = false;
 };
 
 struct RnaChainMapqEvidence {
@@ -117,8 +120,8 @@ struct RnaChainMapqEvidence {
   // Anchor-union query bases covered by the committed fine chain, the brake's
   // numerator (the map-only PAF matches field).
   std::uint64_t selected_query_covered_bases = 0;
-  // The brake's denominator: 0 means read_len (the primary); a second family passes its
-  // realized hull's width.
+  // The brake's denominator: 0 means read_len (the primary); a piece passes its region's
+  // query span.
   int qcov_bases = 0;
   std::vector<RnaChainMapqRival> rivals;
   // Realized DP maxima with CIGAR output; 0 for map-only.
@@ -145,6 +148,10 @@ struct RnaChainMapqEvidence {
   // Coefficient of the damped disjoint-vote floor v, in [0, 1]; 0 disables it with no
   // float operation.
   double disjoint_vote_damp = 0.0;
+  // minimap2's parent rule in place of the span test: a chained rival is admissible
+  // only when `parented`, and n_sub is parent_n_sub, the priced region's own count.
+  bool parent_rule = false;
+  int parent_n_sub = 0;
 };
 
 // The formula's verdict on one rival, for the caller.

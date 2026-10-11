@@ -5,7 +5,7 @@
 #include "../seeding/scratch.h"         // ChainWindowPeakScratch
 #include "anchoring/skeleton_harvest.h" // SeedPostingMemo (per-read posting memo)
 #include "placement/coarse_chain.h"  // CoarseLocusScratch (envelope selection)
-#include "query_partition.h"         // RnaExplainScratch (the query partition)
+#include "query_partition.h"         // RnaExplainScratch (the re-vote)
 #include "placement/fused_capture.h" // FusedCaptureScratch (fused vote capture)
 #include "realization/splice_scratch.h" // SpliceRealizationScratch (DP arena)
 
@@ -19,8 +19,7 @@ struct WorkerScratch {
   ChainWindowPeakScratch rc;
   placement::FusedCaptureScratch capture;
   placement::CoarseLocusScratch coarse;
-  // The query partition's buffers: the solver's problem, the re-vote capture, the
-  // staircase DP arrays.
+  // The re-vote's capture and the unexplained-piece buffers.
   RnaExplainScratch explain;
   // Per-read posting memo shared by both strands (the reverse projection keeps canonical
   // keys and indexes it through n-1-j). Scoped to a read by new_read()'s generation bump:

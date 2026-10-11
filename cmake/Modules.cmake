@@ -96,6 +96,7 @@ add_library(flashalign_rna STATIC
     csrc/rna/realization/splice_realizer.cpp
     csrc/rna/realization/rank2_arbitration.cpp
     csrc/rna/realization/rival_lifecycle.cpp
+    csrc/rna/realization/rna_parent.cpp
     csrc/rna/backend.cpp)
 flashalign_configure_internal_target(flashalign_rna)
 target_link_libraries(flashalign_rna PRIVATE

@@ -17,8 +17,8 @@ struct RnaChainTags {
   int secondary_chain_score = -1;
 };
 
-// A second family emitted beside the committed one: a realized co-primary that cleared
-// the chimeric emission floor (realization/rival_lifecycle.h), with its own chain MAPQ.
+// A family emitted beside the committed one: a supplementary piece of the parent rule
+// (backend.cpp), with its own chain MAPQ.
 // `result` is borrowed from the caller's realization store and must outlive the commit.
 struct RnaChimericFamily {
   const RnaSpliceRealizationResult* result = nullptr;
