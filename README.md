@@ -141,8 +141,9 @@ flashalign align -ax splice:hq -u f ref.fa isoseq.fq.gz > aln.sam  # PacBio Iso-
 strand only, for reads already on that strand, such as direct RNA and Iso-Seq. For noisy
 Nanopore direct RNA, an index built with `-k 14` finds more junctions, short first and last
 exons above all. `splice:hq` differs from `splice` in scoring, in the vote's diagonal bin (48
-against 64), in the fine chain's query gap (10,000 against 20,000; `-g` sets it) and in the
-MAPQ coverage threshold (0.70 against 0.55).
+against 64), in the vote spacing (one seed per 16 query bases against 8, at least 128 per
+strand; `--vote-spacing` sets it) and in the MAPQ coverage threshold (0.70 against 0.55); both
+take minimap2's query gap, 2000 (`-g`).
 
 FlashAlign can take annotated junctions and prefer them during base alignment:
 

@@ -306,8 +306,7 @@ DNA presets only.
 .BI \-p \ FLOAT
 Minimal secondary-to-primary score ratio to output secondary mappings [0.8].
 Under a splice preset it
-retains a rival: a retained rival is weighed in the mapping quality, is what
-.BR s2 ,
+retains a rival: a retained rival is aligned, is what
 .B md
 and
 .B XA
@@ -996,7 +995,11 @@ and
 .B s1
 describe the chain a record comes from, the chain
 .B s2
-is compared against; a secondary alignment carries its own chain's. Under the
+is compared against.
+.B s2
+is taken over every rival the mapping quality weighs, before
+.B \-p
+applies, as in minimap2. A secondary alignment carries its own chain's. Under the
 DNA presets but ava\-ont and ava\-hifi, a primary or supplementary record
 carries the anchor count and score of its own part of that chain. A record
 without a chain, such as the inverted middle of a DNA alignment, carries none
