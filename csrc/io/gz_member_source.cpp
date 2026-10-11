@@ -82,6 +82,7 @@
 //      every wait checks abort, inflate checks it at every chunk, and a fix-up
 //      and the finder check `stopping` at every read.
 #include "gz_member_source.h"
+#include "bgzf_header.h"
 
 #include "deflate_split.h"
 #include "threading/parallel_for.h" // default_thread_count
@@ -216,15 +217,6 @@ int64_t pread_exact(int fd, void* buf, size_t count, uint64_t offset) {
     done += static_cast<size_t>(n);
   }
   return static_cast<int64_t>(done);
-}
-
-// A BGZF member is a gzip member with an FEXTRA 'BC' subfield.
-bool looks_like_bgzf(const unsigned char* head, size_t len) {
-  if (len < 14)
-    return false;
-  if ((head[3] & 0x04) == 0)
-    return false; // FLG.FEXTRA
-  return head[12] == 'B' && head[13] == 'C';
 }
 
 enum class SegState {
@@ -1927,7 +1919,7 @@ bool gz_member_parallel_eligible(const std::string& path, uint64_t min_bytes) {
   const int fd = ::open(path.c_str(), O_RDONLY);
   if (fd < 0)
     return false;
-  unsigned char head[18] = {0};
+  unsigned char head[kGzipExtraHeaderBytes];
   const int64_t got = pread_exact(fd, head, sizeof(head), 0);
   ::close(fd);
   if (got < 3)
@@ -1936,7 +1928,8 @@ bool gz_member_parallel_eligible(const std::string& path, uint64_t min_bytes) {
   // takes the serial path, which reports the error.
   if (head[0] != 0x1f || head[1] != 0x8b || head[2] != 0x08)
     return false;
-  return !looks_like_bgzf(head, static_cast<size_t>(got));
+  return parse_bgzf_header(head, static_cast<size_t>(got)).kind ==
+         BgzfHeaderKind::gzip;
 }
 
 MemberParallelGzByteSource::MemberParallelGzByteSource(

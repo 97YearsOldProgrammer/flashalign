@@ -1,11 +1,12 @@
 // The decompressed-byte source kseq.h reads from, so the decompressor can be
-// swapped without modifying kseq. A ByteSource must deliver exactly the bytes
-// zlib's gzread would, in order, and is read from one thread only. The
+// swapped without modifying kseq. The default policy delivers the bytes zlib's
+// gzread would, in order; BAM policy instead fails on confirmed damage. A source
+// is read from one thread only. The
 // implementations are ZlibByteSource below, MemberParallelGzByteSource
 // (io/gz_member_source.h) and BgzfByteSource
 // (io/bgzf_source.h); io/fastx.h make_byte_source() chooses. A gzip file
 // cut before a member's trailer reads as ending at the cut, as with gzread;
-// both sources call warn_truncated_gzip() when they reach the cut.
+// gzip-compatible sources call warn_truncated_gzip() when they reach the cut.
 #pragma once
 
 #include <zlib.h>
@@ -16,6 +17,17 @@
 #include <string>
 
 namespace fa { namespace cpu { namespace io {
+
+// A format probe uses gzip-compatible bytes but leaves warnings to the reader.
+enum class InputPolicy { gzip_compatible, gzip_probe, bam_integrity };
+
+struct ByteSourceStatus {
+    // A known compressed position; a source error uses its member's start.
+    uint64_t compressed_offset = ~uint64_t{0};
+    bool last_bgzf_empty = false;
+    bool at_member_start = false;
+    std::string error;
+};
 
 // read() returns the byte count, 0 at EOF, or < 0 on error, as gzread does.
 struct ByteSource {
@@ -28,6 +40,7 @@ struct ByteSource {
     // than only inside the last member's trailer, so the record the cut
     // interrupts is incomplete. Set by the time read() returns 0.
     virtual bool cut_in_data() const { return false; }
+    virtual ByteSourceStatus status() const { return {}; }
 };
 
 // The read function passed to KSEQ_INIT.
@@ -47,24 +60,31 @@ void warn_truncated_gzip(const std::string& path);
 class ZlibByteSource : public ByteSource {
 public:
     // Throws std::runtime_error if `path` cannot be opened.
-    explicit ZlibByteSource(const std::string& path);
+    explicit ZlibByteSource(const std::string& path,
+                            InputPolicy policy = InputPolicy::gzip_compatible);
     // Reads the file `path` from byte `start_offset`. With `after_member` the
     // bytes there follow a gzip member, so anything but the gzip magic ends
-    // the input, as gzread ignores it, rather than being passed through.
+    // the input under gzip-compatible policy, rather than being passed through.
+    // BAM policy refuses such trailing bytes and retains the last marker state.
     ZlibByteSource(const std::string& path, uint64_t start_offset,
-                   bool after_member);
+                   bool after_member,
+                   InputPolicy policy = InputPolicy::gzip_compatible,
+                   bool last_bgzf_empty = false);
     ~ZlibByteSource() override;
     ZlibByteSource(const ZlibByteSource&) = delete;
     ZlibByteSource& operator=(const ZlibByteSource&) = delete;
 
     int read(void* buf, int len) override;
     bool cut_in_data() const override { return cut_in_data_; }
+    ByteSourceStatus status() const override { return status_; }
 
 private:
     enum class Mode { kLook, kCopy, kGzip, kEnd, kError };
 
     bool fill();
     bool inflate_some();
+    bool prepare_member();
+    bool fail(const std::string& reason, bool at_member_start = true);
     int deliver(size_t n);
     void advise();
 
@@ -85,6 +105,10 @@ private:
     static constexpr uint64_t kDropStep = 64ull << 20;
 
     std::string path_;
+    InputPolicy policy_;
+    ByteSourceStatus status_;
+    uint64_t member_start_ = 0;
+    size_t member_bgzf_bytes_ = 0;
     int fd_ = -1;
     bool owns_fd_ = false; // false for stdin
     std::unique_ptr<unsigned char[]> in_;

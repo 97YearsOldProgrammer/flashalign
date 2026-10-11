@@ -67,8 +67,11 @@ inline void uppercase_inplace(std::string& seq) {
 // bytes; everything else, and any failure to start either, gets
 // ZlibByteSource. `plan` (or null for defaults) sets threads and memory only.
 inline std::unique_ptr<ByteSource>
-make_byte_source(const std::string& path, const IoPlan* plan = nullptr) {
-  if ((plan == nullptr || plan->parallel_gz) &&
+make_byte_source(const std::string& path, const IoPlan* plan = nullptr,
+                 InputPolicy policy = InputPolicy::gzip_compatible) {
+  // Generic-gzip BAM is supported serially, where every member is validated.
+  if (policy == InputPolicy::gzip_compatible &&
+      (plan == nullptr || plan->parallel_gz) &&
       gz_member_parallel_eligible(path)) {
     try {
       return std::make_unique<MemberParallelGzByteSource>(
@@ -81,12 +84,12 @@ make_byte_source(const std::string& path, const IoPlan* plan = nullptr) {
       bgzf_eligible(path)) {
     try {
       return std::make_unique<BgzfByteSource>(
-          path, plan == nullptr ? GzMemberSourceOptions() : plan->gz);
+          path, plan == nullptr ? GzMemberSourceOptions() : plan->gz, policy);
     } catch (const std::exception&) {
       // As above.
     }
   }
-  return std::make_unique<ZlibByteSource>(path);
+  return std::make_unique<ZlibByteSource>(path, policy);
 }
 
 class FastxReader {

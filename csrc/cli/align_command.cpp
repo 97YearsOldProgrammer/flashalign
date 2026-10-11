@@ -94,8 +94,11 @@ bool decode_loan_can_be_fed(const std::vector<std::string>& reads_paths,
   if (reads_paths.empty())
     return false;
   for (const std::string& path : reads_paths) {
-    if (!(gz && ::fa::cpu::io::gz_member_parallel_eligible(path)) &&
-        !(bgzf && ::fa::cpu::io::bgzf_eligible(path)))
+    if (bgzf && ::fa::cpu::io::bgzf_eligible(path))
+      continue;
+    // Generic-gzip BAM uses strict serial decoding, so it cannot feed a loan.
+    if (!(gz && ::fa::cpu::io::gz_member_parallel_eligible(path) &&
+          !::fa::cpu::io::path_is_bam(path)))
       return false;
   }
   return true;

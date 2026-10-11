@@ -9,12 +9,14 @@
 //   - A block is accepted only when its raw inflate ends exactly at its
 //     trailer and its output matches the trailer's CRC-32 and ISIZE.
 //   - The cut stops at the first block that is not BGZF-shaped (gzip magic,
-//     deflate, FLG = FEXTRA alone, one 'BC' subfield of length 2, ISIZE at
+//     deflate, FLG = FEXTRA alone, a 'BC' subfield of length 2, ISIZE at
 //     most 64 KiB) or that runs past the end of the file, and delivery stops
 //     at the first block that fails a check. From there the rest of the file
 //     is read by ZlibByteSource(path, offset, after_member), so truncation,
 //     trailing data, a gzip member that is not BGZF and a corrupt block give
 //     the serial source's bytes, warning, cut_in_data() and -1.
+//   - BAM integrity policy follows the same fallback with strict framing and
+//     fatal truncation/trailing-data checks; it never treats damage as EOF.
 //
 // Memory: a ring of 2 * (workers + 1) runs, each a 32 MiB output buffer of
 // which only the pages its largest run wrote are resident (a FASTQ run's
@@ -57,7 +59,8 @@ public:
   // segment_stage_cap and staging_budget are unused. Throws
   // std::runtime_error if `path` cannot be opened or is not a regular file.
   explicit BgzfByteSource(const std::string& path,
-                          GzMemberSourceOptions options = {});
+                          GzMemberSourceOptions options = {},
+                          InputPolicy policy = InputPolicy::gzip_compatible);
   ~BgzfByteSource() override;
 
   BgzfByteSource(const BgzfByteSource&) = delete;
@@ -68,6 +71,7 @@ public:
 
   bool is_parallel() const override { return true; }
   bool cut_in_data() const override;
+  ByteSourceStatus status() const override;
 
 private:
   struct Impl;

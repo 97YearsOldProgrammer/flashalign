@@ -20,6 +20,7 @@
 // filler owns it (kRunning), and the page-cache advice, which only the token
 // holder touches.
 #include "bgzf_source.h"
+#include "bgzf_header.h"
 
 #include "threading/parallel_for.h" // default_thread_count
 #include "threading/thread_name.h"
@@ -48,10 +49,7 @@ namespace cpu {
 namespace io {
 namespace bgzf_detail {
 
-constexpr size_t kHeaderBytes = 18;
 constexpr size_t kTrailerBytes = 8;
-// Header, the shortest deflate stream (an empty fixed block) and trailer.
-constexpr size_t kMinBlockBytes = 28;
 constexpr uint32_t kMaxBlockOutput = 1u << 16;
 // Compressed input per run, and a ceiling on a run's output.
 constexpr size_t kRunInputBytes = 4u << 20;
@@ -67,14 +65,6 @@ constexpr uint64_t kRunsAhead = 2;
 inline uint32_t read_le32(const unsigned char* p) {
   return static_cast<uint32_t>(p[0]) | static_cast<uint32_t>(p[1]) << 8 |
          static_cast<uint32_t>(p[2]) << 16 | static_cast<uint32_t>(p[3]) << 24;
-}
-
-// Gzip magic, CM = deflate, FLG = FEXTRA only, XLEN = 6 holding one 'BC'
-// subfield with SLEN = 2; the deflate data then starts at byte 18.
-inline bool bgzf_shaped_header(const unsigned char* h) {
-  return h[0] == 0x1f && h[1] == 0x8b && h[2] == 8 && h[3] == 4 &&
-         h[10] == 6 && h[11] == 0 && h[12] == 'B' && h[13] == 'C' &&
-         h[14] == 2 && h[15] == 0;
 }
 
 // Reads the whole request, retrying EINTR. Returns the byte count (short only
@@ -100,6 +90,7 @@ int64_t pread_exact(int fd, void* buf, size_t count, uint64_t offset) {
 struct Block {
   uint32_t in_off;  // in the run's input
   uint32_t total;   // BSIZE + 1
+  uint32_t header_bytes;
   uint64_t out_off; // in the run's output
   uint32_t isize;
   uint32_t crc;
@@ -127,6 +118,8 @@ struct Slot {
   uint64_t out_len = 0;
   uint64_t out_pos = 0; // reader-owned once kReady
   bool failed = false;
+  uint64_t end_offset = 0;
+  bool last_bgzf_empty = false;
   uint64_t fail_offset = 0; // file offset of the first block that failed
 };
 
@@ -138,6 +131,8 @@ using namespace bgzf_detail;
 
 struct BgzfByteSource::Impl {
   std::string path;
+  InputPolicy policy = InputPolicy::gzip_compatible;
+  ByteSourceStatus status;
   int fd = -1;
   uint64_t size = 0;
   unsigned workers = 1;
@@ -220,19 +215,18 @@ struct BgzfByteSource::Impl {
         stop = file_end == size ? Stop::kEnd : Stop::kTail;
         break;
       }
-      if (have - p < kHeaderBytes) {
-        if (at + kHeaderBytes > file_end)
-          stop = Stop::kTail;
+      const unsigned char* h = in + p;
+      const BgzfHeader header = parse_bgzf_header(h, have - p);
+      if (header.kind == BgzfHeaderKind::need_more) {
+        if (pos + have == file_end) stop = Stop::kTail;
         break;
       }
-      const unsigned char* h = in + p;
-      if (!bgzf_shaped_header(h)) {
+      if (header.kind != BgzfHeaderKind::bgzf) {
         stop = Stop::kTail;
         break;
       }
-      const size_t total = (static_cast<size_t>(h[16]) |
-                            static_cast<size_t>(h[17]) << 8) + 1;
-      if (total < kMinBlockBytes || at + total > file_end) {
+      const size_t total = header.block_bytes;
+      if (at + total > file_end) {
         stop = Stop::kTail;
         break;
       }
@@ -246,7 +240,8 @@ struct BgzfByteSource::Impl {
       if (!sc.blocks.empty() && out_size + isize > kRunMaxOutput)
         break;
       sc.blocks.push_back(Block{static_cast<uint32_t>(p),
-                                static_cast<uint32_t>(total), out_size, isize,
+                                static_cast<uint32_t>(total),
+                                static_cast<uint32_t>(header.header_bytes), out_size, isize,
                                 read_le32(h + total - kTrailerBytes)});
       out_size += isize;
       p += total;
@@ -262,6 +257,8 @@ struct BgzfByteSource::Impl {
   void inflate_run(Scratch& sc, Slot& slot, uint64_t run_start) {
     slot.failed = false;
     slot.out_pos = 0;
+    slot.end_offset = run_start;
+    slot.last_bgzf_empty = false;
     try {
       // Sized once for any run; only the pages a run writes become resident.
       if (!slot.out)
@@ -291,8 +288,8 @@ struct BgzfByteSource::Impl {
       unsigned char* dst = out + b.out_off;
       z_stream& zs = sc.zs;
       inflateReset(&zs);
-      zs.next_in = sc.in.get() + b.in_off + kHeaderBytes;
-      zs.avail_in = static_cast<uInt>(b.total - kHeaderBytes - kTrailerBytes);
+      zs.next_in = sc.in.get() + b.in_off + b.header_bytes;
+      zs.avail_in = static_cast<uInt>(b.total - b.header_bytes - kTrailerBytes);
       zs.next_out = dst;
       zs.avail_out = static_cast<uInt>(b.isize);
       const int ret = inflate(&zs, Z_FINISH);
@@ -305,6 +302,8 @@ struct BgzfByteSource::Impl {
         break;
       }
       out_len = b.out_off + b.isize;
+      slot.end_offset = run_start + b.in_off + b.total;
+      slot.last_bgzf_empty = b.isize == 0;
     }
     slot.out_len = out_len;
   }
@@ -446,11 +445,14 @@ struct BgzfByteSource::Impl {
               std::min<uint64_t>(want, cur->out_len - cur->out_pos));
           std::memcpy(dst, cur->out.get() + cur->out_pos, n);
           cur->out_pos += n;
+          status.compressed_offset = cur->end_offset;
           return static_cast<int>(n);
         }
         std::unique_lock<std::mutex> lock(mu);
         Slot* done = cur;
         cur = nullptr;
+        status.compressed_offset = done->end_offset;
+        status.last_bgzf_empty = done->last_bgzf_empty;
         if (done->failed) {
           // Everything before the failed block is delivered; the serial
           // source takes it from there.
@@ -459,7 +461,8 @@ struct BgzfByteSource::Impl {
           release_ring_locked();
           work_cv.notify_all();
           lock.unlock();
-          tail.reset(new ZlibByteSource(path, at, at > 0));
+          tail.reset(new ZlibByteSource(path, at, at > 0, policy,
+                                        status.last_bgzf_empty));
           continue;
         }
         done->state = SlotState::kFree;
@@ -480,7 +483,8 @@ struct BgzfByteSource::Impl {
           if (has_tail) {
             const uint64_t at = tail_offset;
             lock.unlock();
-            tail.reset(new ZlibByteSource(path, at, at > 0));
+            tail.reset(new ZlibByteSource(path, at, at > 0, policy,
+                                        status.last_bgzf_empty));
           } else {
             finished = true;
           }
@@ -527,17 +531,20 @@ bool bgzf_eligible(const std::string& path, uint64_t min_bytes) {
   const int fd = ::open(path.c_str(), O_RDONLY);
   if (fd < 0)
     return false;
-  unsigned char head[kHeaderBytes] = {0};
+  unsigned char head[kGzipExtraHeaderBytes];
   const int64_t got = pread_exact(fd, head, sizeof(head), 0);
   ::close(fd);
-  return got == static_cast<int64_t>(sizeof(head)) && bgzf_shaped_header(head);
+  return got >= 0 && parse_bgzf_header(head, static_cast<size_t>(got)).kind ==
+                         BgzfHeaderKind::bgzf;
 }
 
 BgzfByteSource::BgzfByteSource(const std::string& path,
-                               GzMemberSourceOptions options)
+                               GzMemberSourceOptions options, InputPolicy policy)
     : impl_(new Impl()) {
   Impl* self = impl_.get();
   self->path = path;
+  self->policy = policy;
+  self->status.compressed_offset = 0;
   self->fd = ::open(path.c_str(), O_RDONLY);
   if (self->fd < 0)
     throw std::runtime_error("failed to open FASTA/FASTQ: " + path);
@@ -576,8 +583,13 @@ int BgzfByteSource::read(void* buf, int len) {
     return 0;
   try {
     return impl_->read(static_cast<char*>(buf), static_cast<size_t>(len));
-  } catch (...) {
+  } catch (const std::exception& e) {
     // Nothing may propagate into kseq.
+    impl_->status.error = e.what();
+    impl_->broken = true;
+    return -1;
+  } catch (...) {
+    impl_->status.error = "BGZF decoder failed";
     impl_->broken = true;
     return -1;
   }
@@ -585,6 +597,10 @@ int BgzfByteSource::read(void* buf, int len) {
 
 bool BgzfByteSource::cut_in_data() const {
   return impl_->tail && impl_->tail->cut_in_data();
+}
+
+ByteSourceStatus BgzfByteSource::status() const {
+  return impl_->tail ? impl_->tail->status() : impl_->status;
 }
 
 } // namespace io

@@ -1,4 +1,5 @@
 #include "byte_source.h"
+#include "bgzf_header.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -28,8 +29,8 @@ void warn_truncated_gzip(const std::string& path) {
                  path == "-" ? "stdin" : path.c_str());
 }
 
-ZlibByteSource::ZlibByteSource(const std::string& path)
-    : path_(path), in_(new unsigned char[kInputBytes]),
+ZlibByteSource::ZlibByteSource(const std::string& path, InputPolicy policy)
+    : path_(path), policy_(policy), in_(new unsigned char[kInputBytes]),
       out_(new unsigned char[kOutputBytes]) {
     next_ = in_.get();
     if (path == "-") {
@@ -45,9 +46,11 @@ ZlibByteSource::ZlibByteSource(const std::string& path)
 }
 
 ZlibByteSource::ZlibByteSource(const std::string& path, uint64_t start_offset,
-                               bool after_member)
-    : ZlibByteSource(path) {
+                               bool after_member, InputPolicy policy, bool last_bgzf_empty)
+    : ZlibByteSource(path, policy) {
     after_member_ = after_member;
+    status_.compressed_offset = start_offset;
+    status_.last_bgzf_empty = last_bgzf_empty;
     if (start_offset == 0) return;
     if (!owns_fd_ || ::lseek(fd_, static_cast<off_t>(start_offset), SEEK_SET) < 0)
         throw std::runtime_error("failed to seek in FASTA/FASTQ: " + path);
@@ -69,7 +72,7 @@ bool ZlibByteSource::fill() {
         const ssize_t n = ::read(fd_, in_.get() + avail_, kInputBytes - avail_);
         if (n < 0) {
             if (errno == EINTR) continue;
-            return false;
+            return fail(std::string("input read failed: ") + std::strerror(errno), false);
         }
         if (n == 0) eof_ = true;
         avail_ += static_cast<size_t>(n);
@@ -104,8 +107,15 @@ int ZlibByteSource::read(void* buf, int len) {
                 }
             }
             if (avail_ >= 2 && next_[0] == 0x1f && next_[1] == 0x8b) {
+                member_start_ = bytes_read_ - avail_;
+                status_.compressed_offset = member_start_;
+                if (policy_ == InputPolicy::bam_integrity && !prepare_member()) {
+                    mode_ = Mode::kError;
+                    return -1;
+                }
                 const int ret = zs_ready_ ? inflateReset(&zs_) : inflateInit2(&zs_, 15 + 16);
                 if (ret != Z_OK) {
+                    fail("cannot initialize gzip decoder");
                     mode_ = Mode::kError;
                     return -1;
                 }
@@ -113,6 +123,16 @@ int ZlibByteSource::read(void* buf, int len) {
                 final_block_ended_ = false;
                 mode_ = Mode::kGzip;
             } else {
+                // BAM must consume the complete stream, including after an empty block.
+                if (policy_ == InputPolicy::bam_integrity && avail_ > 0 &&
+                    (zs_ready_ || after_member_)) {
+                    member_start_ = bytes_read_ - avail_;
+                    fail(avail_ == 1 ? "incomplete next gzip header" :
+                         "invalid next gzip header or trailing bytes");
+                    mode_ = Mode::kError;
+                    return -1;
+                }
+                status_.compressed_offset = bytes_read_ - avail_;
                 // Plain input, or data after the last member, which gzread ignores.
                 mode_ = zs_ready_ || after_member_ ? Mode::kEnd : Mode::kCopy;
             }
@@ -162,7 +182,10 @@ bool ZlibByteSource::inflate_some() {
             // gzread's "unexpected end of file": what was decoded is delivered,
             // then EOF.
             cut_in_data_ = !final_block_ended_;
-            warn_truncated_gzip(path_);
+            if (policy_ == InputPolicy::bam_integrity)
+                return fail(final_block_ended_ ? "incomplete gzip trailer" :
+                            "incomplete gzip member");
+            if (policy_ != InputPolicy::gzip_probe) warn_truncated_gzip(path_);
             mode_ = Mode::kEnd;
             break;
         }
@@ -179,22 +202,63 @@ bool ZlibByteSource::inflate_some() {
         next_ += used;
         avail_ -= used;
         if (eof_ && (zs_.data_type & 192) == 192) final_block_ended_ = true;
+        if (policy_ == InputPolicy::bam_integrity && member_bgzf_bytes_ != 0 &&
+            (bytes_read_ - avail_ - member_start_ > member_bgzf_bytes_ ||
+             zs_.total_out > kBgzfMaxBytes))
+            return fail("BGZF BSIZE or uncompressed block size mismatch");
         if (ret == Z_STREAM_END) {
+            if (policy_ == InputPolicy::bam_integrity) {
+                if (member_bgzf_bytes_ != 0 &&
+                    bytes_read_ - avail_ - member_start_ != member_bgzf_bytes_)
+                    return fail("BGZF BSIZE does not match the complete gzip member");
+                status_.last_bgzf_empty = member_bgzf_bytes_ != 0 && zs_.total_out == 0;
+                status_.compressed_offset = bytes_read_ - avail_;
+            }
             mode_ = Mode::kLook;
             break;
         }
-        if (ret != Z_OK && ret != Z_BUF_ERROR) return false;
+        if (ret != Z_OK && ret != Z_BUF_ERROR) {
+            if (zs_.msg && std::strcmp(zs_.msg, "incorrect data check") == 0)
+                return fail("gzip CRC32 mismatch");
+            if (zs_.msg && std::strcmp(zs_.msg, "incorrect length check") == 0)
+                return fail("gzip ISIZE mismatch");
+            return fail(std::string("corrupt gzip member: ") +
+                        (zs_.msg ? zs_.msg : "inflate failed"));
+        }
         // A Z_BLOCK return at a block end may consume and produce nothing
         // (empty blocks decode from bits zlib already holds); anything else
         // that makes no progress twice is a zlib fault.
         const bool progress =
             used > 0 || zs_.avail_out != out_before || (zs_.data_type & 128) != 0;
         stalled = progress ? 0 : stalled + 1;
-        if (stalled >= 2) return false;
+        if (stalled >= 2) return fail("gzip decoder made no progress");
     }
     out_pos_ = 0;
     out_len_ = kOutputBytes - zs_.avail_out;
     return true;
+}
+
+bool ZlibByteSource::fail(const std::string& reason, bool at_member_start) {
+    status_.compressed_offset = at_member_start ? member_start_ : bytes_read_ - avail_;
+    status_.at_member_start = at_member_start;
+    status_.error = reason;
+    return false;
+}
+
+bool ZlibByteSource::prepare_member() {
+    member_bgzf_bytes_ = 0;
+    for (;;) {
+        const BgzfHeader header = parse_bgzf_header(next_, avail_);
+        if (header.kind == BgzfHeaderKind::need_more) {
+            if (eof_) return fail("incomplete gzip header");
+            if (!fill()) return false;
+            continue;
+        }
+        if (header.kind == BgzfHeaderKind::malformed) return fail(header.error);
+        if (header.kind == BgzfHeaderKind::bgzf)
+            member_bgzf_bytes_ = header.block_bytes;
+        return true;
+    }
 }
 
 void ZlibByteSource::advise() {

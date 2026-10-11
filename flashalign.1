@@ -86,6 +86,12 @@ which it aligns across introns. It outputs in the PAF or SAM format, PAF by
 default; it writes no BAM, so BAM is made by piping SAM to
 .BR samtools .
 .PP
+Reads may be FASTA/FASTQ (plain, gzip or BGZF) or BAM/uBAM regular files.
+Legal additional BGZF extra subfields are accepted. Confirmed BAM container
+or record damage and non-gzip trailing bytes are errors; a missing final
+BGZF EOF marker alone warns and succeeds. Discard partial output after an error.
+Embedded empty BGZF blocks do not end the input.
+.PP
 Seeds are closed syncmers, so an index is defined by the pair
 .RI ( k ,\  s ).
 .B flashalign index
