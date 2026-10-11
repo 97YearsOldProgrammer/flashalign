@@ -1002,6 +1002,27 @@ carries the anchor count and score of its own part of that chain. A record
 without a chain, such as the inverted middle of a DNA alignment, carries none
 of the three.
 .PP
+In SAM, the tags of a BAM input record ride every record of its read, spelled
+as
+.B samtools view
+spells them, after FlashAlign's own tags and before
+.BR SA .
+MM, ML, MN and a B array with one element per base of the read are left off a
+record whose SEQ is not the whole read: a hard\-clipped supplementary and a
+secondary alignment. An input tag that FlashAlign writes itself is dropped with
+a warning. The headers of the BAM inputs are merged: their
+.B @PG
+lines come before FlashAlign's, whose
+.B PP
+names the first input's last program, and their
+.B @RG
+and
+.B @CO
+lines after it; one read group ID declared differently by two inputs is an
+error. An aligned BAM is read as reads: its secondary and supplementary records
+are skipped and a mapped record loses its alignment tags. PAF carries no input
+tag.
+.PP
 The
 .B cs
 tag encodes difference sequences in the short form or the entire query

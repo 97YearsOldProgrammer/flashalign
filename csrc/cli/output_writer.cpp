@@ -9,11 +9,15 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace fa::cpu::cli {
@@ -101,24 +105,6 @@ std::unique_ptr<std::ostream> open_output_owner(const std::string& path,
     return output;
 }
 
-std::vector<std::string> passthrough_header_lines(
-    const std::string& source
-) {
-    std::vector<std::string> lines;
-    std::size_t begin = 0;
-    while (begin < source.size()) {
-        std::size_t end = source.find('\n', begin);
-        if (end == std::string::npos) end = source.size();
-        const std::string line = source.substr(begin, end - begin);
-        if (line.rfind("@RG\t", 0) == 0 ||
-            line.rfind("@CO\t", 0) == 0) {
-            lines.push_back(line);
-        }
-        begin = end + 1;
-    }
-    return lines;
-}
-
 // A passthrough @RG with the same ID as -R/--rg would define one read group
 // twice, so refuse it at startup.
 void require_no_read_group_conflict(
@@ -143,7 +129,104 @@ bool sam_tags_declare_read_group(const std::string& tags) {
            tags.find("\tRG:Z:") != std::string::npos;
 }
 
+// MM, ML, MN and the draft spellings Mm, Ml: they count bases of SEQ.
+bool is_base_modification_key(const char* key) {
+    return key[0] == 'M' && (key[1] == 'M' || key[1] == 'L' || key[1] == 'N' ||
+                             key[1] == 'm' || key[1] == 'l');
+}
+
+// A B array with one element per base of the read, such as PacBio's
+// kinetics; a shorter array (sn:B:f) describes the whole read.
+bool is_per_base_array(const char* tag, std::size_t read_length) {
+    if (tag[2] != 'B') return false;
+    std::uint32_t count;
+    std::memcpy(&count, tag + 4, 4);
+    return count == read_length;
+}
+
+// The read's input tags as SAM text, without those whose keys we write.
+output::PassthroughTags passthrough_tags(const io::FastxRecord& read,
+                                         const OwnTagKeys* own) {
+    output::PassthroughTags tags;
+    const std::string& blob = read.tag_bytes;
+    for (std::size_t at = 0; io::bam_tag_at(blob, at);) {
+        const std::size_t size = io::bam_tag_size(blob, at, read.name);
+        const char* tag = blob.data() + at;
+        at += size;
+        if (own != nullptr && own->drop(tag)) continue;
+        if (!tags.whole.empty()) tags.whole.push_back('\t');
+        const std::size_t begin = tags.whole.size();
+        io::append_bam_tag_sam_text(tags.whole, tag, size);
+        if (!is_base_modification_key(tag) &&
+            !is_per_base_array(tag, read.seq.size())) {
+            if (!tags.clipped.empty()) tags.clipped.push_back('\t');
+            tags.clipped.append(tags.whole, begin, std::string::npos);
+        }
+    }
+    return tags;
+}
+
 }  // namespace
+
+OwnTagKeys::OwnTagKeys(std::vector<std::string> keys)
+    : keys_(std::move(keys)),
+      warned_(std::make_unique<std::atomic<bool>[]>(keys_.size())) {}
+
+bool OwnTagKeys::drop(const char* key) const {
+    for (std::size_t k = 0; k < keys_.size(); ++k) {
+        if (keys_[k][0] != key[0] || keys_[k][1] != key[1]) continue;
+        if (!warned_[k].exchange(true)) {
+            std::fprintf(stderr,
+                         "flashalign: warning: input tag %s dropped: FlashAlign "
+                         "writes %s\n",
+                         keys_[k].c_str(), keys_[k].c_str());
+        }
+        return true;
+    }
+    return false;
+}
+
+InputHeader read_input_headers(const std::vector<std::string>& paths) {
+    InputHeader merged;
+    // Read group ID -> its line and the input that declared it first.
+    std::unordered_map<std::string, std::pair<std::string, std::string>> groups;
+    std::unordered_set<std::string> programs;
+    for (const std::string& path : paths) {
+        if (!io::path_is_bam(path)) continue;
+        // The header only: a serial decoder, no thread team.
+        io::IoPlan serial;
+        serial.parallel_gz = false;
+        serial.parallel_bgzf = false;
+        const std::string text = io::BamReader(path, &serial).sam_header_text();
+        std::string last_program;
+        std::size_t begin = 0;
+        while (begin < text.size()) {
+            std::size_t end = text.find('\n', begin);
+            if (end == std::string::npos) end = text.size();
+            const std::string line = text.substr(begin, end - begin);
+            begin = end + 1;
+            if (line.rfind("@RG\t", 0) == 0) {
+                const std::string id = read_group_line_id(line);
+                const auto [it, added] = groups.emplace(id, std::make_pair(line, path));
+                if (added) {
+                    merged.passthrough.push_back(line);
+                } else if (it->second.first != line) {
+                    throw std::runtime_error(
+                        "read group ID '" + id + "' is declared differently in " +
+                        it->second.second + " and " + path);
+                }
+            } else if (line.rfind("@CO\t", 0) == 0) {
+                merged.passthrough.push_back(line);
+            } else if (line.rfind("@PG\t", 0) == 0) {
+                last_program = read_group_line_id(line);
+                if (programs.insert(last_program).second)
+                    merged.program_lines.push_back(line);
+            }
+        }
+        if (merged.previous_program.empty()) merged.previous_program = last_program;
+    }
+    return merged;
+}
 
 AlignmentOutputWriter::AlignmentOutputWriter(
     const std::string& path,
@@ -171,18 +254,31 @@ AlignmentOutputWriter::AlignmentOutputWriter(
 AlignmentOutputWriter::~AlignmentOutputWriter() = default;
 
 void AlignmentOutputWriter::write_header(
-    const std::string& source_header_text,
+    const InputHeader& input_header,
     bool suppress_sam_header
 ) {
-    const std::vector<std::string> source_lines =
-        passthrough_header_lines(source_header_text);
-    require_no_read_group_conflict(source_lines, read_group_id_);
-    // The declared @RG goes after @PG and before the passthrough @RG/@CO lines.
+    require_no_read_group_conflict(input_header.passthrough, read_group_id_);
+    // Our @PG takes the first free ID, as htslib's sam_hdr_pg_id picks it.
+    std::unordered_set<std::string> taken;
+    for (const std::string& line : input_header.program_lines)
+        taken.insert(read_group_line_id(line));
+    std::string program_id = "flashalign";
+    for (int k = 1; taken.count(program_id) != 0; ++k)
+        program_id = "flashalign." + std::to_string(k);
+    // The inputs' @PG lines go before ours; the declared @RG after it and
+    // before the passthrough @RG/@CO lines.
     std::vector<std::string> header_lines =
         output::sam_header(references_, "flashalign", FA_VERSION,
-                           command_line_);
+                           command_line_, program_id,
+                           input_header.previous_program);
+    std::string program = std::move(header_lines.back());
+    header_lines.pop_back();
+    for (const std::string& line : input_header.program_lines)
+        header_lines.push_back(line);
+    header_lines.push_back(std::move(program));
     if (!read_group_line_.empty()) header_lines.push_back(read_group_line_);
-    for (const std::string& line : source_lines) header_lines.push_back(line);
+    for (const std::string& line : input_header.passthrough)
+        header_lines.push_back(line);
     if (format_ == "sam" && !suppress_sam_header) {
         for (const auto& line : header_lines) *text_ << line << '\n';
         require_output(*text_, "write");
@@ -193,9 +289,11 @@ AlignmentOutputContext AlignmentOutputWriter::context(
     bool include_unmapped,
     bool paf_cigar,
     bool copy_comment,
-    output::SamEmitOptions sam
+    output::SamEmitOptions sam,
+    std::vector<std::string> own_tag_keys
 ) {
     sam.read_group_id = read_group_id_;
+    own_tag_keys_ = std::make_unique<OwnTagKeys>(std::move(own_tag_keys));
     // emit_secondary is already set by the caller from --secondary.
     return {
         *text_,
@@ -205,6 +303,7 @@ AlignmentOutputContext AlignmentOutputWriter::context(
         paf_cigar,
         copy_comment,
         sam,
+        own_tag_keys_.get(),
     };
 }
 
@@ -228,25 +327,25 @@ int64_t write_alignment_records(
     if (context.format == "sam") {
         if (result.mapped() || context.include_unmapped) {
             std::string line;
-            const std::string passthrough_tags =
-                io::bam_tags_to_sam_text(read.tag_bytes);
+            const output::PassthroughTags passthrough =
+                passthrough_tags(read, context.own_tag_keys);
             // -y: the comment goes on every record of the read, verbatim and
-            // unchecked as in minimap2; the passthrough tags stay primary-only.
+            // unchecked as in minimap2.
             std::string record_tags;
             if (context.copy_comment && !read.comment.empty())
               record_tags = read.comment;
             // Sized for the primary record; other records may still grow it.
             line.reserve(read.seq.size() + read.qual.size() +
                          result.cigar.size() + read.name.size() +
-                         passthrough_tags.size() + record_tags.size() + 256);
+                         passthrough.whole.size() + record_tags.size() + 256);
             output::SamEmitOptions emit_options = context.sam;
             // A read that already carries an RG:Z keeps it.
-            if (sam_tags_declare_read_group(passthrough_tags) ||
+            if (sam_tags_declare_read_group(passthrough.clipped) ||
                 sam_tags_declare_read_group(record_tags))
                 emit_options.read_group_id.clear();
             output::append_sam_records(
                 line, read.name, result, read.seq, read.qual,
-                passthrough_tags, emit_options, record_tags);
+                passthrough, emit_options, record_tags);
             context.text << line;
             written += std::count(line.begin(), line.end(), '\n');
         }

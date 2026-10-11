@@ -173,6 +173,20 @@ bool run_needs_reference_bases(const AlignOptions& opt) {
 
 // Parsed CLI values as typed overrides, plus the CLI's preset-dependent
 // runtime defaults.
+// The SAM tag keys this run writes; a uBAM's own tags with these keys give
+// way to ours.
+std::vector<std::string> own_sam_tag_keys(const AlignOptions& opt) {
+  std::vector<std::string> keys = {"AS", "ms", "md", "NM", "nn", "tp", "cm",
+                                   "s1", "s2", "de", "SA", "XA"};
+  if (!opt.cs.empty())
+    keys.push_back("cs");
+  if (opt.emit_md)
+    keys.push_back("MD");
+  if (fa::cpu::api::is_rna_preset(opt.preset))
+    keys.push_back("ts");
+  return keys;
+}
+
 fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
   fa::cpu::api::UserOverrides u;
   const bool need_cigar = run_needs_cigar(opt);
@@ -433,6 +447,9 @@ int run_align(const AlignOptions& cli_options) {
                 std::cout);
     return 0;
   }
+  // The BAM inputs' header lines, merged before the index loads so that
+  // conflicting read groups fail fast.
+  const InputHeader input_header = read_input_headers(opt.reads_paths);
   // Taken before the reference or index is loaded, for end-to-end wall time.
   const auto program_t0 = std::chrono::steady_clock::now();
   // A multi-part index: its table names every contig and locates each part's image.
@@ -808,8 +825,6 @@ int run_align(const AlignOptions& cli_options) {
       };
     }
 
-    // Opened before the header is written, so a uBAM's @RG/@CO lines can be
-    // carried over.
     fa::cpu::io::SequenceReader reader(opt.reads_paths, &io_plan,
                                        /*keep_comment=*/opt.copy_comment);
     // The source may still have fallen back to serial decoding; then drop
@@ -818,12 +833,12 @@ int run_align(const AlignOptions& cli_options) {
     if (decode_loan > 0 && !reader.decode_parallel_active())
       decode_loan = 0;
     if (part == 0) {
-      output.write_header(reader.source_header_text(), opt.no_header);
+      output.write_header(input_header, opt.no_header);
       output_context.emplace(output.context(
           /*include_unmapped=*/opt.format == "paf" ? opt.paf_no_hit
                                                    : !opt.sam_hit_only,
           opt.paf_cigar,
-          opt.copy_comment, emit_opts));
+          opt.copy_comment, emit_opts, own_sam_tag_keys(opt)));
     }
     batch_reader = std::make_unique<fa::cpu::io::BatchReader>(reader, batch_bp);
 

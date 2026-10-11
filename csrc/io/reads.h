@@ -42,11 +42,6 @@ public:
         }
     }
 
-    // SAM header text of the current input if it is BAM, else empty.
-    std::string source_header_text() const {
-        return bam_ ? bam_->sam_header_text() : std::string();
-    }
-
     // Whether the current input is decoded by a thread team.
     bool decode_parallel_active() const {
         if (fx_) return fx_->decode_parallel_active();

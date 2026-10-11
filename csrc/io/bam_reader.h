@@ -1,7 +1,8 @@
 // BAM/uBAM input. Records become FastxRecords with the raw tag block kept, so
 // base-modification tags (MM/ML) and read groups carry through to the output.
-// SEQ is returned in the original read orientation, so an aligned BAM reads
-// like a uBAM.
+// An aligned BAM reads like a uBAM: secondary and supplementary records are
+// skipped, SEQ is returned in the original read orientation, and a mapped
+// record loses the alignment tags of the aligner that wrote it.
 #pragma once
 
 #include "bgzf.h"
@@ -11,10 +12,15 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <charconv>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -73,10 +79,21 @@ public:
     // Whether a thread team decodes the blocks.
     bool decode_parallel_active() const { return bgzf_->decode_parallel_active(); }
 
-    const std::vector<output::SamReference>& references() const { return refs_; }
     const std::string& sam_header_text() const { return header_text_; }
 
     bool next(FastxRecord& rec) {
+        uint16_t flag = 0;
+        while (read_record(rec, flag)) {
+            if (!(flag & 0x4) || (flag & 0x900)) warn_aligned_input();
+            if (flag & 0x900) continue;
+            if (!(flag & 0x4)) drop_alignment_tags(rec);
+            return true;
+        }
+        return false;
+    }
+
+private:
+    bool read_record(FastxRecord& rec, uint16_t& flag_out) {
         int32_t block_size = 0;
         const size_t got = bgzf_->read(&block_size, 4);
         if (got == 0) {
@@ -111,6 +128,7 @@ public:
         skip(2);                      // bin
         const uint16_t n_cigar = u16();
         const uint16_t flag = u16();
+        flag_out = flag;
         const int32_t l_seq = i32();
         skip(4 + 4 + 4);              // next_refID, next_pos, tlen
         if (l_seq < 0) throw bgzf_->error("malformed BAM: negative l_seq");
@@ -159,7 +177,24 @@ public:
         return true;
     }
 
-private:
+    void warn_aligned_input() {
+        if (warned_aligned_) return;
+        warned_aligned_ = true;
+        // One warning per path, though a multi-part index reads it per part.
+        static std::mutex mu;
+        static std::set<std::string> warned;
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            if (!warned.insert(path_).second) return;
+        }
+        std::fprintf(stderr,
+                     "flashalign: warning: %s: aligned BAM input; secondary and "
+                     "supplementary records skipped, alignment tags dropped\n",
+                     path_.c_str());
+    }
+
+    void drop_alignment_tags(FastxRecord& rec);
+
     void parse_header() {
         char magic[4];
         if (bgzf_->read(magic, 4) != 4 || std::string(magic, 4) != std::string("BAM\1", 4)) {
@@ -170,91 +205,234 @@ private:
         // Kept so @RG/@CO lines can be carried into the output header.
         header_text_.resize(static_cast<size_t>(l_text));
         if (l_text) bgzf_->read_exact(&header_text_[0], header_text_.size(), "BAM header text");
+        // The reference dictionary is skipped: the reads are re-aligned.
         const int32_t n_ref = read_i32();
         if (n_ref < 0) throw bgzf_->error("malformed BAM: negative n_ref");
-        refs_.reserve(static_cast<size_t>(std::max(0, n_ref)));
         for (int32_t i = 0; i < n_ref; ++i) {
             const int32_t l_name = read_i32();
             if (l_name < 0) throw bgzf_->error("malformed BAM: negative l_name");
-            std::string name(static_cast<size_t>(l_name ? l_name - 1 : 0), '\0');
-            if (l_name) {
-                std::string tmp(static_cast<size_t>(l_name), '\0');
-                bgzf_->read_exact(&tmp[0], tmp.size(), "BAM reference name");
-                name.assign(tmp.data(), tmp.size() ? tmp.size() - 1 : 0);
-            }
-            const int32_t l_ref = read_i32();
-            refs_.push_back({name, l_ref});
+            skip(static_cast<size_t>(l_name), "BAM reference name");
+            read_i32();  // l_ref
         }
     }
 
     int32_t read_i32() { int32_t v = 0; bgzf_->read_exact(&v, 4, "BAM header"); return v; }
-    void skip(size_t n) {
+    void skip(size_t n, const char* what) {
         std::string tmp(n, '\0');
-        if (n) bgzf_->read_exact(&tmp[0], n, "BAM field");
+        if (n) bgzf_->read_exact(&tmp[0], n, what);
     }
 
     std::string path_;
     std::unique_ptr<BgzfReader> bgzf_;
-    std::vector<output::SamReference> refs_;
     std::string header_text_;
+    bool warned_aligned_ = false;
 };
 
-// A raw BAM tag block as tab-separated SAM tag text. Integer types become
-// 'i'; 'B' keeps its subtype.
-inline std::string bam_tags_to_sam_text(const std::string& blob) {
-    std::string out;
-    size_t c = 0;
-    auto emit_tab = [&] { if (!out.empty()) out.push_back('\t'); };
-    while (c + 3 <= blob.size()) {
-        const char t0 = blob[c], t1 = blob[c + 1], type = blob[c + 2];
-        c += 3;
-        emit_tab();
-        out.push_back(t0); out.push_back(t1); out.push_back(':');
-        auto rd_i = [&](int width, bool sign) -> long long {
-            long long v = 0;
-            for (int k = 0; k < width; ++k) v |= static_cast<long long>(static_cast<uint8_t>(blob[c + k])) << (8 * k);
-            if (sign && width < 8) {  // sign-extend
-                const long long m = 1LL << (8 * width - 1);
-                v = (v ^ m) - m;
+[[noreturn]] inline void throw_malformed_tag_block(const std::string& read_name,
+                                                  const char* what) {
+    throw std::runtime_error("malformed BAM: tag block of read " + read_name +
+                             ": " + what);
+}
+
+// Whether a tag starts at blob[at]. Fewer than 3 bytes after the last tag
+// hold no key and type and are ignored, as htslib's bam_aux_next ignores them;
+// a tag with its key and type but a short value is not.
+inline bool bam_tag_at(const std::string& blob, size_t at) {
+    return blob.size() - at >= 3;
+}
+
+// The byte size of the tag at blob[at], key and type included. Throws when
+// the tag runs past the block or its type is unknown.
+inline size_t bam_tag_size(const std::string& blob, size_t at,
+                           const std::string& read_name) {
+    const size_t left = blob.size() - at;
+    if (left < 4) throw_malformed_tag_block(read_name, "a tag runs past the block");
+    auto fits = [&](size_t size) {
+        if (size > left) throw_malformed_tag_block(read_name, "a tag runs past the block");
+        return size;
+    };
+    switch (blob[at + 2]) {
+        case 'A': case 'c': case 'C': return 4;
+        case 's': case 'S': return fits(5);
+        case 'i': case 'I': case 'f': return fits(7);
+        case 'd': return fits(11);
+        case 'Z': case 'H': {
+            const void* nul = std::memchr(blob.data() + at + 3, '\0', left - 3);
+            if (nul == nullptr) {
+                throw_malformed_tag_block(read_name, "a Z/H tag has no terminating NUL");
             }
-            c += width;
-            return v;
-        };
-        switch (type) {
-            case 'A': out += "A:"; out.push_back(blob[c++]); break;
-            case 'c': out += "i:"; out += std::to_string(rd_i(1, true)); break;
-            case 'C': out += "i:"; out += std::to_string(rd_i(1, false)); break;
-            case 's': out += "i:"; out += std::to_string(rd_i(2, true)); break;
-            case 'S': out += "i:"; out += std::to_string(rd_i(2, false)); break;
-            case 'i': out += "i:"; out += std::to_string(rd_i(4, true)); break;
-            case 'I': out += "i:"; out += std::to_string(rd_i(4, false)); break;
-            case 'f': {
-                float fv; std::memcpy(&fv, blob.data() + c, 4); c += 4;
-                out += "f:"; out += std::to_string(fv); break;
+            return static_cast<size_t>(static_cast<const char*>(nul) - (blob.data() + at)) + 1;
+        }
+        case 'B': {
+            fits(8);
+            size_t width = 0;
+            switch (blob[at + 3]) {
+                case 'c': case 'C': width = 1; break;
+                case 's': case 'S': width = 2; break;
+                case 'i': case 'I': case 'f': width = 4; break;
+                default: throw_malformed_tag_block(read_name, "a B tag has an unknown subtype");
             }
-            case 'Z': case 'H': {
-                out.push_back(type); out.push_back(':');
-                while (c < blob.size() && blob[c] != '\0') out.push_back(blob[c++]);
-                ++c;  // skip NUL
-                break;
+            uint32_t count;
+            std::memcpy(&count, blob.data() + at + 4, 4);
+            if ((left - 8) / width < count) {
+                throw_malformed_tag_block(read_name, "a tag runs past the block");
             }
-            case 'B': {
-                const char sub = blob[c++];
-                int32_t count; std::memcpy(&count, blob.data() + c, 4); c += 4;
-                out += "B:"; out.push_back(sub);
-                const int w = (sub == 'c' || sub == 'C') ? 1 : (sub == 's' || sub == 'S') ? 2 : 4;
-                const bool sgn = (sub == 'c' || sub == 's' || sub == 'i');
-                for (int32_t k = 0; k < count; ++k) {
-                    out.push_back(',');
-                    if (sub == 'f') { float fv; std::memcpy(&fv, blob.data() + c, 4); c += 4; out += std::to_string(fv); }
-                    else { out += std::to_string(rd_i(w, sgn)); }
+            return 8 + static_cast<size_t>(count) * width;
+        }
+        default: throw_malformed_tag_block(read_name, "a tag has an unknown type");
+    }
+}
+
+// The alignment tags of the aligner that wrote a mapped record: dorado's list
+// (minimap2's tags and bh, TS) with bwa's XS and FlashAlign's md and XA.
+inline void BamReader::drop_alignment_tags(FastxRecord& rec) {
+    static const char kKeys[][3] = {"NM", "MD", "AS", "XS", "SA", "cs", "ms",
+                                    "md", "nn", "de", "dv", "tp", "cm", "s1",
+                                    "s2", "zd", "rl", "bh", "TS", "XA"};
+    const std::string& blob = rec.tag_bytes;
+    std::string kept;
+    kept.reserve(blob.size());
+    for (size_t at = 0; bam_tag_at(blob, at);) {
+        const size_t size = bam_tag_size(blob, at, rec.name);
+        bool drop = false;
+        for (const char* key : kKeys) {
+            if (blob[at] == key[0] && blob[at + 1] == key[1]) drop = true;
+        }
+        if (!drop) kept.append(blob, at, size);
+        at += size;
+    }
+    rec.tag_bytes.swap(kept);
+}
+
+namespace detail {
+
+inline void append_printf_g(std::string& out, double d) {
+    char buf[32];
+    const int n = std::snprintf(buf, sizeof buf, "%g", d);
+    out.append(buf, static_cast<size_t>(n));
+}
+
+// htslib's kputd (kstring.c), which spells B:f elements: six significant
+// digits, trailing zeros cut, printf's %g outside [1e-4, 999999].
+inline void append_kputd(std::string& out, double d) {
+    if (d == 0) {
+        out += std::signbit(d) ? "-0" : "0";
+        return;
+    }
+    if (d < 0) {
+        out.push_back('-');
+        d = -d;
+    }
+    if (!(d >= 0.0001 && d <= 999999)) {
+        append_printf_g(out, d);
+        return;
+    }
+    char buf[21];
+    char* cp = buf + 20;
+    uint32_t i;
+    if (d < 0.001)       i = static_cast<uint32_t>(std::rint(d * 1000000000)), cp -= 1;
+    else if (d < 0.01)   i = static_cast<uint32_t>(std::rint(d * 100000000)),  cp -= 2;
+    else if (d < 0.1)    i = static_cast<uint32_t>(std::rint(d * 10000000)),   cp -= 3;
+    else if (d < 1)      i = static_cast<uint32_t>(std::rint(d * 1000000)),    cp -= 4;
+    else if (d < 10)     i = static_cast<uint32_t>(std::rint(d * 100000)),     cp -= 5;
+    else if (d < 100)    i = static_cast<uint32_t>(std::rint(d * 10000)),      cp -= 6;
+    else if (d < 1000)   i = static_cast<uint32_t>(std::rint(d * 1000)),       cp -= 7;
+    else if (d < 10000)  i = static_cast<uint32_t>(std::rint(d * 100)),        cp -= 8;
+    else if (d < 100000) i = static_cast<uint32_t>(std::rint(d * 10)),         cp -= 9;
+    else                 i = static_cast<uint32_t>(std::rint(d)),              cp -= 10;
+    static const char dig2[] =
+        "00010203040506070809" "10111213141516171819" "20212223242526272829"
+        "30313233343536373839" "40414243444546474849" "50515253545556575859"
+        "60616263646566676869" "70717273747576777879" "80818283848586878889"
+        "90919293949596979899";
+    std::memcpy(cp -= 2, &dig2[2 * (i % 100)], 2); i /= 100;
+    std::memcpy(cp -= 2, &dig2[2 * (i % 100)], 2); i /= 100;
+    std::memcpy(cp -= 2, &dig2[2 * (i % 100)], 2);
+    if (i >= 100) *--cp = static_cast<char>('0' + i / 100);  // rounded up to 7 digits
+    char* ep;
+    int p = static_cast<int>(buf + 20 - cp);
+    if (p <= 10) {  // d < 1
+        ep = cp + 5;
+        while (p < 10) {
+            *--cp = '0';
+            ++p;
+        }
+        *--cp = '.';
+        *--cp = '0';
+    } else {
+        char* xp = --cp;
+        ep = cp + 6;
+        while (p > 10) {
+            xp[0] = xp[1];
+            ++xp;
+            --p;
+        }
+        xp[0] = '.';
+    }
+    while (*ep == '0' && ep > cp) --ep;
+    if (*ep != '.') ++ep;
+    out.append(cp, static_cast<size_t>(ep - cp));
+}
+
+template <typename T>
+inline T load_le(const char* p) {
+    T v;
+    std::memcpy(&v, p, sizeof v);
+    return v;
+}
+
+template <typename T>
+inline void append_decimal(std::string& out, T v) {
+    char buf[24];
+    const auto r = std::to_chars(buf, buf + sizeof buf, v);
+    out.append(buf, r.ptr);
+}
+
+}  // namespace detail
+
+// One tag of `size` bytes (as bam_tag_size gives) as SAM text, spelled as
+// htslib's sam_format_aux1 spells it: every integer type as i, f with %g,
+// B:f elements with kputd.
+inline void append_bam_tag_sam_text(std::string& out, const char* tag, size_t size) {
+    out.append(tag, 2);
+    out.push_back(':');
+    const char* v = tag + 3;
+    switch (tag[2]) {
+        case 'A': out += "A:"; out.push_back(v[0]); break;
+        case 'c': out += "i:"; detail::append_decimal(out, static_cast<int>(detail::load_le<int8_t>(v))); break;
+        case 'C': out += "i:"; detail::append_decimal(out, static_cast<int>(detail::load_le<uint8_t>(v))); break;
+        case 's': out += "i:"; detail::append_decimal(out, detail::load_le<int16_t>(v)); break;
+        case 'S': out += "i:"; detail::append_decimal(out, detail::load_le<uint16_t>(v)); break;
+        case 'i': out += "i:"; detail::append_decimal(out, detail::load_le<int32_t>(v)); break;
+        case 'I': out += "i:"; detail::append_decimal(out, detail::load_le<uint32_t>(v)); break;
+        case 'f': out += "f:"; detail::append_printf_g(out, detail::load_le<float>(v)); break;
+        case 'd': out += "d:"; detail::append_printf_g(out, detail::load_le<double>(v)); break;
+        case 'Z': case 'H':
+            out.push_back(tag[2]);
+            out.push_back(':');
+            out.append(v, size - 4);  // without the NUL
+            break;
+        case 'B': {
+            const char sub = v[0];
+            const uint32_t count = detail::load_le<uint32_t>(v + 1);
+            const char* e = v + 5;
+            out += "B:";
+            out.push_back(sub);
+            for (uint32_t k = 0; k < count; ++k) {
+                out.push_back(',');
+                switch (sub) {
+                    case 'c': detail::append_decimal(out, static_cast<int>(detail::load_le<int8_t>(e))); e += 1; break;
+                    case 'C': detail::append_decimal(out, static_cast<int>(detail::load_le<uint8_t>(e))); e += 1; break;
+                    case 's': detail::append_decimal(out, detail::load_le<int16_t>(e)); e += 2; break;
+                    case 'S': detail::append_decimal(out, detail::load_le<uint16_t>(e)); e += 2; break;
+                    case 'i': detail::append_decimal(out, detail::load_le<int32_t>(e)); e += 4; break;
+                    case 'I': detail::append_decimal(out, detail::load_le<uint32_t>(e)); e += 4; break;
+                    default: detail::append_kputd(out, detail::load_le<float>(e)); e += 4; break;  // 'f'
                 }
-                break;
             }
-            default: return out;  // unknown type: stop
+            break;
         }
     }
-    return out;
 }
 
 }}}  // namespace fa::cpu::io

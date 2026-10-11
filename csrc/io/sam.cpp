@@ -362,13 +362,12 @@ void append_sam_records(
     const AlignResult& result,
     const std::string& seq,
     const std::string& qual,
-    const std::string& extra_tags,
+    const PassthroughTags& passthrough,
     SamEmitOptions opts,
     const std::string& record_tags
 ) {
     const auto emit_hypothesis = [&](const AlignResult& hypothesis,
-                                     bool secondary_hypothesis,
-                                     const std::string& root_tags) {
+                                     bool secondary_hypothesis) {
         std::vector<const AlignResult*> segs;
         segs.reserve(1 + hypothesis.supplementary.size());
         segs.push_back(&hypothesis);
@@ -379,9 +378,15 @@ void append_sam_records(
                           : EmittedRole::SecondarySupplementary)
                 : (i == 0 ? EmittedRole::Primary
                           : EmittedRole::Supplementary);
-            std::string tags = (i == 0 && !secondary_hypothesis)
-                                   ? root_tags
-                                   : std::string();
+            AlignResult emitted = *segs[i];
+            if (secondary_hypothesis) emitted.mapq = 0;
+            const bool hard_clip = !secondary_hypothesis && i > 0 &&
+                                   opts.hard_clip_supp && emitted.mapped() &&
+                                   !emitted.cigar.empty();
+            // Per-base tags only where SEQ is the whole read.
+            std::string tags = (secondary_hypothesis || hard_clip)
+                                   ? passthrough.clipped
+                                   : passthrough.whole;
             // SA:Z links the primary's segments only.
             if (!secondary_hypothesis) {
                 const std::string sa = build_sa_tag(segs, i);
@@ -399,11 +404,8 @@ void append_sam_records(
                     tags += xa;
                 }
             }
-            AlignResult emitted = *segs[i];
-            if (secondary_hypothesis) emitted.mapq = 0;
             const int flag_extra = emitted_role_sam_flag(role);
-            if (!secondary_hypothesis && i > 0 && opts.hard_clip_supp &&
-                emitted.mapped() && !emitted.cigar.empty()) {
+            if (hard_clip) {
                 const HardClippedRecord hc = hard_clip_supplementary(
                     emitted.cigar, seq, qual, emitted.is_reverse);
                 append_sam_record_line(out, read_name, emitted, hc.seq, hc.qual,
@@ -423,12 +425,12 @@ void append_sam_records(
             }
         }
     };
-    emit_hypothesis(result, /*secondary_hypothesis=*/false, extra_tags);
+    emit_hypothesis(result, /*secondary_hypothesis=*/false);
     // An unmapped read has no alternatives to print.
     if (opts.emit_secondary && result.mapped()) {
         for (const AlignResult& secondary : result.secondary) {
             if (secondary.mapped())
-                emit_hypothesis(secondary, /*secondary_hypothesis=*/true, {});
+                emit_hypothesis(secondary, /*secondary_hypothesis=*/true);
         }
     }
 }
@@ -437,16 +439,20 @@ std::vector<std::string> sam_header(
     const std::vector<SamReference>& references,
     const std::string& program_name,
     const std::string& version,
-    const std::string& command_line
+    const std::string& command_line,
+    const std::string& program_id,
+    const std::string& previous_program
 ) {
     std::vector<std::string> lines;
     lines.push_back("@HD\tVN:1.6\tSO:unsorted");
     for (const SamReference& ref : references) {
         lines.push_back("@SQ\tSN:" + clean_sam_field(ref.name) + "\tLN:" + std::to_string(ref.length));
     }
-    std::string program = "@PG\tID:" + clean_sam_field(program_name)
-                          + "\tPN:" + clean_sam_field(program_name)
-                          + "\tVN:" + clean_sam_field(version);
+    std::string program = "@PG\tID:" + clean_sam_field(program_id.empty() ? program_name : program_id)
+                          + "\tPN:" + clean_sam_field(program_name);
+    if (!previous_program.empty())
+        program += "\tPP:" + clean_sam_field(previous_program);
+    program += "\tVN:" + clean_sam_field(version);
     if (!command_line.empty())
         program += "\tCL:" + clean_sam_field(command_line);
     lines.push_back(std::move(program));

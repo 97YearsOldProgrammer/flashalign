@@ -101,6 +101,15 @@ HardClippedRecord hard_clip_supplementary(
     const std::string& soft_cigar, const std::string& fwd_seq,
     const std::string& fwd_qual, bool is_reverse);
 
+// A read's input tags (the uBAM passthrough) as SAM text, in input order.
+// `whole` holds them all; `clipped` leaves out the per-base ones (the
+// base-modification tags and a B array with one element per base of the
+// read), for a record whose SEQ is not the whole read.
+struct PassthroughTags {
+    std::string whole;
+    std::string clipped;
+};
+
 struct SamEmitOptions {
     bool hard_clip_supp = false;  // the CLI sets this unless -Y (minimap2's default)
     // One record per mapped alternative (FLAG 0x100), as --secondary yes.
@@ -113,26 +122,32 @@ struct SamEmitOptions {
 // All SAM records of one read: the primary, then its supplementaries (FLAG
 // 0x800), each with an SA:Z listing the others, then secondaries if enabled.
 // Only supplementaries are hard-clipped; SA:Z lists the soft CIGARs, as
-// minimap2 does. extra_tags (the uBAM passthrough) goes on the primary only,
-// record_tags on every record.
+// minimap2 does. The passthrough goes on every record: `whole` where SEQ is
+// the whole read (the primary, an unmapped read, a soft-clipped
+// supplementary), `clipped` on a hard-clipped supplementary and on
+// secondaries, whose SEQ is '*'. record_tags goes on every record.
 void append_sam_records(
     std::string& out,
     const std::string& read_name,
     const AlignResult& result,
     const std::string& seq,
     const std::string& qual,
-    const std::string& extra_tags = {},
+    const PassthroughTags& passthrough = {},
     SamEmitOptions opts = {},
     const std::string& record_tags = {}
 );
 
 // @HD, @SQ and @PG lines. A non-empty `command_line` becomes @PG CL:, with
 // tabs and newlines neutralized so an argument cannot forge a header line.
+// The @PG ID is `program_id`, or `program_name` when empty; a non-empty
+// `previous_program` becomes PP:.
 std::vector<std::string> sam_header(
     const std::vector<SamReference>& references,
     const std::string& program_name = "flashalign",
     const std::string& version = FA_VERSION,
-    const std::string& command_line = {}
+    const std::string& command_line = {},
+    const std::string& program_id = {},
+    const std::string& previous_program = {}
 );
 
 }}} // namespace fa::cpu::output
