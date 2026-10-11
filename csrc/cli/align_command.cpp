@@ -72,7 +72,9 @@ private:
   std::function<bool(int)> target_;
 };
 
-// The smallest -t at which gzip decoding borrows mapping threads.
+// The smallest -t at which gzip decoding that is not BGZF borrows mapping
+// threads. BGZF borrows them in every windowed run whose inputs are all
+// eligible.
 constexpr int kDecodeLoanMinThreads = 32;
 
 // Threads the decode team borrows from the -t budget: -t/8, clamped to [1, 8].
@@ -83,13 +85,17 @@ int decode_loan_threads(int num_threads) {
   return wanted > 8 ? 8 : wanted;
 }
 
-// A loan needs every input to be eligible for member-parallel decoding;
-// otherwise the loaned threads would sit idle while the serial reader runs.
-bool decode_loan_can_be_fed(const std::vector<std::string>& reads_paths) {
+// A loan needs every input to be eligible for a parallel source the run
+// allows (`gz`: member-parallel gzip; `bgzf`: block-parallel BGZF, BAM
+// included); otherwise the loaned threads would sit idle while the serial
+// reader runs.
+bool decode_loan_can_be_fed(const std::vector<std::string>& reads_paths,
+                            bool gz, bool bgzf) {
   if (reads_paths.empty())
     return false;
   for (const std::string& path : reads_paths) {
-    if (!::fa::cpu::io::gz_member_parallel_eligible(path))
+    if (!(gz && ::fa::cpu::io::gz_member_parallel_eligible(path)) &&
+        !(bgzf && ::fa::cpu::io::bgzf_eligible(path)))
       return false;
   }
   return true;
@@ -123,19 +129,23 @@ int resolve_batch_window(const AlignOptions& opt, int num_threads) {
   return window;
 }
 
-// The input decode plan, minus the loan callback. The parallel gzip decoder
-// borrows threads only with a compute window, inputs that can feed it, and
-// -t >= kDecodeLoanMinThreads: below that, serial decoding on the reader
-// thread hides behind compute and lending threads is a net loss. The loan is
-// at least four threads, so one thread stuck on a long read cannot starve
-// the reader.
+// The input decode plan, minus the loan callback. The parallel decoders
+// borrow threads only with a compute window and inputs that can feed them.
+// The member-parallel gzip decoder also needs -t >= kDecodeLoanMinThreads:
+// below that, serial decoding on the reader thread hides behind compute and
+// its extra work makes lending threads a net loss; its loan is then at least
+// four threads, so one thread stuck on a long read cannot starve the reader.
+// The BGZF decoder costs no extra work, and its reader inflates the run it
+// needs itself when no worker has claimed it, so it borrows from -t 2.
 fa::cpu::io::IoPlan build_io_plan(const AlignOptions& opt, int num_threads,
                                   int batch_window) {
   fa::cpu::io::IoPlan plan;
-  plan.parallel_gz = batch_window >= 2 &&
-                     num_threads >= kDecodeLoanMinThreads &&
-                     decode_loan_can_be_fed(opt.reads_paths);
-  if (!plan.parallel_gz)
+  const bool gz = batch_window >= 2 && num_threads >= kDecodeLoanMinThreads;
+  const bool bgzf = batch_window >= 2;
+  const bool fed = decode_loan_can_be_fed(opt.reads_paths, gz, bgzf);
+  plan.parallel_gz = gz && fed;
+  plan.parallel_bgzf = bgzf && fed;
+  if (!plan.parallel_gz && !plan.parallel_bgzf)
     return plan;
   plan.gz.workers = static_cast<unsigned>(decode_loan_threads(num_threads));
   plan.gz.staging_budget =
@@ -774,14 +784,15 @@ int run_align(const AlignOptions& cli_options) {
     }
     seen.store(0);
 
-    // The gzip decoder borrows some of the -t mapping threads when they are
+    // A parallel decoder borrows some of the -t mapping threads when they are
     // idle rather than adding its own. Its team starts with the reader, before
     // the window exists, so it reaches the window through the hub, which
     // must outlive the team.
     HelperHub helper_hub;
     fa::cpu::io::IoPlan io_plan = build_io_plan(opt, num_threads, batch_window);
-    int decode_loan =
-        io_plan.parallel_gz ? static_cast<int>(io_plan.gz.workers) : 0;
+    int decode_loan = io_plan.parallel_gz || io_plan.parallel_bgzf
+                          ? static_cast<int>(io_plan.gz.workers)
+                          : 0;
     if (decode_loan > 0) {
       // Helper tids are the top of the compute width, which the window
       // reserves for them.

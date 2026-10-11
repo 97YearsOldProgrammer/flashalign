@@ -1,27 +1,35 @@
-// BGZF reader over zlib raw inflate, for uBAM input. BGZF, the container BAM
-// uses, is a series of gzip members of at most 64 KiB uncompressed, each with a
-// 'BC' extra subfield giving its size, ended by a 28-byte empty block.
+// BGZF reader for uBAM input. BGZF, the container BAM uses, is a series of
+// gzip members of at most 64 KiB uncompressed, each with a 'BC' extra subfield
+// giving its size, ended by a 28-byte empty block.
 #pragma once
+
+#include "byte_source.h"
 
 #include <zlib.h>
 
 #include <algorithm>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <istream>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace fa { namespace cpu { namespace io {
 
-// Streaming BGZF reader: inflates blocks on demand and serves a flat byte
-// stream. Skips empty blocks (incl. the EOF marker) transparently.
+// Streaming BGZF reader serving a flat byte stream. Over a ByteSource
+// (io/fastx.h make_byte_source) the source decodes; over an istream the reader
+// inflates one block at a time, skipping empty blocks (incl. the EOF marker).
 class BgzfReader {
 public:
-    explicit BgzfReader(std::istream& in) : in_(in) {}
+    explicit BgzfReader(std::istream& in) : in_(&in) {}
+    explicit BgzfReader(std::unique_ptr<ByteSource> src) : src_(std::move(src)) {}
 
     // Read up to `len` bytes; returns the count actually read (< len only at EOF).
     size_t read(void* dst, size_t len) {
+        if (src_) return read_source(dst, len);
         char* out = static_cast<char*>(dst);
         size_t got = 0;
         while (got < len) {
@@ -41,12 +49,28 @@ public:
         if (read(dst, len) != len) throw std::runtime_error("bgzf: unexpected EOF");
     }
 
+    // Whether a thread team decodes the stream.
+    bool decode_parallel_active() const { return src_ && src_->is_parallel(); }
+
 private:
+    size_t read_source(void* dst, size_t len) {
+        char* out = static_cast<char*>(dst);
+        size_t got = 0;
+        while (got < len) {
+            const size_t ask = std::min<size_t>(len - got, INT_MAX);
+            const int n = src_->read(out + got, static_cast<int>(ask));
+            if (n < 0) throw std::runtime_error("bgzf: corrupt or unreadable block");
+            if (n == 0) break;
+            got += static_cast<size_t>(n);
+        }
+        return got;
+    }
+
     bool fill_block() {
         for (;;) {
             unsigned char hdr[18];
-            in_.read(reinterpret_cast<char*>(hdr), 18);
-            const std::streamsize n = in_.gcount();
+            in_->read(reinterpret_cast<char*>(hdr), 18);
+            const std::streamsize n = in_->gcount();
             if (n == 0) return false;  // clean EOF at a block boundary
             if (n != 18 || hdr[0] != 0x1f || hdr[1] != 0x8b) {
                 throw std::runtime_error("bgzf: bad block header");
@@ -59,14 +83,14 @@ private:
             std::string cdata;
             cdata.resize(clen);
             if (clen) {
-                in_.read(&cdata[0], static_cast<std::streamsize>(clen));
-                if (static_cast<size_t>(in_.gcount()) != clen) {
+                in_->read(&cdata[0], static_cast<std::streamsize>(clen));
+                if (static_cast<size_t>(in_->gcount()) != clen) {
                     throw std::runtime_error("bgzf: truncated block payload");
                 }
             }
             unsigned char tail[8];
-            in_.read(reinterpret_cast<char*>(tail), 8);
-            if (in_.gcount() != 8) throw std::runtime_error("bgzf: truncated block footer");
+            in_->read(reinterpret_cast<char*>(tail), 8);
+            if (in_->gcount() != 8) throw std::runtime_error("bgzf: truncated block footer");
             const uint32_t isize = tail[4] | (tail[5] << 8) | (tail[6] << 16) |
                                    (static_cast<uint32_t>(tail[7]) << 24);
             if (isize == 0) continue;  // empty block (e.g. EOF marker) -> next
@@ -94,7 +118,8 @@ private:
         }
     }
 
-    std::istream& in_;
+    std::istream* in_ = nullptr;
+    std::unique_ptr<ByteSource> src_;
     std::string ubuf_;
     size_t upos_ = 0;
 };

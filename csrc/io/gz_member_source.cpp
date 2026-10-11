@@ -505,6 +505,16 @@ struct MemberParallelGzByteSource::Impl {
     recycle.shrink_to_fit();
   }
 
+  // Frees the reader's detached chunk once it is fully delivered at EOF.
+  void release_held_locked() {
+    if (!held.data)
+      return;
+    held.data.reset();
+    held.size = 0;
+    held_off = 0;
+    total_staged -= chunk_bytes;
+  }
+
   // Hands a segment back. kPending means suspended and keeps the inflate
   // state for a later worker; any other state is terminal and frees it. A
   // failed speculation's chunks stay staged until the chain passes it.
@@ -919,6 +929,7 @@ struct MemberParallelGzByteSource::Impl {
         return -1;
       }
       if (eof) {
+        release_held_locked();
         release_spares_locked();
         return 0;
       }

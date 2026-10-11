@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -57,26 +58,32 @@ inline bool path_is_cram(const std::string& path) {
 
 class BamReader {
 public:
-    explicit BamReader(const std::string& path)
-        : in_(path, std::ios::binary), bgzf_(in_)
-    {
-        if (!in_) throw std::runtime_error("failed to open BAM: " + path);
+    // The blocks are decoded by make_byte_source(path, plan); `plan` is
+    // borrowed, and null takes the defaults.
+    explicit BamReader(const std::string& path, const IoPlan* plan = nullptr)
+        : path_(path),
+          bgzf_(std::make_unique<BgzfReader>(make_byte_source(path, plan))) {
         parse_header(path);
     }
+
+    // Whether a thread team decodes the blocks.
+    bool decode_parallel_active() const { return bgzf_->decode_parallel_active(); }
 
     const std::vector<output::SamReference>& references() const { return refs_; }
     const std::string& sam_header_text() const { return header_text_; }
 
     bool next(FastxRecord& rec) {
         int32_t block_size = 0;
-        if (bgzf_.read(&block_size, 4) != 4) return false;  // EOF
+        const size_t got = bgzf_->read(&block_size, 4);
+        if (got == 0) return false;  // EOF
+        if (got != 4) throw std::runtime_error("truncated BAM record: " + path_);
         // Every field is bounds-checked against the block (`need`); the fixed
         // part of a record is 32 bytes.
         if (block_size < 32) {
             throw std::runtime_error("malformed BAM: record block_size too small");
         }
         std::string buf(static_cast<size_t>(block_size), '\0');
-        bgzf_.read_exact(&buf[0], buf.size());
+        bgzf_->read_exact(&buf[0], buf.size());
 
         const size_t n = buf.size();
         size_t c = 0;
@@ -148,14 +155,14 @@ public:
 private:
     void parse_header(const std::string& path) {
         char magic[4];
-        if (bgzf_.read(magic, 4) != 4 || std::string(magic, 4) != std::string("BAM\1", 4)) {
+        if (bgzf_->read(magic, 4) != 4 || std::string(magic, 4) != std::string("BAM\1", 4)) {
             throw std::runtime_error("not a BAM file: " + path);
         }
         int32_t l_text = read_i32();
         if (l_text < 0) throw std::runtime_error("malformed BAM: negative l_text");
         // Kept so @RG/@CO lines can be carried into the output header.
         header_text_.resize(static_cast<size_t>(l_text));
-        if (l_text) bgzf_.read_exact(&header_text_[0], header_text_.size());
+        if (l_text) bgzf_->read_exact(&header_text_[0], header_text_.size());
         const int32_t n_ref = read_i32();
         if (n_ref < 0) throw std::runtime_error("malformed BAM: negative n_ref");
         refs_.reserve(static_cast<size_t>(std::max(0, n_ref)));
@@ -165,7 +172,7 @@ private:
             std::string name(static_cast<size_t>(l_name ? l_name - 1 : 0), '\0');
             if (l_name) {
                 std::string tmp(static_cast<size_t>(l_name), '\0');
-                bgzf_.read_exact(&tmp[0], tmp.size());
+                bgzf_->read_exact(&tmp[0], tmp.size());
                 name.assign(tmp.data(), tmp.size() ? tmp.size() - 1 : 0);
             }
             const int32_t l_ref = read_i32();
@@ -173,14 +180,14 @@ private:
         }
     }
 
-    int32_t read_i32() { int32_t v = 0; bgzf_.read_exact(&v, 4); return v; }
+    int32_t read_i32() { int32_t v = 0; bgzf_->read_exact(&v, 4); return v; }
     void skip(size_t n) {
         std::string tmp(n, '\0');
-        if (n) bgzf_.read_exact(&tmp[0], n);
+        if (n) bgzf_->read_exact(&tmp[0], n);
     }
 
-    std::ifstream in_;
-    BgzfReader bgzf_;
+    std::string path_;
+    std::unique_ptr<BgzfReader> bgzf_;
     std::vector<output::SamReference> refs_;
     std::string header_text_;
 };

@@ -3,6 +3,7 @@
 // paths are read in sequence.
 #pragma once
 
+#include "bgzf_source.h"
 #include "byte_source.h"
 #include "gz_member_source.h"
 #include "vendor/kseq.h"
@@ -61,10 +62,10 @@ inline void uppercase_inplace(std::string& seq) {
     }
 }
 
-// Opens one input. A large gzip file that is not BGZF gets the parallel
-// source, which returns the same bytes; everything else, and any failure to
-// start it, gets ZlibByteSource. `plan` (or null for defaults) sets threads and
-// memory only.
+// Opens one input. A large gzip file that is not BGZF gets the member-parallel
+// source and a large BGZF file the block-parallel one, which return the same
+// bytes; everything else, and any failure to start either, gets
+// ZlibByteSource. `plan` (or null for defaults) sets threads and memory only.
 inline std::unique_ptr<ByteSource>
 make_byte_source(const std::string& path, const IoPlan* plan = nullptr) {
   if ((plan == nullptr || plan->parallel_gz) &&
@@ -74,6 +75,15 @@ make_byte_source(const std::string& path, const IoPlan* plan = nullptr) {
           path, plan == nullptr ? GzMemberSourceOptions() : plan->gz);
     } catch (const std::exception&) {
       // Fall back to the serial source, which reports any open error.
+    }
+  }
+  if ((plan == nullptr || plan->parallel_bgzf) &&
+      bgzf_eligible(path)) {
+    try {
+      return std::make_unique<BgzfByteSource>(
+          path, plan == nullptr ? GzMemberSourceOptions() : plan->gz);
+    } catch (const std::exception&) {
+      // As above.
     }
   }
   return std::make_unique<ZlibByteSource>(path);
@@ -126,10 +136,16 @@ public:
                 throw std::runtime_error(
                     "truncated FASTQ or qual/seq length mismatch in " + current_path());
             }
-            // len == -1: end of this file.
+            // len == -1: end of this file. After the last one the source is
+            // kept until the reader is destroyed, so a decode team lent by
+            // the caller keeps running the caller's work until then.
+            if (idx_ + 1 >= paths_.size()) {
+                kseq_destroy(ks_);
+                ks_ = nullptr;
+                return false;
+            }
             close_current();
             ++idx_;
-            if (idx_ >= paths_.size()) return false;
             open_current();
         }
     }

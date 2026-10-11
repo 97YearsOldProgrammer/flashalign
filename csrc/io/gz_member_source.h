@@ -80,14 +80,17 @@ struct GzMemberSourceOptions {
 
 // How a run decodes its inputs. A null plan means the defaults.
 struct IoPlan {
-  // False forces the serial ZlibByteSource.
+  // False forces the serial ZlibByteSource for gzip that is not BGZF.
   bool parallel_gz = true;
+  // False forces it for BGZF (io/bgzf_source.h).
+  bool parallel_bgzf = true;
+  // The team of either parallel source.
   GzMemberSourceOptions gz;
 };
 
 // True for a regular file of at least `min_bytes` that starts with a deflate
-// gzip member (1f 8b 08) and is not BGZF, whose small members would make
-// parallel decoding slower. Never throws; a failed probe answers false.
+// gzip member (1f 8b 08) and is not BGZF, which has its own source
+// (io/bgzf_source.h). Never throws; a failed probe answers false.
 bool gz_member_parallel_eligible(
     const std::string& path, uint64_t min_bytes = kGzMemberParallelMinBytes);
 

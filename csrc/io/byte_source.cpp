@@ -44,6 +44,16 @@ ZlibByteSource::ZlibByteSource(const std::string& path)
 #endif
 }
 
+ZlibByteSource::ZlibByteSource(const std::string& path, uint64_t start_offset,
+                               bool after_member)
+    : ZlibByteSource(path) {
+    after_member_ = after_member;
+    if (start_offset == 0) return;
+    if (!owns_fd_ || ::lseek(fd_, static_cast<off_t>(start_offset), SEEK_SET) < 0)
+        throw std::runtime_error("failed to seek in FASTA/FASTQ: " + path);
+    bytes_read_ = start_offset;
+}
+
 ZlibByteSource::~ZlibByteSource() {
     if (zs_ready_) inflateEnd(&zs_);
     if (owns_fd_) ::close(fd_);
@@ -104,7 +114,7 @@ int ZlibByteSource::read(void* buf, int len) {
                 mode_ = Mode::kGzip;
             } else {
                 // Plain input, or data after the last member, which gzread ignores.
-                mode_ = zs_ready_ ? Mode::kEnd : Mode::kCopy;
+                mode_ = zs_ready_ || after_member_ ? Mode::kEnd : Mode::kCopy;
             }
             continue;
         case Mode::kCopy: {

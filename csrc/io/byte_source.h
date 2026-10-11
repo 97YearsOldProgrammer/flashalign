@@ -1,8 +1,9 @@
 // The decompressed-byte source kseq.h reads from, so the decompressor can be
 // swapped without modifying kseq. A ByteSource must deliver exactly the bytes
 // zlib's gzread would, in order, and is read from one thread only. The
-// implementations are ZlibByteSource below and MemberParallelGzByteSource
-// (io/gz_member_source.h); io/fastx.h make_byte_source() chooses. A gzip file
+// implementations are ZlibByteSource below, MemberParallelGzByteSource
+// (io/gz_member_source.h) and BgzfByteSource
+// (io/bgzf_source.h); io/fastx.h make_byte_source() chooses. A gzip file
 // cut before a member's trailer reads as ending at the cut, as with gzread;
 // both sources call warn_truncated_gzip() when they reach the cut.
 #pragma once
@@ -47,6 +48,11 @@ class ZlibByteSource : public ByteSource {
 public:
     // Throws std::runtime_error if `path` cannot be opened.
     explicit ZlibByteSource(const std::string& path);
+    // Reads the file `path` from byte `start_offset`. With `after_member` the
+    // bytes there follow a gzip member, so anything but the gzip magic ends
+    // the input, as gzread ignores it, rather than being passed through.
+    ZlibByteSource(const std::string& path, uint64_t start_offset,
+                   bool after_member);
     ~ZlibByteSource() override;
     ZlibByteSource(const ZlibByteSource&) = delete;
     ZlibByteSource& operator=(const ZlibByteSource&) = delete;
@@ -92,6 +98,7 @@ private:
     Mode mode_ = Mode::kLook;
     z_stream zs_{};
     bool zs_ready_ = false;
+    bool after_member_ = false;
     // The current member's final deflate block has ended; only its trailer is
     // left. Tracked in the last kTailBytes of input only.
     bool final_block_ended_ = false;

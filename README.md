@@ -96,7 +96,8 @@ or for base-level alignments in the SAM format:
 flashalign align -a ref.fa reads.fq > aln.sam
 ```
 
-Reads may be FASTA or FASTQ, plain or gzip'd, and several read files may follow the reference.
+Reads may be FASTA or FASTQ, plain, gzip'd or bgzip'd, or unaligned BAM, and several read files may follow the
+reference. Large gzip, bgzip and BAM inputs decode on threads borrowed from `-t`.
 
 A FASTA reference is indexed in memory on every run. To index it once, write the index with
 `flashalign index` and give the index in place of the reference:

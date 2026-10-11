@@ -744,7 +744,9 @@ record the read produces.
 .BI \-t \ INT
 Number of threads [all\-2]: mapping runs on the machine's hardware threads less
 the reader and the writer. An explicit value is the whole mapping budget, and
-decompression of compressed input borrows from it rather than adding to it.
+decompression of compressed input borrows from it rather than adding to it:
+\-t/8 threads, from 1 to 8, when every read input qualifies (BGZF or BAM of at
+least 16 MiB at any \-t of 2 or more; other gzip of at least 64 MiB from \-t 32).
 .TP
 .B \-K, \-\-batch\-bp \fINUM\fR
 Number of bases loaded into memory to process in a mini-batch [500M]. As with
@@ -781,10 +783,10 @@ a batch before the next one starts. Output bytes and order are identical for
 every value.
 .TP
 .BI \-\-io\-staging \ MIB
-Ceiling, in MiB, on the decompressed input staged ahead of the reader; 0 scales
-it with
+Ceiling, in MiB, on the decompressed gzip input staged ahead of the reader; 0
+scales it with
 .B \-t
-[0]. A non-zero value must be at least 64.
+[0]. A non-zero value must be at least 64. BGZF and BAM input is not affected.
 .SS Preset options
 .TP 10
 .B \-x, \-\-preset \fISTR\fR

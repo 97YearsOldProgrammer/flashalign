@@ -17,7 +17,7 @@ namespace fa { namespace cpu { namespace io {
 class SequenceReader {
 public:
     // `plan` is borrowed and must outlive the reader; null takes the defaults.
-    // BAM inputs ignore it. `keep_comment` (-y) applies to FASTA/FASTQ only.
+    // `keep_comment` (-y) applies to FASTA/FASTQ only.
     explicit SequenceReader(std::string path, const IoPlan* plan = nullptr,
                             bool keep_comment = false)
         : SequenceReader(std::vector<std::string>{std::move(path)}, plan,
@@ -47,9 +47,10 @@ public:
         return bam_ ? bam_->sam_header_text() : std::string();
     }
 
-    // Whether the current input is decoded by a thread team (never for BAM).
+    // Whether the current input is decoded by a thread team.
     bool decode_parallel_active() const {
-        return fx_ && fx_->decode_parallel_active();
+        if (fx_) return fx_->decode_parallel_active();
+        return bam_ && bam_->decode_parallel_active();
     }
 
 private:
@@ -63,7 +64,7 @@ private:
                 "machinery only samtools/htslib provides); decode it first, e.g.: "
                 "samtools fastq " + p + " | flashalign align ref.fa -");
         }
-        if (path_is_bam(p)) bam_ = std::make_unique<BamReader>(p);
+        if (path_is_bam(p)) bam_ = std::make_unique<BamReader>(p, plan_);
         else fx_ = std::make_unique<FastxReader>(p, plan_, keep_comment_);
     }
 
