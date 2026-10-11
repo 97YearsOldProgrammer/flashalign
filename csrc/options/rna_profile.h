@@ -18,6 +18,9 @@ struct RnaLongOptions {
   int max_intron = 200000;
   int max_locus_chains = 6;
   int max_chain_predecessors = 64;
+  // --vote-spacing S: a read of length L votes max(the seeds per strand,
+  // ceil(L / S)) seeds per strand; 0 keeps the seeds per strand.
+  int vote_seed_spacing = 0;
   // Rival realization (rna/realization/rival_lifecycle.h). A rival is
   // retained when its chain score is within rival_pri_ratio of the primary's,
   // or within rival_min_diff of it absolutely (default 30, minimap2's 2k at

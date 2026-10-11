@@ -66,6 +66,8 @@ enum class OptionId {
     // Secondary retention ratio (-p), the RNA retention band
     // (--rival-min-diff) and the catalogue depth and realization budget (-N)
     PriRatio, SpliceRivalMinDiff, SpliceMaxLoci,
+    // RNA: one vote seed per this many query bases
+    VoteSpacing,
     // align: reporting
     Stats, ShowConfig,
   // clang-format on

@@ -161,8 +161,21 @@ std::string resolved_config_text(const AlignOptions& opt,
 
   row("min_support", i2s(cfg.common.min_support),
       src(opt.min_support.has_value(), "preset"));
-  row("max_query_seeds", i2s(cfg.common.max_query_seeds_per_strand),
-      src(opt.vote_seeds.has_value(), "preset"));
+  // With a vote spacing S a read of length L votes max(F, ceil(L / S)) seeds
+  // per strand, F the preset's seeds per strand (rna/backend.cpp).
+  const int vote_spacing =
+      is_rna && rna != nullptr ? rna->vote_seed_spacing : 0;
+  if (vote_spacing > 0 && cfg.common.max_query_seeds_per_strand > 0)
+    row("max_query_seeds",
+        "max(" + i2s(cfg.common.max_query_seeds_per_strand) + ", ceil(L/" +
+            i2s(vote_spacing) + "))",
+        "rule");
+  else
+    row("max_query_seeds", i2s(cfg.common.max_query_seeds_per_strand),
+        src(opt.vote_seeds.has_value(), "preset"));
+  if (is_rna && rna != nullptr)
+    row("vote_seed_spacing", i2s(rna->vote_seed_spacing),
+        src(opt.vote_spacing.has_value(), "preset"));
   // Above kVoteSeedNestBase a DNA selection keeps the kVoteSeedNestBase one
   // and fills it (seeding/syncmer.h).
   if (!is_rna)

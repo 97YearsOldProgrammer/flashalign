@@ -375,6 +375,8 @@ inline void set_splice_fields(
     mapping.strand_mode = 0;
     mapping.min_intron = 20;
     mapping.max_intron = 200000;
+    // One vote seed per this many query bases, above the 128 per strand.
+    mapping.vote_seed_spacing = hq ? 16 : 8;
 
     // RNA MAPQ parameters (rna/chain_mapq.h). ONT cDNA alignments often
     // cover less of the read, so `splice` uses a lower coverage threshold.

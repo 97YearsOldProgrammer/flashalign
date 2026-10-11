@@ -107,9 +107,16 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
   postings.bind_forward(*shared_fwd_syncmer_seeds);
   postings.bind_reverse(projected_shared_reverse);
   rna::placement::FusedCaptureScratch& capture = worker_scratch.capture;
+  // A context of 0 (every seed) stays 0.
+  int vote_seeds_per_strand = seed_ctx.max_query_seeds_per_strand;
+  const int vote_spacing = rctx.opts.vote_seed_spacing;
+  if (vote_spacing > 0 && vote_seeds_per_strand > 0)
+    vote_seeds_per_strand =
+        std::max(vote_seeds_per_strand,
+                 (read_len + vote_spacing - 1) / vote_spacing);
   rna::placement::capture_votes_fused(seed_ctx, *shared_fwd_syncmer_seeds,
                                       projected_shared_reverse, read_len,
-                                      capture);
+                                      vote_seeds_per_strand, capture);
 
   // Stage 2: aggregate captured postings into exon-shaped peaks.
   std::vector<rna::placement::CoarseDiagonalPeak> peaks =
@@ -131,9 +138,14 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
   if (!peaks.empty()) {
     // Stage 3: coarse locus envelopes. Locus selection only; the exon path is the
     // spliced anchor chain's job (stage 4).
+    // Past the cut, a locus whose seeds cover kRnaChimeraMinQueryBases of query no
+    // kept locus's seeds cover is kept too.
+    const rna::placement::CoarseLocusQueryCover query_cover{
+        &capture.peak_read_pos_offset, &capture.peak_read_pos, read_len, k,
+        rna::kRnaChimeraMinQueryBases};
     loci = rna::placement::select_coarse_loci(
         peaks, copt, worker_scratch.coarse, tie_seed, /*coalesced=*/nullptr,
-        /*overflow_out=*/nullptr);
+        /*overflow_out=*/nullptr, &query_cover);
   }
 
   // The second coarse pass. The budgeted vote needs two distinct seeds in one diagonal
@@ -157,10 +169,14 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
             worker_scratch.explain.revote_capture, revote_stats);
     if (revote_stats.over_budget)
       return false;
+    const rna::placement::CoarseLocusQueryCover pass_query_cover{
+        &worker_scratch.explain.revote_capture.peak_read_pos_offset,
+        &worker_scratch.explain.revote_capture.peak_read_pos, read_len, k,
+        rna::kRnaChimeraMinQueryBases};
     std::vector<rna::placement::CoarseLocus> pass_loci =
         rna::placement::select_coarse_loci(
             pass_peaks, copt, worker_scratch.coarse, tie_seed,
-            /*coalesced=*/nullptr, /*overflow_out=*/nullptr);
+            /*coalesced=*/nullptr, /*overflow_out=*/nullptr, &pass_query_cover);
     if (pass_loci.empty())
       return false;
     peaks = std::move(pass_peaks);

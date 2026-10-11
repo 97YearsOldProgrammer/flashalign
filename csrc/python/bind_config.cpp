@@ -82,7 +82,11 @@ void append(std::ostringstream& out, const char* name,
   X(k, "Seed k-mer length [-k]; mapping always uses the index's.")             \
   X(min_support, "Minimum anchor support [--min-support]. -1 = preset-owned.") \
   X(max_query_seeds,                                                           \
-    "Vote seeds per strand [--vote-seeds]; 0 = all. -1 = preset-owned.")       \
+    "Vote seeds per strand [--vote-seeds]; 0 = all. DNA presets only.\n"       \
+    "-1 = preset-owned.")                                                      \
+  X(vote_seed_spacing,                                                         \
+    "One vote seed per this many query bases, at least 128 per strand\n"       \
+    "[--vote-spacing]; 0 = a fixed 128. Splice only. -1 = preset-owned.")      \
   X(full_read_cigar,                                                           \
     "Realize base-level CIGARs; False maps only (the CLI's plain PAF).")       \
   X(syncmer_s, "Closed-syncmer s [-s]; mapping always uses the index's.")      \

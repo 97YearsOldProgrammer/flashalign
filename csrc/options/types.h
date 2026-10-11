@@ -31,6 +31,7 @@ struct UserOverrides {
   std::optional<int> min_support;
   // -m, minimap2's min_chain_score, >= 1. DNA presets only.
   std::optional<int> min_chain_score;
+  // --vote-seeds, >= 0. DNA presets only.
   std::optional<int> max_query_seeds_per_strand;
   std::optional<int> query_tile_supported_reward;
   std::optional<int> query_tile_block_open_cost;
@@ -90,6 +91,8 @@ struct UserOverrides {
   // which also sets the realization budget to one fewer.
   std::optional<int> rna_rival_min_diff;
   std::optional<int> rna_max_loci; // >= 1
+  // --vote-spacing, >= 0. RNA presets only.
+  std::optional<int> rna_vote_seed_spacing;
   // -N on a DNA preset, minimap2's best_n: the -c lane's cap on secondary
   // alignments, >= 1.
   std::optional<int> dna_secondary_max;

@@ -394,8 +394,8 @@ sets. DNA presets only.
 Seeds per strand that vote [128; 4096 on asm5, asm10, asm20; 256 on ava\-ont]: the read is cut
 into
 .I INT
-equal tiles and each tile votes with one of its seeds; 0 votes with every seed,
-and every preset takes the value. Above 128, a DNA preset keeps the seeds the
+equal tiles and each tile votes with one of its seeds; 0 votes with every seed.
+Above 128, the preset keeps the seeds the
 128\-tile cut picks and adds seeds of the
 .IR INT \-tile
 cut, each the farthest from those kept, until it holds as many as that cut picks;
@@ -414,6 +414,8 @@ votes (3 on the DNA presets), so an
 below that places few reads or none.
 The Python field is
 .BR Config.max_query_seeds .
+DNA presets only; the splice presets take
+.BR \-\-vote\-spacing .
 .TP
 .BI \-\-max\-cands \ INT
 Vote peaks and placement candidates kept per strand, 1 to 64 [16]; 1 to 16383
@@ -620,6 +622,19 @@ with
 .BR \-\-junc\-bed .
 .I INT
 ranges from 0 to 127. Splice presets only.
+.TP
+.BI \-\-vote\-spacing \ INT
+One vote seed per
+.I INT
+query bases [8; splice:hq 16]: a read of length
+.I L
+votes with max(128, ceil(\fIL\fR/\fIINT\fR)) seeds per strand, one per equal tile, so a read
+of at most 128 times
+.I INT
+bases votes with 128 seeds as before; 0 keeps the fixed 128. The vote serves
+plain PAF and base-level output alike. The Python field is
+.BR Config.vote_seed_spacing .
+Splice presets only.
 .SS Input/output options
 .TP 10
 .B \-o, \-\-output \fIFILE\fR
@@ -839,7 +854,9 @@ Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq
 .BR \-O6,24 ).
 It differs from
 .B splice
-in scoring and also in the vote's diagonal bin (48 against 64)
+in scoring and also in the vote's diagonal bin (48 against 64), the vote
+spacing (16 against 8; see
+.BR \-\-vote\-spacing )
 and the MAPQ coverage threshold (0.70 against 0.55).
 .TP
 .B asm5

@@ -271,6 +271,8 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.rna_rival_min_diff = *opt.rna_rival_min_diff;
   if (opt.rna_max_loci)
     u.rna_max_loci = *opt.rna_max_loci;
+  if (opt.vote_spacing)
+    u.rna_vote_seed_spacing = *opt.vote_spacing;
   if (opt.dna_secondary_max)
     u.dna_secondary_max = *opt.dna_secondary_max;
   // "auto" (-u b) maps to Unknown, the preset default.

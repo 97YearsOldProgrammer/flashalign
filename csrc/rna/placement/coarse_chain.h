@@ -80,6 +80,19 @@ struct CoarseLocusScratch {
   std::vector<std::pair<std::uint32_t, std::uint32_t>> spans;
   std::vector<std::int64_t> chain_score;
   std::vector<std::uint32_t> by_reference;
+  // Per read base: covered by a kept locus's seeds (query_cover admissions).
+  std::vector<std::uint8_t> query_cover;
+};
+
+// Each peak's seeds, for select_coarse_loci's admissions past the cut.
+struct CoarseLocusQueryCover {
+  // Peak p's distinct seeds' read positions, in its lane's frame, are
+  // read_pos[offset[p] .. offset[p + 1]).
+  const std::vector<std::uint32_t>* offset = nullptr;
+  const std::vector<int>* read_pos = nullptr;
+  int read_len = 0;
+  int k = 0;
+  int min_new_bases = 0;
 };
 
 // Selects candidate locus envelopes for the downstream harvest. A reference-ordered sweep
@@ -94,11 +107,15 @@ struct CoarseLocusScratch {
 // `overflow_out`, when non-null and max_overflow_loci > 0, receives the next ranked
 // distinct envelopes past the cut, unfinished (no colinear score, no intron estimate,
 // peaks in reference order); the kept prefix is unaffected.
+// `query_cover`, when non-null and `overflow_out` is null, also keeps, past the cut and
+// in rank order, each distinct envelope whose seeds' [pos, pos + k), in the forward
+// frame, hold at least min_new_bases bases that no kept envelope's seeds cover.
 std::vector<CoarseLocus> select_coarse_loci(
     const std::vector<CoarseDiagonalPeak>& peaks,
     const CoarseLocusOptions& options, CoarseLocusScratch& scratch,
     std::uint32_t tie_seed, std::size_t* coalesced = nullptr,
-    std::vector<CoarseLocus>* overflow_out = nullptr);
+    std::vector<CoarseLocus>* overflow_out = nullptr,
+    const CoarseLocusQueryCover* query_cover = nullptr);
 
 } // namespace placement
 } // namespace rna

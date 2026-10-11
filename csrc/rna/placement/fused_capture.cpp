@@ -123,7 +123,7 @@ std::uint32_t DiagonalBinCounter::support(std::int64_t key) const {
 
 FusedCaptureSummary capture_votes_fused(
     const LongReadSeedContext& ctx, const std::vector<QuerySeed>& fwd_seeds,
-    const std::vector<QuerySeed>& rc_seeds, int read_len,
+    const std::vector<QuerySeed>& rc_seeds, int read_len, int max_seeds,
     FusedCaptureScratch& scratch) {
   FusedCaptureSummary summary;
   scratch.fwd_log.clear();
@@ -153,7 +153,6 @@ FusedCaptureSummary capture_votes_fused(
 
   // Per-strand low-occurrence tile-spread selection, replayed from the cached evidence
   // (limit_query_seeds semantics).
-  const int max_seeds = ctx.max_query_seeds_per_strand;
   const auto select_strand = [&](const std::vector<QuerySeed>& stream,
                                  bool reversed_views,
                                  std::vector<QuerySeed>& selected) {
@@ -273,6 +272,8 @@ std::vector<CoarseDiagonalPeak>
 aggregate_fused_capture_to_peaks(FusedCaptureScratch& scratch, int k,
                                  int min_support) {
   std::vector<CoarseDiagonalPeak> peaks;
+  scratch.peak_read_pos.clear();
+  scratch.peak_read_pos_offset.assign(1, 0);
   const auto drain = [&](const std::vector<CapturedVote>& log,
                          const DiagonalBinCounter& bins, bool reverse) {
     std::vector<CapturedVote>& survivors = scratch.survivors;
@@ -308,6 +309,13 @@ aggregate_fused_capture_to_peaks(FusedCaptureScratch& scratch, int k,
               k, reverse, min_support, scratch.read_pos_scratch,
               scratch.ref_start_scratch, scratch.seed_id_scratch, peak)) {
         peaks.push_back(peak);
+        // Sorted by build_bin_peak; one position is one seed.
+        const std::vector<int>& positions = scratch.read_pos_scratch;
+        for (std::size_t q = 0; q < positions.size(); ++q)
+          if (q == 0 || positions[q] != positions[q - 1])
+            scratch.peak_read_pos.push_back(positions[q]);
+        scratch.peak_read_pos_offset.push_back(
+            static_cast<std::uint32_t>(scratch.peak_read_pos.size()));
       }
       i = j;
     }

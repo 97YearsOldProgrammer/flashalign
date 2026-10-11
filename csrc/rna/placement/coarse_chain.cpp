@@ -174,13 +174,37 @@ uint32_t estimate_intron_count(const std::vector<CoarseDiagonalPeak>& peaks,
   return introns;
 }
 
+// Sets the forward-frame bases of [pos, pos + k) over the seeds of `peak_indices` that
+// hold `from` in `cover` to `to`; returns how many it set.
+int recolor_query_cover(const std::vector<CoarseDiagonalPeak>& peaks,
+                        const std::vector<uint32_t>& peak_indices,
+                        const CoarseLocusQueryCover& qc, uint8_t from,
+                        uint8_t to, std::vector<uint8_t>& cover) {
+  int changed = 0;
+  for (uint32_t p : peak_indices) {
+    const bool reverse = peaks[p].reverse;
+    for (uint32_t s = (*qc.offset)[p]; s < (*qc.offset)[p + 1]; ++s) {
+      const int pos = (*qc.read_pos)[s];
+      const int begin = reverse ? qc.read_len - pos - qc.k : pos;
+      const int hi = std::min(qc.read_len, begin + qc.k);
+      for (int b = std::max(0, begin); b < hi; ++b)
+        if (cover[static_cast<size_t>(b)] == from) {
+          cover[static_cast<size_t>(b)] = to;
+          ++changed;
+        }
+    }
+  }
+  return changed;
+}
+
 } // namespace
 
 std::vector<CoarseLocus>
 select_coarse_loci(const std::vector<CoarseDiagonalPeak>& peaks,
                    const CoarseLocusOptions& o, CoarseLocusScratch& scratch,
                    uint32_t tie_seed, size_t* coalesced,
-                   std::vector<CoarseLocus>* overflow_out) {
+                   std::vector<CoarseLocus>* overflow_out,
+                   const CoarseLocusQueryCover* query_cover) {
   std::vector<CoarseLocus> out;
   if (overflow_out)
     overflow_out->clear();
@@ -404,14 +428,19 @@ select_coarse_loci(const std::vector<CoarseDiagonalPeak>& peaks,
       overflow_out ? std::min<size_t>(keep + o.max_overflow_loci, ranked.size())
                    : keep;
   out.reserve(keep);
+  // Past the cut, query_cover's admissions walk the rest of the ranking.
+  const bool cover_admits = query_cover != nullptr && overflow_out == nullptr;
+  std::vector<uint8_t>& cover = scratch.query_cover;
+  bool cover_built = false;
   // Walk in rank order, keeping at most one envelope per distinct reference window: a
   // candidate overlapping a kept locus on the same contig, on either strand, names the
   // same place and is dropped, and the next ranked entry takes the slot. Ignoring strand
   // removes the winner's own opposite-strand mirror; same-strand envelopes are disjoint
   // by construction.
-  for (size_t r = 0; r < ranked.size() &&
-                     out.size() + (overflow_out ? overflow_out->size() : 0) <
-                         admit;
+  for (size_t r = 0;
+       r < ranked.size() &&
+       (cover_admits ||
+        out.size() + (overflow_out ? overflow_out->size() : 0) < admit);
        ++r) {
     const CoarseLocus& candidate = envelopes[ranked[r]];
     bool duplicate_window = false;
@@ -439,8 +468,25 @@ select_coarse_loci(const std::vector<CoarseDiagonalPeak>& peaks,
     }
     if (duplicate_window)
       continue;
+    if (cover_admits && out.size() >= keep) {
+      if (!cover_built) {
+        cover.assign(static_cast<size_t>(std::max(0, query_cover->read_len)), 0);
+        for (const CoarseLocus& kept : out)
+          recolor_query_cover(peaks, kept.peak_indices, *query_cover, 0, 1, cover);
+        cover_built = true;
+      }
+      const std::vector<uint32_t>& candidate_peaks =
+          envelopes[ranked[r]].peak_indices;
+      const bool admitted =
+          recolor_query_cover(peaks, candidate_peaks, *query_cover, 0, 2,
+                              cover) >= query_cover->min_new_bases;
+      recolor_query_cover(peaks, candidate_peaks, *query_cover, 2,
+                          admitted ? 1 : 0, cover);
+      if (!admitted)
+        continue;
+    }
     CoarseLocus locus = std::move(envelopes[ranked[r]]);
-    if (out.size() >= keep) {
+    if (out.size() >= keep && !cover_admits) {
       overflow_out->push_back(std::move(locus));
       continue;
     }

@@ -56,10 +56,23 @@ class Config:
 
     @property
     def max_query_seeds(self) -> int:
-        """Vote seeds per strand [--vote-seeds]; 0 = all. -1 = preset-owned."""
+        """
+        Vote seeds per strand [--vote-seeds]; 0 = all. DNA presets only.
+        -1 = preset-owned.
+        """
 
     @max_query_seeds.setter
     def max_query_seeds(self, arg: int, /) -> None: ...
+
+    @property
+    def vote_seed_spacing(self) -> int:
+        """
+        One vote seed per this many query bases, at least 128 per strand
+        [--vote-spacing]; 0 = a fixed 128. Splice only. -1 = preset-owned.
+        """
+
+    @vote_seed_spacing.setter
+    def vote_seed_spacing(self, arg: int, /) -> None: ...
 
     @property
     def full_read_cigar(self) -> bool:

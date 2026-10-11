@@ -87,6 +87,11 @@ struct FusedCaptureScratch {
   std::vector<int> read_pos_scratch;
   std::vector<int> ref_start_scratch;
   std::vector<int> seed_id_scratch;
+  // The aggregation's peak p has its distinct seeds' read positions, in its lane's
+  // frame, at peak_read_pos[peak_read_pos_offset[p] .. peak_read_pos_offset[p + 1])
+  // (select_coarse_loci's query_cover).
+  std::vector<std::uint32_t> peak_read_pos_offset;
+  std::vector<int> peak_read_pos;
 };
 
 // Post-selection seed counts per strand.
@@ -104,12 +109,12 @@ struct FusedCaptureSummary {
 };
 
 // Captures votes over the forward canonical seed stream and its reverse projection with
-// one posting lookup per forward seed: each strand's tile-spread selection
-// (ctx.max_query_seeds_per_strand) is replayed from the cached evidence, then both
+// one posting lookup per forward seed: each strand's tile-spread selection of
+// max_seeds (0: every seed) is replayed from the cached evidence, then both
 // strands vote under the per-seed gates (index hit, posting count, occurrence policy).
 FusedCaptureSummary capture_votes_fused(
     const LongReadSeedContext& ctx, const std::vector<QuerySeed>& fwd_seeds,
-    const std::vector<QuerySeed>& rc_seeds, int read_len,
+    const std::vector<QuerySeed>& rc_seeds, int read_len, int max_seeds,
     FusedCaptureScratch& scratch);
 
 // Aggregates the captured logs into diagonal peaks: forward-strand bins in ascending key

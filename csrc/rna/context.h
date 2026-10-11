@@ -32,6 +32,9 @@ struct ResolvedOptions {
   int cigar_local_global_occ = 200;
   int cigar_local_interval_anchor_chain_max_gap = 5000;
   int fine_chain_band = 200000;
+  // The vote's seeds per strand on a read of length L: max(the seed context's,
+  // ceil(L / vote_seed_spacing)); 0 keeps the seed context's.
+  int vote_seed_spacing = 0;
 
   // Rival realization lifecycle options; the lifecycle is the requested-CIGAR path's
   // only arbitration.

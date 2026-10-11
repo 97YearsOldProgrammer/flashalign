@@ -70,7 +70,11 @@ struct AlignOptions {
     int io_staging_mib = 0;
     std::optional<int> min_support;
     // --vote-seeds INT: the vote's seeds per strand, >= 0; 0 is every seed.
+    // DNA presets only.
     std::optional<int> vote_seeds;
+    // --vote-spacing INT: one vote seed per INT query bases above the seeds
+    // per strand, >= 0; 0 keeps the seeds per strand. RNA presets only.
+    std::optional<int> vote_spacing;
     // --max-cands INT: the vote's peaks and the catalogue's candidates per
     // strand, 1..64, or 1..16383 in the all-chains lane
     // (check_max_cands_range). DNA presets only.

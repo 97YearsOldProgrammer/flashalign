@@ -586,6 +586,11 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
                 if (*opt.vote_seeds < 0)
                     throw UsageError("--vote-seeds must be >= 0");
                 break;
+            case OptionId::VoteSpacing:
+                opt.vote_spacing = parse_int(val, arg);
+                if (*opt.vote_spacing < 0)
+                    throw UsageError("--vote-spacing must be >= 0");
+                break;
             // Its range depends on the lane (check_max_cands_range).
             case OptionId::MaxCands:
                 opt.max_cands = parse_int(val, arg);
@@ -807,6 +812,13 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
         throw UsageError("--tiles is valid only with a DNA preset");
     if (rna && opt.chain_band)
         throw UsageError("-b is valid only with a DNA preset");
+    if (rna && opt.vote_seeds)
+        throw UsageError("--vote-seeds is valid only with a DNA preset; the "
+                         "splice presets take --vote-spacing");
+    // Without -x an index may record a splice preset; options/resolve.cpp
+    // refuses then.
+    if (!rna && opt.vote_spacing && opt.preset_source != "builtin")
+        throw UsageError("--vote-spacing is valid only with an RNA preset");
     if (rna && (opt.tile_supported_reward || opt.tile_block_open_cost ||
                 opt.tile_null_cost || opt.tile_unsupported_cost)) {
         throw UsageError(

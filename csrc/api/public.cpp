@@ -74,6 +74,8 @@ fa::cpu::options::ResolvedOptions resolve_config(
   if (source.max_query_seeds >= 0) {
     request.user.max_query_seeds_per_strand = source.max_query_seeds;
   }
+  if (source.vote_seed_spacing >= 0)
+    request.user.rna_vote_seed_spacing = source.vote_seed_spacing;
   if (source.tile_score_hit)
     request.user.query_tile_supported_reward = *source.tile_score_hit;
   if (source.tile_score_block)
@@ -172,7 +174,10 @@ Config to_public_config(const fa::cpu::options::ResolvedOptions& source,
   config.preset = std::move(preset);
   config.k = source.index.k;
   config.min_support = source.common.min_support;
-  config.max_query_seeds = source.common.max_query_seeds_per_strand;
+  // A splice preset's seeds per strand follow vote_seed_spacing.
+  config.max_query_seeds =
+      rna ? -1 : source.common.max_query_seeds_per_strand;
+  config.vote_seed_spacing = rna ? rna->vote_seed_spacing : -1;
   // A splice preset rejects --tile-score, so report None there.
   if (!rna) {
     config.tile_score_hit = mapping.query_partition.supported_tile_reward;

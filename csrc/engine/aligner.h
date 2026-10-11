@@ -521,6 +521,7 @@ private:
       opts.rival_lifecycle.realize_max = rna_mapping->rival_realize_max;
       opts.mapq_qcov_tau = rna_mapping->rna_mapq_qcov_tau;
       opts.mapq_disjoint_vote_damp = rna_mapping->rna_mapq_disjoint_vote_damp;
+      opts.vote_seed_spacing = rna_mapping->vote_seed_spacing;
     }
     opts.enable_full_read_cigar = config.common.enable_full_read_cigar;
     opts.cigar_replay_request = cigar_replay_request_for(config.common);

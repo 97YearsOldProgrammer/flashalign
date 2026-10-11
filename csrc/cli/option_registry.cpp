@@ -113,7 +113,8 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::VoteDiagWidthMax, '\0', "--dw-max", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "max diagonal bin width in voting [2048]"},
-        // The Python Config.max_query_seeds. Above 128 a DNA preset keeps the
+        // The Python Config.max_query_seeds. DNA presets only; the splice
+        // presets take --vote-spacing. Above 128 a DNA preset keeps the
         // 128-seed selection and fills it from the larger one
         // (seeding/syncmer.h).
         {OptionId::VoteSeeds, '\0', "--vote-seeds", kInt, kStable, A,
@@ -179,6 +180,11 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::RnaJunctionBonus, '\0', "--junc-bonus", kInt,
          kStable, A, "INT", SEC_SPLICE,
          "score bonus for a splice donor or acceptor found in annotation [9]"},
+        // A read of length L votes max(128, ceil(L / INT)) seeds per strand.
+        // The Python Config.vote_seed_spacing.
+        {OptionId::VoteSpacing, '\0', "--vote-spacing", kInt, kStable, A,
+         "INT", SEC_SPLICE,
+         "one vote seed per INT query bases, at least 128 per strand; 0 for a fixed 128 [8; splice:hq 16]"},
 
         {OptionId::Output,   'o', "--output", kStr, kStable, A,
          "FILE", SEC_IO, "output alignments to FILE [stdout]"},
