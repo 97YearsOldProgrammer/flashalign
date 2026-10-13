@@ -190,7 +190,7 @@ flashalign align -a -x lr:hq ref.fa hifi.fq.gz | samtools sort -o aln.bam
 Unmapped reads are written to SAM unless `--sam-hit-only` is given, and to PAF only with
 `--paf-no-hit`. Secondary alignments are written only with `--secondary=yes`. `--cs`, `--MD` and
 `--eqx` add the `cs` tag, the `MD` tag and `=`/`X` CIGAR operators. The PAF columns, the tags and
-the `cs` operations are listed under OUTPUT FORMAT in the manual.
+the `cs` operations are listed under [OUTPUT FORMAT](https://97yearsoldprogrammer.github.io/flashalign/#OUTPUT_FORMAT) in the manual.
 
 ### Advanced features
 
@@ -219,8 +219,9 @@ Mapping quality is incorrect given a multi-part index.
 
 ### Getting help
 
-The manual page, [`flashalign.1`](flashalign.1), describes every option, the output format and
-the exit status (`man ./flashalign.1`). `flashalign align --help` and `flashalign index --help`
+The [manual page](https://97yearsoldprogrammer.github.io/flashalign/) describes every option, the
+output format and the exit status; it is the HTML form of [`flashalign.1`](flashalign.1)
+(`man ./flashalign.1`). `flashalign align --help` and `flashalign index --help`
 list the common options. Bugs and questions go to the
 [issue page](https://github.com/97YearsOldProgrammer/flashalign/issues).
 

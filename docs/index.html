@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link rel="stylesheet" href="manual.css" type="text/css" media="all"/>
+  <title>flashalign(1)</title>
+</head>
+<body>
+<table class="head">
+  <tr>
+    <td class="head-ltitle">flashalign(1)</td>
+    <td class="head-vol">Bioinformatics tools</td>
+    <td class="head-rtitle">flashalign(1)</td>
+  </tr>
+</table>
+<nav class="toc" aria-label="Contents">
+<div class="toc-title">Contents</div>
+<ul>
+<li><a href="#NAME">Name</a>
+</li>
+<li><a href="#SYNOPSIS">Synopsis</a>
+</li>
+<li><a href="#DESCRIPTION">Description</a>
+</li>
+<li><a href="#OPTIONS">Options</a>
+<ul>
+<li><a href="#Indexing_options">Indexing options</a></li>
+<li><a href="#Placement_options">Placement options</a></li>
+<li><a href="#Alignment_options">Alignment options</a></li>
+<li><a href="#Splice_options">Splice options</a></li>
+<li><a href="#Input/output_options">Input/output options</a></li>
+<li><a href="#Preset_options">Preset options</a></li>
+<li><a href="#Miscellaneous_options">Miscellaneous options</a></li>
+</ul>
+</li>
+<li><a href="#OUTPUT_FORMAT">Output format</a>
+</li>
+<li><a href="#EXIT_STATUS">Exit status</a>
+</li>
+<li><a href="#LIMITATIONS">Limitations</a>
+</li>
+<li><a href="#SEE_ALSO">See also</a>
+</li>
+</ul>
+</nav>
+<div class="manual-text">
+<section class="Sh">
+<h1 class="Sh" id="NAME"><a class="permalink" href="#NAME">NAME</a></h1>
+<p class="Pp">flashalign - long-read DNA and spliced RNA alignment against a
+    reference genome</p>
+</section>
+<section class="Sh">
+<h1 class="Sh" id="SYNOPSIS"><a class="permalink" href="#SYNOPSIS">SYNOPSIS</a></h1>
+<p class="Pp">* Indexing the reference (optional):</p>
+<div class="Bd-indent">flashalign index [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
+  [<i>out.faix</i>]
+<br/>
+flashalign index [<b>-k</b> <i>kmer</i>] [<b>-s</b> <i>smer</i>] [<b>-I</b>
+  <i>batchSize</i>] <i>ref.fa</i> [<i>out.faix</i>]</div>
+<p class="Pp">* Long-read alignment with CIGAR:</p>
+<div class="Bd-indent">flashalign align <b>-a</b> [<b>-x</b> <i>preset</i>]
+  <i>ref.faix</i> <i>reads.fq</i> &gt; <i>output.sam</i>
+<br/>
+flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
+  <i>reads.fq</i> &gt; <i>output.paf</i></div>
+<p class="Pp">* Long-read mapping without CIGAR:</p>
+<div class="Bd-indent">flashalign align [<b>-x</b> <i>preset</i>] [<b>-t</b>
+  <i>nThreads</i>] <i>ref.fa</i> <i>reads.fq</i> &gt; <i>output.paf</i></div>
+<p class="Pp">* Long-read overlap without CIGAR:</p>
+<div class="Bd-indent">flashalign align <b>-x</b> ava-ont [<b>-t</b>
+  <i>nThreads</i>] <i>reads.fq</i> <i>reads.fq</i> &gt; <i>output.paf</i></div>
+<p class="Pp">* Spliced alignment of long RNA reads:</p>
+<div class="Bd-indent">flashalign align <b>-ax splice</b> <i>ref.fa</i>
+  <i>reads.fq</i> &gt; <i>output.sam</i></div>
+</section>
+<section class="Sh">
+<h1 class="Sh" id="DESCRIPTION"><a class="permalink" href="#DESCRIPTION">DESCRIPTION</a></h1>
+<p class="Pp">FlashAlign maps long reads to a reference genome: noisy Nanopore
+    reads, accurate long reads such as PacBio HiFi, and long cDNA, direct-RNA
+    and Iso-Seq reads, which it aligns across introns. It outputs in the PAF or
+    SAM format, PAF by default; it writes no BAM, so BAM is made by piping SAM
+    to <b>samtools</b>.</p>
+<p class="Pp">Reads may be FASTA/FASTQ (plain, gzip or BGZF) or BAM/uBAM regular
+    files. Legal additional BGZF extra subfields are accepted. Confirmed BAM
+    container or record damage and non-gzip trailing bytes are errors; a missing
+    final BGZF EOF marker alone warns and succeeds. Discard partial output after
+    an error. Embedded empty BGZF blocks do not end the input.</p>
+<p class="Pp">Seeds are closed syncmers, so an index is defined by the pair
+    (<i>k</i>,&#x00A0;<i>s</i>). <b>flashalign index</b> writes a reusable
+    <i>.faix</i> index (<i>ref.fa</i>.faix unless <i>out.faix</i> is given) and
+    records in it the preset it was built with; <b>flashalign align</b> adopts
+    that preset unless <b>-x</b> is given. The target of <b>align</b> may
+    equally be a reference FASTA, which is indexed transiently in memory and
+    never written out. FASTA or FASTQ (plain or gzip) and <i>.faix</i> targets
+    are told apart by content, not by name, and any other file is refused.</p>
+<p class="Pp">The index owns the seeding: <b>align</b> has no <b>-k</b> and no
+    <b>-s</b>. A FASTA target is indexed with the preset's
+    (<i>k</i>,&#x00A0;<i>s</i>), a <i>.faix</i> target supplies its own, and
+    mapping under another pair means running <b>flashalign index</b>
+    -k<b>/</b>-s first.</p>
+</section>
+<section class="Sh">
+<h1 class="Sh" id="OPTIONS"><a class="permalink" href="#OPTIONS">OPTIONS</a></h1>
+<section class="Ss">
+<h2 class="Ss" id="Indexing_options"><a class="permalink" href="#Indexing_options">Indexing
+  options</a></h2>
+<dl class="Bl-tag">
+  <dt id="x,"><a class="permalink" href="#x,"><b>-x, --preset
+    <i>STR</i></b></a></dt>
+  <dd>Preset [lr]. It fixes the seeding of the index and is written into it.
+      Available <i>STR</i> are <b>lr</b> (<b>-k21</b> <b>-s9</b>), <b>lr:hq</b>
+      (<b>-k21</b> <b>-s5</b>), <b>splice</b> and <b>splice:hq</b> (<b>-k15</b>
+      <b>-s10</b>), the experimental <b>asm5</b>, <b>asm10</b> and <b>asm20</b>
+      (<b>-k21</b> <b>-s9</b>), and the experimental <b>ava-ont</b> (<b>-k17</b>
+      <b>-s9</b>) and <b>ava-hifi</b> (<b>-k21</b> <b>-s5</b>). See <b>Preset
+      options</b>.</dd>
+  <dt id="k"><a class="permalink" href="#k"><b>-k</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Syncmer k-mer length [21], no larger than 23. Every preset maps an index
+      of any such k; Nanopore direct RNA maps on a <b>-k14</b> splice index. A
+      k-mer that is its own reverse complement, possible at an even value only,
+      is never a seed.</dd>
+  <dt id="s"><a class="permalink" href="#s"><b>-s</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Closed-syncmer s-mer size, 1 to <i>k</i> [9]. A closed syncmer is a k-mer
+      whose minimal s-mer sits at one of its two ends; the seed density is about
+      2/(k-s+1). A preset's s larger than <i>k</i> is taken as <i>k</i>.</dd>
+  <dt id="I"><a class="permalink" href="#I"><b>-I</b><i>&#x00A0;NUM</i></a></dt>
+  <dd>Load at most <i>NUM</i> target bases into RAM for indexing [no split]. If
+      there are more than <i>NUM</i> bases in <i>ref.fa</i>, flashalign needs to
+      read <i>reads.fq</i> multiple times to map it against each batch of target
+      sequences. This would create a multi-part index. <i>NUM</i> may be ending
+      with k/K/m/M/g/G. NB: mapping quality is incorrect given a multi-part
+      index.</dd>
+  <dt id="idx"><a class="permalink" href="#idx"><b>--idx-no-seq</b></a></dt>
+  <dd>Don't store target sequences in the index. It saves disk space and memory
+      but the index generated with this option will not work with <b>-a</b> or
+      <b>-c</b>: it serves plain PAF output only, so SAM output, <b>--cs</b>,
+      <b>--MD</b> and the splice presets refuse it. This option is not listed on
+      the help screen.</dd>
+  <dt id="t"><a class="permalink" href="#t"><b>-t</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Number of threads [all].</dd>
+  <dt id="quiet"><a class="permalink" href="#quiet"><b>--quiet</b></a></dt>
+  <dd>Suppress non-error logging, including the version, command line and
+      resource usage printed at the end of the run.</dd>
+  <dt id="help"><a class="permalink" href="#help"><b>--help</b></a></dt>
+  <dd>Print the <b>index</b> help message to stdout and exit.</dd>
+</dl>
+</section>
+<section class="Ss">
+<h2 class="Ss" id="Placement_options"><a class="permalink" href="#Placement_options">Placement
+  options</a></h2>
+<dl class="Bl-tag">
+  <dt id="g"><a class="permalink" href="#g"><b>-g</b><i>&#x00A0;NUM</i></a></dt>
+  <dd>Stop alignment elongation if there are no seeds within <i>NUM</i>-bp
+      [5000]. It bounds how far base alignment extends toward a read end, and
+      under a DNA preset two pieces of a read join into one record only across
+      gaps of at most <i>NUM</i>. Under a DNA preset it is also the maximum gap
+      of chaining, whose reach is never below the chain's band and grows with
+      the read length, so values under the band leave that chain unchanged. The
+      band is <b>-b</b>'s first value for the dense chains and its second for
+      the screening chain. Under a splice preset it bounds base alignment and is
+      also the maximum query gap of the fine chain; there <b>-G</b> bounds
+      introns. Untyped, <b>lr</b> uses 5000 for base alignment and 20000 for
+      chaining, <b>lr:hq</b> 10000 for both, the assembly presets 10000 and
+      20000, and the splice presets 2000 for both; a typed <i>NUM</i> sets both.
+      <i>NUM</i> may be ending with k/K/m/M/g/G.</dd>
+  <dt id="r"><a class="permalink" href="#r"><b>-r
+    <i>NUM1</i>[,<i>NUM2</i>]</b></a></dt>
+  <dd>Bandwidth for base alignment and gap filling [500,20000]. Under a DNA
+      preset, <i>NUM1</i> is used for alignment extension toward the read ends
+      and for inverted middles, and <i>NUM2</i> for closing gaps between
+      anchors, both only when base-level alignment runs (<b>-c</b>, SAM);
+      neither bands chaining, which <b>-b</b> sets. A single value sets
+      <i>NUM1</i> only. Each value may be ending with k/K/m/M/g/G, and
+      <i>NUM1</i> may not exceed <i>NUM2</i>. Under a splice preset <i>NUM1</i>
+      is the diagonal band of the fine chain and <i>NUM2</i> only bounds
+      <i>NUM1</i>; neither bands base alignment there, and <b>-G</b> sets both
+      [200000,200000].</dd>
+  <dt id="b"><a class="permalink" href="#b"><b>-b
+    <i>NUM1</i>[,<i>NUM2</i>]</b></a></dt>
+  <dd>Chaining bandwidth [20000,20000; 100000,20000 on asm5, asm10, asm20].
+      <i>NUM1</i> bands each candidate's dense chain over the whole read and
+      <i>NUM2</i> its bounded screening chain: a chain keeps only the anchors
+      whose diagonal lies within the band of the candidate's, and long reads
+      chain with a reach that grows with their length. It acts on placement, so
+      also on plain PAF output. A single value sets both. Each value may end
+      with k/K/m/M/g/G. The long form is <b>--chain-band</b>. DNA presets only;
+      <b>ava-ont</b> and <b>ava-hifi</b>, which do not partition the read,
+      refuse it.</dd>
+  <dt id="m"><a class="permalink" href="#m"><b>-m</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Discard alignments with chaining score &lt;<i>INT</i> [40; 100 on ava-ont,
+      ava-hifi]. Chaining score equals the approximate number of matching bases
+      minus a concave gap penalty. With a CIGAR the test counts the alignment's
+      matching bases; in plain PAF output it reads the chain score. A rival
+      chain scoring under <i>INT</i> is weighed as scoring <i>INT</i> in the
+      mapping quality; an inverted middle is aligned only when both its spans
+      reach <i>INT</i>; and base alignment trims a bad read end until
+      2*<i>INT</i> matching bases. At least 1. The long form is
+      <b>--min-chain-score</b>. DNA presets only.</dd>
+  <dt id="p"><a class="permalink" href="#p"><b>-p</b><i>&#x00A0;FLOAT</i></a></dt>
+  <dd>Minimal secondary-to-primary score ratio to output secondary mappings
+      [0.8]. Under a splice preset it retains a rival: a retained rival is
+      aligned, is what <b>md</b> and <b>XA</b> report, and is a record of its
+      own under <b>--secondary=yes</b>. Under a DNA preset it decides which
+      alternative loci enter the ownership selection, which chains attached to
+      an owner are aligned beside it and kept as secondary alignments, and which
+      rival a piece of a split read is weighed against in the mapping quality:
+      one whose chain scores at least <i>FLOAT</i> times the primary's, or
+      within 2<i>k</i> of it.</dd>
+  <dt id="N"><a class="permalink" href="#N"><b>-N</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Retain at most <i>INT</i> secondary alignments [1; splice presets 5].
+      Under a DNA preset the base-level lane realizes and keeps up to <i>INT</i>
+      rivals per read whether or not they are printed; one prices the mapping
+      quality. <b>-N0</b> is <b>--secondary=no</b>.</dd>
+  <dt id="rival"><a class="permalink" href="#rival"><b>--rival-min-diff</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Absolute chain-score band that retains a rival beside <b>-p</b> [30].
+      Splice presets only.</dd>
+  <dt id="min"><a class="permalink" href="#min"><b>--min-support</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Minimal number of seeds on a vote peak [3]. The splice presets use 2.</dd>
+  <dt id="max"><a class="permalink" href="#max"><b>--max-vote-occ</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Ignore a seed whose reference occurrence is above <i>INT</i> when voting,
+      and under a DNA preset when chaining too; 0 turns occurrence filtering off
+      [200]. Unset, the cap is the larger of 200 and the occurrence of the top
+      1.81e-4 fraction of the most frequent seeds in the index, at most 500
+      under <b>lr:hq</b>, and the DNA chaining gates take the same cap. The
+      splice presets keep the fixed 200. Under a DNA preset a vote tile whose
+      seeds are all above the cap still votes with its rarest seed of at most
+      4095 occurrences (<b>lr</b>) or 1024 (<b>lr:hq</b>), and chaining keeps
+      that seed.</dd>
+  <dt id="vote"><a class="permalink" href="#vote"><b>--vote-ratio</b><i>&#x00A0;FLOAT</i></a></dt>
+  <dd>Keep every vote peak whose vote is at least <i>FLOAT</i> of the best
+      peak's [0.25; 0 on ava-ont, ava-hifi]. 0 keeps the top four peaks by count
+      instead. DNA presets only.</dd>
+  <dt id="max~2"><a class="permalink" href="#max~2"><b>--max-chain-occ</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Drop a seed whose genome-wide reference occurrence is above <i>INT</i>
+      from the pool handed to chaining; 0 disables the gate [200]. Unset, the
+      gate is the voting cap (<b>--max-vote-occ</b>). A seed an empty vote tile
+      kept passes the gate. Only this gate bounds the seeds chaining receives:
+      with 0, repeats can cost several times the CPU and memory. DNA presets
+      only.</dd>
+  <dt id="dw"><a class="permalink" href="#dw"><b>--dw</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Width in reference bases of the diagonal bin a seed votes into, greater
+      than 0 [64]. <b>lr:hq</b> and <b>splice:hq</b> use 48. Under a DNA preset
+      the width otherwise grows with the read length; a value given here fixes
+      it and turns that growth off.</dd>
+  <dt><b>--dw-slope-den</b><i>&#x00A0;INT</i></dt>
+  <dd>Denominator of the term that grows the vote bin with read length: the
+      width is the read length divided by <i>INT</i>, held between the base
+      width and the cap [128]. <b>lr:hq</b>, <b>ava-ont</b> and <b>ava-hifi</b>
+      use 64, and 0 drops the term. DNA presets only.</dd>
+  <dt><b>--dw-max</b><i>&#x00A0;INT</i></dt>
+  <dd>Largest width that growth may reach, greater than 0 [2048]. While the
+      growth is on it may not be below the width <b>--dw</b> sets. DNA presets
+      only.</dd>
+  <dt id="vote~2"><a class="permalink" href="#vote~2"><b>--vote-seeds</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Seeds per strand that vote [128; 4096 on asm5, asm10, asm20; 256 on
+      ava-ont]: the read is cut into <i>INT</i> equal tiles and each tile votes
+      with one of its seeds; 0 votes with every seed. Above 128, the preset
+      keeps the seeds the 128-tile cut picks and adds seeds of the
+      <i>INT</i>-tile cut, each the farthest from those kept, until it holds as
+      many as that cut picks; a rescued seed that would exceed the strand's
+      budget of rescued occurrences is skipped, so the count can stop short. The
+      exact refinement of the vote peaks uses the seeds of both cuts. Neither
+      <b>--min-support</b> nor <b>--max-cands</b> scales with <i>INT</i>; a vote
+      peak needs <b>--min-support</b> votes (3 on the DNA presets), so an
+      <i>INT</i> below that places few reads or none. The Python field is
+      <b>Config.max_query_seeds</b>. DNA presets only; the splice presets take
+      <b>--vote-spacing</b>.</dd>
+  <dt id="max~3"><a class="permalink" href="#max~3"><b>--max-cands</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Vote peaks and placement candidates kept per strand, 1 to 64 [16]; 1 to
+      16383 [16383] under <b>ava-ont</b> and <b>ava-hifi</b>, which partition
+      nothing. Elsewhere, unset, it is 16 when vote peaks are admitted by their
+      ratio to the best (<b>--vote-ratio</b>), where it only bounds the cost,
+      and 4 when <b>--vote-ratio</b> is 0, where it selects; a value replaces
+      whichever applies. With a CIGAR the secondary alignments come from these
+      candidates' chains, so a wider bound can add secondaries. DNA presets
+      only.</dd>
+  <dt id="tiles"><a class="permalink" href="#tiles"><b>--tiles</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Query tiles the read is cut into for placement, 2 to 4096 [128; 2048 on
+      asm5, asm10, asm20]. The exact query partition gives each tile one
+      candidate or none, and an owned block needs two tiles with seed support.
+      Under the default <b>--tile-score</b>, 2 tiles place no read: a two-tile
+      block scores 8 - 12 = -4, below the -2 of leaving both tiles unowned. The
+      <b>--tile-score</b> terms are per tile, so their weight against each other
+      and against the read's length moves with <i>INT</i>. A candidate starts
+      with the tiles in which a voting seed supports it, so with fewer voting
+      seeds than tiles (<b>--vote-seeds</b>) most tiles start unsupported and
+      candidates are hard to admit; keep <b>--vote-seeds</b> at least
+      <i>INT</i>. Above 2048 tiles, candidates are admitted by comparing their
+      supports on 2048 tiles. The partition's work grows with <i>INT</i>. DNA
+      presets only.</dd>
+  <dt id="tile"><a class="permalink" href="#tile"><b>--tile-score
+    <i>hit</i>=<i>INT</i>,<i>block</i>=<i>INT</i>,<i>null</i>=<i>INT</i>,<i>miss</i>=<i>INT</i></b></a></dt>
+  <dd>Objective of the exact query partition, which decides for each of the
+      read's query tiles (<b>--tiles</b>) which candidate owns it
+      [hit=4,block=12,null=1,miss=0]. Under a DNA preset the partition picks the
+      candidates chained over the whole read, and the anchors of those chains
+      then decide which chain owns each part of the read. <i>hit</i> rewards an
+      owned tile the seeds support and is at least 1; <i>block</i> is charged
+      each time an ownership block opens, <i>null</i> per valid tile left
+      unowned, and <i>miss</i> per owned tile without seed support, each at
+      least 0. Any subset of the keys may be given, and a repeated key keeps its
+      last value. DNA presets only.</dd>
+</dl>
+</section>
+<section class="Ss">
+<h2 class="Ss" id="Alignment_options"><a class="permalink" href="#Alignment_options">Alignment
+  options</a></h2>
+<p class="Pp">Under a DNA preset, <b>-A</b>, <b>-B</b>, <b>-O</b>, <b>-E</b>,
+    <b>-z</b> and <b>--score-N</b> set the scoring of the gap fills between
+    anchors, and that row is checked: <b>-O</b> and <b>-E</b> positive, E1&gt;E2
+    and O1+E1&lt;O2+E2 unless the two pieces are equal, (O1+E1)+(O2+E2) at most
+    127, <b>--score-N</b> below <b>-B</b>, <b>-A</b> and <b>-B</b> within
+    [1,127] and <b>--end-bonus</b> at least -1; a row that fails exits 1. The
+    read-end extensions use the preset's own row, which also scores every
+    alignment, so AS, <b>-S</b> and <b>--end-bonus</b> are in its units: for
+    <b>lr</b> <b>-A2</b> <b>-B4</b> <b>-O4,24</b> <b>-E2,1</b> <b>-z400,200</b>
+    <b>--score-N</b> 1, for <b>lr:hq</b> <b>-A1</b> <b>-B4</b> <b>-O6,26</b>
+    <b>-E2,1</b> <b>-z400,200</b> <b>--score-N</b> 1. Under <b>asm5</b>,
+    <b>asm10</b> and <b>asm20</b>, as under the splice presets, the gap fills
+    and the read-end extensions use one row, and these options set it. The
+    defaults below are those of <b>lr</b>.</p>
+<dl class="Bl-tag">
+  <dt id="A"><a class="permalink" href="#A"><b>-A</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Matching score [4].</dd>
+  <dt id="B"><a class="permalink" href="#B"><b>-B</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Mismatching penalty [8]. Use a larger value for lower divergence.</dd>
+  <dt id="O"><a class="permalink" href="#O"><b>-O
+    <i>INT</i>[,<i>INT</i>]</b></a></dt>
+  <dd>Gap open penalty [8,48]. If the second <i>INT</i> is not specified, it is
+      set to the first.</dd>
+  <dt id="E"><a class="permalink" href="#E"><b>-E
+    <i>INT</i>[,<i>INT</i>]</b></a></dt>
+  <dd>Gap extension penalty [4,1]. A gap of length <i>k</i> costs
+      min{<i>O1</i>+<i>k</i>*<i>E1</i>,<i>O2</i>+<i>k</i>*<i>E2</i>}. If the
+      second <i>INT</i> is not specified, it is set to the first.</dd>
+  <dt id="z"><a class="permalink" href="#z"><b>-z</b><i>&#x00A0;INT1[,INT2]</i></a></dt>
+  <dd>Truncate an alignment if the running alignment score drops too quickly
+      along the diagonal of the DP matrix (diagonal X-drop, or Z-drop)
+      [800,200]. Under a DNA preset, a drop above <i>INT2</i> tests the dropped
+      region for a small inversion, aligning the reverse complement of the query
+      there; under <b>lr:hq</b>, only where the read's own seeds of the other
+      strand chain inside that region. If <i>INT2</i> is not specified, it is
+      set to <i>INT1</i>; it may not exceed <i>INT1</i>.</dd>
+  <dt id="S"><a class="permalink" href="#S"><b>-S</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Minimal peak DP alignment score to output [80]. Under a splice preset it
+      is also the floor of a supplementary piece, which needs 3 anchors and 40
+      matching bases besides; the primary is exempt. Under a DNA preset an
+      alignment also needs at least <b>-m</b> (40) matching bases; a value of 0
+      or less turns off the score test, not the base count. Plain PAF output,
+      which has no DP, is not filtered by this score; under a DNA preset it
+      prints no record whose chaining score is below <b>-m</b>. The long form is
+      <b>--min-dp-score</b>.</dd>
+  <dt id="score"><a class="permalink" href="#score"><b>--score-N</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Penalty of a mismatch involving ambiguous bases [2].</dd>
+  <dt id="end"><a class="permalink" href="#end"><b>--end-bonus</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Score bonus when alignment extends to the end of the query sequence
+    [-1].</dd>
+</dl>
+</section>
+<section class="Ss">
+<h2 class="Ss" id="Splice_options"><a class="permalink" href="#Splice_options">Splice
+  options</a></h2>
+<dl class="Bl-tag">
+  <dt id="min~2"><a class="permalink" href="#min~2"><b>--min-intron</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Minimal reference gap that chaining accepts as an intron [20]; a shorter
+      gap is left to base alignment as a deletion. It does not decide the `N'
+      CIGAR operator: base alignment writes a gap as `N' once the second gap
+      penalty makes the long gap cheaper (see <b>-O</b> and <b>-E</b>). Splice
+      presets only.</dd>
+  <dt id="G"><a class="permalink" href="#G"><b>-G</b><i>&#x00A0;NUM</i></a></dt>
+  <dd>Maximum gap on the reference (effective with a splice preset), that is the
+      maximum intron length [200k]. It also sets both values of <b>-r</b>, as in
+      minimap2; when both <b>-G</b> and <b>-r</b> are given, the later one
+      decides them. <i>NUM</i> may be ending with k/K/m/M/g/G. The long form is
+      <b>--max-intron-len</b>. Splice presets only.</dd>
+  <dt id="u"><a class="permalink" href="#u"><b>-u</b><i>&#x00A0;CHAR</i></a></dt>
+  <dd>How to find canonical splicing sites GT-AG - <b>f</b>: transcript strand;
+      <b>b</b>: both strands; <b>r</b>: reverse strand; <b>n</b>: no attempt to
+      match GT-AG [b]. Under <b>n</b> no <b>ts</b> tag is stamped. Use <b>f</b>
+      for reads already on the transcript strand, such as direct RNA and
+      Iso-Seq. Splice presets only.</dd>
+  <dt id="junc"><a class="permalink" href="#junc"><b>--junc-bed</b><i>&#x00A0;FILE</i></a></dt>
+  <dd>Junctions to prefer during base alignment []. <i>FILE</i> can be gene
+      annotations in the BED12 format (aka 12-column BED), or intron positions
+      in 6-column BED with the strand column required. BED12 file can be
+      converted from GTF/GFF3 with `paftools.js gff2bed anno.gtf'. Splice
+      presets only.</dd>
+  <dt id="junc~2"><a class="permalink" href="#junc~2"><b>--junc-bonus</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Score bonus for a splice donor or acceptor found in annotation [9].
+      Effective with <b>--junc-bed</b>. <i>INT</i> ranges from 0 to 127. Splice
+      presets only.</dd>
+  <dt id="vote~3"><a class="permalink" href="#vote~3"><b>--vote-spacing</b><i>&#x00A0;INT</i></a></dt>
+  <dd>One vote seed per <i>INT</i> query bases [8; splice:hq 16]: a read of
+      length <i>L</i> votes with max(128, ceil(<i>L</i>/<i>INT</i>)) seeds per
+      strand, one per equal tile, so a read of at most 128 times <i>INT</i>
+      bases votes with 128 seeds as before; 0 keeps the fixed 128. The vote
+      serves plain PAF and base-level output alike. The Python field is
+      <b>Config.vote_seed_spacing</b>. Splice presets only.</dd>
+</dl>
+</section>
+<section class="Ss">
+<h2 class="Ss" id="Input/output_options"><a class="permalink" href="#Input/output_options">Input/output
+  options</a></h2>
+<dl class="Bl-tag">
+  <dt id="o,"><a class="permalink" href="#o,"><b>-o, --output
+    <i>FILE</i></b></a></dt>
+  <dd>Output alignments to <i>FILE</i> [stdout].</dd>
+  <dt id="c"><a class="permalink" href="#c"><b>-c</b></a></dt>
+  <dd>Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag. PAF
+      without <b>-c</b> is placement-only: it runs no base-level dynamic
+      programming, so its coordinates and its <b>AS:i</b> differ from those of a
+      base-level alignment. <b>-c</b>, <b>--cs</b> and <b>--MD</b> turn
+      base-level alignment on in PAF; SAM output always has it.</dd>
+  <dt id="cs"><a class="permalink" href="#cs"><b>--cs</b>[=<b>short</b>|<b>long</b>]</a></dt>
+  <dd>Output the <b>cs</b> tag. If no argument is given, `<b>short</b>' is set
+      [none]. Implies <b>-c</b>.</dd>
+  <dt id="MD"><a class="permalink" href="#MD"><b>--MD</b></a></dt>
+  <dd>Output the MD tag (see the SAM spec). Implies <b>-c</b>.</dd>
+  <dt id="eqx"><a class="permalink" href="#eqx"><b>--eqx</b></a></dt>
+  <dd>Output =/X CIGAR operators for sequence match/mismatch. It rewrites every
+      CIGAR the run realizes - the SAM CIGAR, <b>SA:Z</b> and PAF's <b>cg:Z</b>
+      - and implies nothing, so plain PAF needs <b>-c</b> beside it.</dd>
+  <dt id="Y,"><a class="permalink" href="#Y,"><b>-Y,
+    --soft-clip-supp</b></a></dt>
+  <dd>In SAM output, use soft clipping for supplementary alignments. The default
+      is hard clipping.</dd>
+  <dt id="R,"><a class="permalink" href="#R,"><b>-R, --rg
+    <i>STR</i></b></a></dt>
+  <dd>SAM read group line in a format like <b>@RG\tID:foo\tSM:bar</b> []. It
+      must start with <b>@RG</b> and carry an <b>ID</b> field, and it adds
+      <b>RG:Z</b> as the first tag of every SAM record.</dd>
+  <dt id="sam"><a class="permalink" href="#sam"><b>--sam-hit-only</b></a></dt>
+  <dd>In SAM, don't output unmapped reads.</dd>
+  <dt id="paf"><a class="permalink" href="#paf"><b>--paf-no-hit</b></a></dt>
+  <dd>In PAF, output unmapped queries; the strand and the reference name fields
+      are set to `*', and every count to 0.</dd>
+  <dt id="no"><a class="permalink" href="#no"><b>--no-header</b></a></dt>
+  <dd>Don't output the SAM header.</dd>
+  <dt id="dual"><a class="permalink" href="#dual"><b>--dual</b>=<b>yes</b>|<b>no</b></a></dt>
+  <dd>With an overlap preset, whether an overlap is printed from each of its
+      reads that finds it (<b>yes</b>) or once, from the shorter read, ties
+      going to the read whose name sorts first (<b>no</b>), minimap2's
+      <b>--dual</b> [no] (minimap2 prints from the read whose name sorts first).
+      With <b>no</b> a read is not compared with a target read shorter than
+      itself, or as long and earlier by name. Refused with any other
+    preset.</dd>
+  <dt id="secondary"><a class="permalink" href="#secondary"><b>--secondary</b>=<b>yes</b>|<b>no</b></a></dt>
+  <dd>Whether to output secondary alignments [no]. With <b>yes</b>, each
+      alternative alignment of a read is written after the primary and its
+      supplementary records: FLAG 0x100, or 0x900 on its continuation segments,
+      <b>tp:A:S</b> in PAF, mapping quality 0, and `<b>*</b>' for SEQ and QUAL.
+      A secondary record carries <b>ms</b> and its own chain's <b>cm</b> and
+      <b>s1</b>, but no <b>md</b>, <b>s2</b>, <b>SA</b> or <b>XA</b>. Under a
+      DNA preset the secondary alignments are those of the chains aligned beside
+      an owner that, after alignment, overlap a primary record by more than half
+      of the shorter, at most <b>-N</b> per read; they are listed on the
+      primary's <b>XA</b>. Without a CIGAR a DNA preset writes no secondary
+      alignment. The value may also be given as a separate word (<b>--secondary
+      yes</b>); typed twice, the last one wins.</dd>
+  <dt id="y"><a class="permalink" href="#y"><b>-y</b></a></dt>
+  <dd>Copy input FASTA/Q comments to output, verbatim, as the last field of
+      every record the read produces.</dd>
+  <dt id="t~2"><a class="permalink" href="#t~2"><b>-t</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Number of threads [all-2]: mapping runs on the machine's hardware threads
+      less the reader and the writer. An explicit value is the whole mapping
+      budget, and decompression of compressed input borrows from it rather than
+      adding to it: -t/8 threads, from 1 to 8, when every read input qualifies
+      (BGZF or BAM of at least 16 MiB at any -t of 2 or more; other gzip of at
+      least 64 MiB from -t 32).</dd>
+  <dt id="K,"><a class="permalink" href="#K,"><b>-K, --batch-bp
+    <i>NUM</i></b></a></dt>
+  <dd>Number of bases loaded into memory to process in a mini-batch [500M]. As
+      with <b>-I</b>, a k/K/m/M/g/G suffix is accepted. Output bytes and output
+      order do not depend on it.</dd>
+  <dt id="show"><a class="permalink" href="#show"><b>--show-config</b></a></dt>
+  <dd>Print the fully resolved configuration to stdout and exit 0. It loads
+      neither the reference nor the reads, so <b>flashalign align -x lr:hq
+      --show-config</b> is a complete invocation; of a <i>.faix</i> target it
+      reads the header alone.</dd>
+  <dt id="stats"><a class="permalink" href="#stats"><b>--stats</b></a></dt>
+  <dd>Print a summary of the run to stderr: reads and bases, mapped reads,
+      records written, wall time, throughput and peak memory.</dd>
+  <dt id="progress"><a class="permalink" href="#progress"><b>--progress</b></a></dt>
+  <dd>Print per-batch progress to stderr.</dd>
+  <dt id="quiet~2"><a class="permalink" href="#quiet~2"><b>--quiet</b></a></dt>
+  <dd>Suppress non-error logging, including the three lines a run ends with on
+      stderr: the version, the command line, and the real time, CPU time and
+      peak memory.</dd>
+  <dt id="a"><a class="permalink" href="#a"><b>-a</b></a></dt>
+  <dd>Generate CIGAR and output alignments in the SAM format. FlashAlign outputs
+      in PAF by default.</dd>
+  <dt id="batch"><a class="permalink" href="#batch"><b>--batch-window</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Number of batches in flight in the compute stage [3]. With 1, all threads
+      finish a batch before the next one starts. Output bytes and order are
+      identical for every value.</dd>
+  <dt id="io"><a class="permalink" href="#io"><b>--io-staging</b><i>&#x00A0;MIB</i></a></dt>
+  <dd>Ceiling, in MiB, on the decompressed gzip input staged ahead of the
+      reader; 0 scales it with <b>-t</b> [0]. A non-zero value must be at least
+      64. BGZF and BAM input is not affected.</dd>
+</dl>
+</section>
+<section class="Ss">
+<h2 class="Ss" id="Preset_options"><a class="permalink" href="#Preset_options">Preset
+  options</a></h2>
+<dl class="Bl-tag">
+  <dt id="x,~2"><a class="permalink" href="#x,~2"><b>-x, --preset
+    <i>STR</i></b></a></dt>
+  <dd>Preset [lr]. This option applies multiple options at the same time. An
+      explicit <b>-x</b> also overrides the preset recorded in a <i>.faix</i>
+      target; the index keeps its own (<i>k</i>, <i>s</i>). Available <i>STR</i>
+      are:</dd>
+</dl>
+<div class="Bd-indent">
+<dl class="Bl-tag">
+  <dt id="lr"><a class="permalink" href="#lr"><b>lr</b></a></dt>
+  <dd>Align noisy long reads of ~10% error rate to a reference genome. This is
+      the default mode. (<b>-k21</b> <b>-s9 --min-support 3 -A4 -B8 -O8,48
+      -E4,1</b> <b>-z800,200 --score-N 2 -r500,20000 -m40 -p0.8</b>
+      <b>-S80</b>).</dd>
+  <dt id="lr:hq"><a class="permalink" href="#lr:hq"><b>lr:hq</b></a></dt>
+  <dd>Align accurate long reads (error rate &lt;1%), such as PacBio HiFi reads,
+      to a reference genome (<b>-k21</b> <b>-s5 --min-support 3 -A3 -B12 -O18,78
+      -E6,1</b> <b>-z1200,600 --score-N 3 -r500,20000 -g10000 -m40 -p0.8</b>
+      <b>-S200</b>). Its alignments are scored with minimap2's map-hifi scoring
+      (<b>-A1</b> <b>-B4</b> <b>-O6,26</b> <b>-E2,1</b>, <b>-S200</b>).</dd>
+  <dt id="splice"><a class="permalink" href="#splice"><b>splice</b></a></dt>
+  <dd>Long-read spliced alignment (<b>-k15</b> <b>-s10 --min-support 2 -A1 -B2
+      -O2,32 -E1,0 -z200,100 -S80</b> <b>--min-intron 20 -g2000 -G200k -ub
+      --junc-bonus 9 -p0.8</b> <b>-N5</b>). In the splice mode a long deletion
+      is taken as an intron and represented as the `<b>N</b>' CIGAR operator,
+      and <b>-m</b> is refused. For Nanopore direct RNA, index with <b>-k14</b>
+      (<b>flashalign index -x splice -k 14 ref.fa</b>) and align with <b>-x
+      splice -u f</b>.</dd>
+  <dt id="splice:hq"><a class="permalink" href="#splice:hq"><b>splice:hq</b></a></dt>
+  <dd>Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq
+      (<b>-xsplice</b> <b>-B4</b> <b>-O6,24</b>). It differs from <b>splice</b>
+      in scoring and also in the vote's diagonal bin (48 against 64), the vote
+      spacing (16 against 8; see <b>--vote-spacing</b>) and the MAPQ coverage
+      threshold (0.70 against 0.55).</dd>
+  <dt id="asm5"><a class="permalink" href="#asm5"><b>asm5</b></a></dt>
+  <dd>Experimental. Long assembly to reference mapping (<b>-k21</b> <b>-s9 -A1
+      -B19 -O39,81 -E3,1 -z200,200 --score-N 1 -r1000,100000</b>
+      <b>-b100000,20000 -S200 --vote-seeds 4096 --tiles 2048</b>). Use this
+      preset if the average divergence is not much higher than 0.1%.</dd>
+  <dt id="asm10"><a class="permalink" href="#asm10"><b>asm10</b></a></dt>
+  <dd>Experimental. Long assembly to reference mapping (<b>-xasm5</b> <b>-B9
+      -O16,41</b> <b>-E2,1</b>). Use this if the average divergence is around
+      1%.</dd>
+  <dt id="asm20"><a class="permalink" href="#asm20"><b>asm20</b></a></dt>
+  <dd>Experimental. Long assembly to reference mapping (<b>-xasm5</b> <b>-B4
+      -O6,26</b> <b>-E2,1</b>). Use this if the average divergence is around
+      several percent.</dd>
+  <dt id="ava"><a class="permalink" href="#ava"><b>ava-ont</b></a></dt>
+  <dd>Experimental. Oxford Nanopore all-vs-all overlap mapping (<b>-k17</b>
+      <b>-s9 --min-support 2 --vote-seeds 256 --vote-ratio 0 --dw-slope-den
+      64</b> <b>--max-cands 16383 -m100</b> <b>--dual=no</b>). Output is PAF
+      without CIGAR; <b>-a</b> and <b>-c</b> are refused. Read names must be
+      unique.</dd>
+  <dt id="ava~2"><a class="permalink" href="#ava~2"><b>ava-hifi</b></a></dt>
+  <dd>Experimental. PacBio HiFi all-vs-all overlap mapping (<b>-k21</b> <b>-s5
+      --min-support 3 --vote-ratio 0 --dw-slope-den 64</b> <b>--max-cands 16383
+      -m100</b> <b>--dual=no</b>).</dd>
+</dl>
+</div>
+</section>
+<section class="Ss">
+<h2 class="Ss" id="Miscellaneous_options"><a class="permalink" href="#Miscellaneous_options">Miscellaneous
+  options</a></h2>
+<dl class="Bl-tag">
+  <dt id="help~2"><a class="permalink" href="#help~2"><b>--help</b></a></dt>
+  <dd>Print the help screen of the subcommand to stdout and exit 0. A subcommand
+      invoked with no arguments prints the same screen to stderr and exits 2.
+      The help screen lists the common options; this page lists every
+    option.</dd>
+  <dt id="version"><a class="permalink" href="#version"><b>version</b></a></dt>
+  <dd>Print the version number to stdout. <b>flashalign --version</b> and
+      <b>flashalign -V</b> print the same line. Both spellings are top-level
+      only: neither is an <b>align</b> or <b>index</b> option.</dd>
+</dl>
+</section>
+</section>
+<section class="Sh">
+<h1 class="Sh" id="OUTPUT_FORMAT"><a class="permalink" href="#OUTPUT_FORMAT">OUTPUT
+  FORMAT</a></h1>
+<p class="Pp">FlashAlign outputs in the PAF format by default; without
+    <b>-c</b>, PAF output is approximate mapping, with no base-level alignment.
+    <b>-a</b> selects the SAM format. FlashAlign writes no BAM; pipe its SAM to
+    <b>samtools sort</b> for one, as in <b>flashalign align -a ref.fa reads.fq |
+    samtools sort -o out.bam</b>. PAF is a TAB-delimited text format with each
+    line consisting of at least 12 fields as are described in the following
+    table:</p>
+<table class="tbl" style="border-style: solid;">
+  <tr style="border-bottom-style: solid;">
+    <td style="text-align: center; border-right-style: solid;"><b>Col</b></td>
+    <td style="text-align: center; border-right-style: solid;"><b>Type</b></td>
+    <td style="text-align: center;"><b>Description</b></td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">1</td>
+    <td style="text-align: center; border-right-style: solid;">string</td>
+    <td>Read name</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">2</td>
+    <td style="text-align: center; border-right-style: solid;">int</td>
+    <td>Read length</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">3</td>
+    <td style="text-align: center; border-right-style: solid;">int</td>
+    <td>Read start coordinate (0-based)</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">4</td>
+    <td style="text-align: center; border-right-style: solid;">int</td>
+    <td>Read end coordinate (0-based)</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">5</td>
+    <td style="text-align: center; border-right-style: solid;">char</td>
+    <td>`+' for forward strand; `-' for reverse</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">6</td>
+    <td style="text-align: center; border-right-style: solid;">string</td>
+    <td>Contig name</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">7</td>
+    <td style="text-align: center; border-right-style: solid;">int</td>
+    <td>Contig length</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">8</td>
+    <td style="text-align: center; border-right-style: solid;">int</td>
+    <td>Contig start coordinate on the original strand</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">9</td>
+    <td style="text-align: center; border-right-style: solid;">int</td>
+    <td>Contig end coordinate on the original strand</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">10</td>
+    <td style="text-align: center; border-right-style: solid;">int</td>
+    <td>Number of matching bases</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">11</td>
+    <td style="text-align: center; border-right-style: solid;">int</td>
+    <td>Number of bases in alignment</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">12</td>
+    <td style="text-align: center; border-right-style: solid;">int</td>
+    <td>Mapping quality (0-60)</td>
+  </tr>
+</table>
+<p class="Pp"></p>
+<p class="Pp">When alignment is available, column 11 gives the total number of
+    sequence matches, mismatches and gaps in the alignment; column 10 divided by
+    column 11 gives the BLAST-like alignment identity. When alignment is
+    unavailable, these two columns are approximate. SAM and PAF may optionally
+    have additional fields in the SAM-like typed key-value format. FlashAlign
+    may output the following tags:</p>
+<table class="tbl" style="border-style: solid;">
+  <tr style="border-bottom-style: solid;">
+    <td style="text-align: center; border-right-style: solid;"><b>Tag</b></td>
+    <td style="text-align: center; border-right-style: solid;"><b>Type</b></td>
+    <td style="text-align: center;"><b>Description</b></td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">AS</td>
+    <td style="text-align: center; border-right-style: solid;">i</td>
+    <td>Alignment score from dynamic programming</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">ms</td>
+    <td style="text-align: center; border-right-style: solid;">i</td>
+    <td>Score of the maximum scoring segment</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">md</td>
+    <td style="text-align: center; border-right-style: solid;">i</td>
+    <td>Max score minus secondary max score</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">NM</td>
+    <td style="text-align: center; border-right-style: solid;">i</td>
+    <td>Edit distance</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">nn</td>
+    <td style="text-align: center; border-right-style: solid;">i</td>
+    <td>Number of ambiguous bases in the alignment</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">tp</td>
+    <td style="text-align: center; border-right-style: solid;">A</td>
+    <td>Type of aln: P/primary, S/secondary, I/inversion</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">cm</td>
+    <td style="text-align: center; border-right-style: solid;">i</td>
+    <td>Number of anchors on the chain; FlashAlign's anchors are syncmers</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">s1</td>
+    <td style="text-align: center; border-right-style: solid;">i</td>
+    <td>Chaining score</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">s2</td>
+    <td style="text-align: center; border-right-style: solid;">i</td>
+    <td>Chaining score of the best secondary chain</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">de</td>
+    <td style="text-align: center; border-right-style: solid;">f</td>
+    <td>Gap-compressed per-base sequence divergence</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">ts</td>
+    <td style="text-align: center; border-right-style: solid;">A</td>
+    <td>Transcript strand (splice mode only)</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">RG</td>
+    <td style="text-align: center; border-right-style: solid;">Z</td>
+    <td>Read group ID from -R (SAM only)</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">SA</td>
+    <td style="text-align: center; border-right-style: solid;">Z</td>
+    <td>List of other supplementary alignments (SAM only)</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">XA</td>
+    <td style="text-align: center; border-right-style: solid;">Z</td>
+    <td>Secondary hits in (ctg,strandPos,CIGAR,NM;)+ (SAM only)</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">cg</td>
+    <td style="text-align: center; border-right-style: solid;">Z</td>
+    <td>CIGAR (PAF only)</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">cs</td>
+    <td style="text-align: center; border-right-style: solid;">Z</td>
+    <td>Difference string</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;">MD</td>
+    <td style="text-align: center; border-right-style: solid;">Z</td>
+    <td>Difference string in the SAM spec</td>
+  </tr>
+</table>
+<p class="Pp"></p>
+<p class="Pp">Tags <b>md</b>, <b>s2</b> and <b>XA</b> are not written on a
+    secondary alignment. <b>cm</b> and <b>s1</b> describe the chain a record
+    comes from, the chain <b>s2</b> is compared against. <b>s2</b> is taken over
+    every rival the mapping quality weighs, before <b>-p</b> applies, as in
+    minimap2. A secondary alignment carries its own chain's. Under the DNA
+    presets but ava-ont and ava-hifi, a primary or supplementary record carries
+    the anchor count and score of its own part of that chain. A record without a
+    chain, such as the inverted middle of a DNA alignment, carries none of the
+    three.</p>
+<p class="Pp">In SAM, the tags of a BAM input record ride every record of its
+    read, spelled as <b>samtools view</b> spells them, after FlashAlign's own
+    tags and before <b>SA</b>. MM, ML, MN and a B array with one element per
+    base of the read are left off a record whose SEQ is not the whole read: a
+    hard-clipped supplementary and a secondary alignment. An input tag that
+    FlashAlign writes itself is dropped with a warning. The headers of the BAM
+    inputs are merged: their <b>@PG</b> lines come before FlashAlign's, whose
+    <b>PP</b> names the first input's last program, and their <b>@RG</b> and
+    <b>@CO</b> lines after it; one read group ID declared differently by two
+    inputs is an error. An aligned BAM is read as reads: its secondary and
+    supplementary records are skipped and a mapped record loses its alignment
+    tags. PAF carries no input tag.</p>
+<p class="Pp">The <b>cs</b> tag encodes difference sequences in the short form
+    or the entire query <i>AND</i> reference sequences in the long form. It
+    consists of a series of operations:</p>
+<table class="tbl" style="border-style: solid;">
+  <tr style="border-bottom-style: solid;">
+    <td style="text-align: center; border-right-style: solid;"><b>Op</b></td>
+    <td style="text-align: center; border-right-style: solid;"><b>Regex</b></td>
+    <td style="text-align: center;"><b>Description</b></td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;"> =</td>
+    <td style="border-right-style: solid;">[ACGTN]+</td>
+    <td>Identical sequence (long form)</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;"> :</td>
+    <td style="border-right-style: solid;">[0-9]+</td>
+    <td>Identical sequence length</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;"> *</td>
+    <td style="border-right-style: solid;">[acgtn][acgtn]</td>
+    <td>Substitution: ref to query</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;"> +</td>
+    <td style="border-right-style: solid;">[acgtn]+</td>
+    <td>Insertion to the reference</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;"> -</td>
+    <td style="border-right-style: solid;">[acgtn]+</td>
+    <td>Deletion from the reference</td>
+  </tr>
+  <tr>
+    <td style="text-align: right; border-right-style: solid;"> ~</td>
+    <td style="border-right-style: solid;">[acgtn]{2}[0-9]+[acgtn]{2}</td>
+    <td>Intron length and splice signal</td>
+  </tr>
+</table>
+<p class="Pp"></p>
+</section>
+<section class="Sh">
+<h1 class="Sh" id="EXIT_STATUS"><a class="permalink" href="#EXIT_STATUS">EXIT
+  STATUS</a></h1>
+<dl class="Bl-tag">
+  <dt><b>0</b></dt>
+  <dd>Success, and every <b>--help</b> path, which prints to stdout.</dd>
+  <dt><b>1</b></dt>
+  <dd>Runtime failure: a missing or unreadable input, a write failure, CRAM or
+      SAM text handed in as reads, a closed output, or an option the resolved
+      preset cannot honour, such as a scoring row that fails its check or a
+      <b>-r</b> pair whose first value exceeds the second. One error line on
+      stderr, no hint.</dd>
+  <dt><b>2</b></dt>
+  <dd>Usage error: an unknown command, an unknown option, a bad value or a
+      missing operand. One error line plus one hint line on stderr.
+      <b>flashalign</b> with no arguments, and <b>flashalign align</b> or
+      <b>flashalign index</b> with no arguments, print their help screen to
+      stderr and exit 2 instead.</dd>
+</dl>
+</section>
+<section class="Sh">
+<h1 class="Sh" id="LIMITATIONS"><a class="permalink" href="#LIMITATIONS">LIMITATIONS</a></h1>
+<dl class="Bl-tag">
+  <dt>*</dt>
+  <dd>Long reads only: a read has to carry enough anchors to be collapsed into
+      one or more diagonals.</dd>
+  <dt>*</dt>
+  <dd>FlashAlign requires SSE4.1 instructions on x86 CPUs or NEON on ARM CPUs. A
+      build without them is not provided.</dd>
+  <dt>*</dt>
+  <dd>The assembly and overlap presets are experimental.</dd>
+</dl>
+</section>
+<section class="Sh">
+<h1 class="Sh" id="SEE_ALSO"><a class="permalink" href="#SEE_ALSO">SEE
+  ALSO</a></h1>
+<p class="Pp">samtools(1).</p>
+</section>
+</div>
+<table class="foot">
+  <tr>
+    <td class="foot-date">11 October 2026</td>
+    <td class="foot-os">flashalign-0.3.0</td>
+  </tr>
+</table>
+</body>
+</html>
