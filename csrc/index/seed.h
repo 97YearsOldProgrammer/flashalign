@@ -2,8 +2,7 @@
 // (reference seeds) and the per-read query path (query seeds).
 #pragma once
 
-#include "../core/hash.h"   // sketch_order_hash, detail::splitmix64
-#include "../core/types.h"  // nuc_encode
+#include "../core/core.h"   // sketch_order_hash, detail::splitmix64, nuc_encode
 #include "format.h"         // RefPos
 
 #include <algorithm>
@@ -195,11 +194,6 @@ inline bool closed_syncmer_selected_generic(const BaseT* kmer, int k, int s) {
 // s-mers preserves every comparison, and selection is unchanged while the per-base hash
 // becomes one table load.
 
-// -1: use the table only when it is cache-small (s <= 7); 0: never; 1: always.
-inline int closed_syncmer_order_lut_override() {
-    return -1;
-}
-
 // Built once per S, thread-safely; S <= 16 keeps every rank in uint32_t.
 template <int S>
 inline const uint32_t* closed_syncmer_order_rank_table_impl() {
@@ -218,24 +212,10 @@ inline const uint32_t* closed_syncmer_order_rank_table_impl() {
     return table.data();
 }
 
-// The order-rank table for the preset s values (5 and 9); nullptr otherwise, where callers
-// use sketch_order_hash.
-inline const uint32_t* closed_syncmer_order_rank_table(int s) {
-    switch (s) {
-        case 5:  return closed_syncmer_order_rank_table_impl<5>();
-        case 9:  return closed_syncmer_order_rank_table_impl<9>();
-        default: return nullptr;
-    }
-}
-
-// The order-rank table to use for `s`, or nullptr to hash directly.
+// The order-rank table to use for `s`, or nullptr to hash directly with sketch_order_hash.
+// Only the s = 5 preset has one; larger tables do not stay cached, so s = 9 hashes.
 inline const uint32_t* closed_syncmer_order_rank_table_for(int s) {
-    const int ov = closed_syncmer_order_lut_override();
-    if (ov == 0) return nullptr;
-    if (ov < 0 && (s < 1 || (1ULL << (2 * s)) > (1ULL << 14))) {
-        return nullptr;  // skip tables too large to stay cached, e.g. s = 9
-    }
-    return closed_syncmer_order_rank_table(s);
+    return s == 5 ? closed_syncmer_order_rank_table_impl<5>() : nullptr;
 }
 
 // Sliding window of the last W = k - s + 1 s-mer order values, tracking the window minimum

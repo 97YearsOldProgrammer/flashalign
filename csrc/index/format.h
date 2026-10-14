@@ -61,12 +61,12 @@
 // postings[begin, begin + count) of the shard's slice, ascending. A position is
 // contig << 33 | offset << 1 | z, z being the orientation bit of the reference k-mer there.
 //
-// The hash functions are in core/hash.h. A reader refuses another version, a flag it does
+// The hash functions are in core/core.h. A reader refuses another version, a flag it does
 // not know and non-zero zero bytes. Changing any rule above, or the layout, needs format
 // version 2.
 #pragma once
 
-#include "../core/hash.h"
+#include "../core/core.h"
 
 #include <algorithm>
 #include <cstddef>

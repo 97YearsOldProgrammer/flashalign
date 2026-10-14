@@ -1,6 +1,6 @@
 // The header check here is a fast filter in front of zlib's one-block
 // inflate, which is what makes a position a candidate.
-#include "deflate_split.h"
+#include "io.h"
 
 #include <algorithm>
 #include <cstring>

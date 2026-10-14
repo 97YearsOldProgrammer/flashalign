@@ -1,134 +1,105 @@
 include_guard(GLOBAL)
 
 add_library(flashalign_core STATIC
-    csrc/core/cigar.cpp
-    csrc/core/sequence.cpp)
+    csrc/core/core.cpp)
 flashalign_configure_internal_target(flashalign_core)
 
 add_library(flashalign_threading INTERFACE)
-add_library(flashalign_split INTERFACE)
 
 add_library(flashalign_index STATIC
-    csrc/index/builder.cpp
-    csrc/index/faix_format.cpp
-    csrc/index/faix_storage_posix.cpp)
+    csrc/index/build.cpp
+    csrc/index/faix.cpp)
 flashalign_configure_internal_target(flashalign_index)
 target_link_libraries(flashalign_index PRIVATE
     flashalign_core flashalign_threading)
 
-add_library(flashalign_chaining STATIC
-    csrc/chaining/colinear_chain.cpp
-    csrc/chaining/dense_chain.cpp
-    csrc/chaining/partition.cpp)
-flashalign_configure_internal_target(flashalign_chaining)
-target_link_libraries(flashalign_chaining PRIVATE
-    flashalign_core flashalign_split)
+add_library(flashalign_chain STATIC
+    csrc/chain/colinear_chain.cpp
+    csrc/chain/dense_chain.cpp)
+flashalign_configure_internal_target(flashalign_chain)
+target_link_libraries(flashalign_chain PRIVATE
+    flashalign_core)
 # dense_chain.cpp's vector code must round exactly as its scalar code, so no FMA contraction.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(csrc/chaining/dense_chain.cpp PROPERTIES
+    set_source_files_properties(csrc/chain/dense_chain.cpp PROPERTIES
         COMPILE_OPTIONS "-ffp-contract=off")
 endif()
-add_library(flashalign_seeding STATIC
-    csrc/seeding/posting_density.cpp)
-flashalign_configure_internal_target(flashalign_seeding)
-target_link_libraries(flashalign_seeding PRIVATE
-    flashalign_core flashalign_index flashalign_chaining
-    flashalign_split)
+add_library(flashalign_seed STATIC
+    csrc/seed/seed.cpp)
+flashalign_configure_internal_target(flashalign_seed)
+target_link_libraries(flashalign_seed PRIVATE
+    flashalign_core flashalign_index flashalign_chain)
 
-add_library(flashalign_voting STATIC
-    csrc/voting/query_tiles.cpp
-    csrc/voting/candidate_catalogue.cpp
-    csrc/voting/query_partition.cpp)
-flashalign_configure_internal_target(flashalign_voting)
-target_link_libraries(flashalign_voting PUBLIC
-    flashalign_core flashalign_index flashalign_seeding)
+add_library(flashalign_vote STATIC
+    csrc/vote/vote.cpp
+    csrc/vote/partition.cpp)
+flashalign_configure_internal_target(flashalign_vote)
+target_link_libraries(flashalign_vote PUBLIC
+    flashalign_core flashalign_index flashalign_seed)
 
 add_library(flashalign_dp STATIC
-    csrc/dp/splice_kernel.cpp
+    csrc/dp/dp.cpp
     $<TARGET_OBJECTS:fa_ksw2>)
 flashalign_configure_internal_target(flashalign_dp)
 target_link_libraries(flashalign_dp PRIVATE
     flashalign_core)
 
 add_library(flashalign_dna STATIC
-    csrc/dna/alternative_hypothesis.cpp
-    csrc/dna/chain_mapq.cpp
-    csrc/dna/chain_ownership.cpp
-    csrc/dna/postdp_scoring.cpp
-    csrc/dna/mapq_routing.cpp
-    csrc/dna/retained_seed_density.cpp
-    csrc/dna/inv_local_chain.cpp
-    csrc/dna/placement_chaining.cpp
-    csrc/dna/target_chaining.cpp
-    csrc/dna/placement_family_adapter.cpp
-    csrc/dna/record_family.cpp
-    csrc/dna/family_projection.cpp
-    csrc/dna/family_realization.cpp
-    csrc/dna/region_realization.cpp
-    csrc/dna/dp_runner.cpp
-    csrc/dna/realization_controller.cpp
-    csrc/dna/ordered_anchor_path.cpp
-    csrc/dna/backend.cpp)
+    csrc/dna/map.cpp
+    csrc/dna/seeds.cpp
+    csrc/dna/catalogue.cpp
+    csrc/dna/placement.cpp
+    csrc/dna/ownership.cpp
+    csrc/dna/ava.cpp
+    csrc/dna/projection.cpp
+    csrc/dna/anchor_path.cpp
+    csrc/dna/realization.cpp
+    csrc/dna/align.cpp
+    csrc/dna/mapq.cpp)
 flashalign_configure_internal_target(flashalign_dna)
 target_link_libraries(flashalign_dna PRIVATE
-    flashalign_core flashalign_index flashalign_dp flashalign_chaining
-    flashalign_seeding flashalign_voting flashalign_split)
+    flashalign_core flashalign_index flashalign_dp flashalign_chain
+    flashalign_seed flashalign_vote)
 target_compile_definitions(flashalign_dna PRIVATE FLASHALIGN_BUILDING_DNA)
 add_library(flashalign_rna STATIC
-    csrc/rna/annotation/known_junctions.cpp
-    csrc/rna/placement/aggregate.cpp
-    csrc/rna/placement/fused_capture.cpp
-    csrc/rna/placement/coarse_chain.cpp
-    csrc/rna/placement/output.cpp
-    csrc/rna/anchoring/skeleton_regions.cpp
-    csrc/rna/anchoring/skeleton_harvest.cpp
-    csrc/rna/anchoring/selected_locus_anchoring.cpp
-    csrc/rna/anchoring/exact_anchor_path.cpp
-    csrc/rna/anchoring/select_exact_anchor_path.cpp
-    csrc/rna/anchoring/frame_diagonal_support.cpp
-    csrc/rna/config.cpp
-    csrc/rna/chain_mapq.cpp
-    csrc/rna/query_partition.cpp
-    csrc/rna/rival_pricing.cpp
-    csrc/rna/output.cpp
-    csrc/rna/realization/splice_anchor_view.cpp
-    csrc/rna/realization/splice_controller.cpp
-    csrc/rna/realization/splice_realizer.cpp
-    csrc/rna/realization/rank2_arbitration.cpp
-    csrc/rna/realization/rival_lifecycle.cpp
-    csrc/rna/realization/rna_parent.cpp
-    csrc/rna/backend.cpp)
+    csrc/rna/map.cpp
+    csrc/rna/vote.cpp
+    csrc/rna/harvest.cpp
+    csrc/rna/anchor_path.cpp
+    csrc/rna/realization.cpp
+    csrc/rna/align.cpp
+    csrc/rna/hit.cpp
+    csrc/rna/leftover.cpp)
 flashalign_configure_internal_target(flashalign_rna)
 target_link_libraries(flashalign_rna PRIVATE
-    flashalign_core flashalign_index flashalign_dp flashalign_chaining
-    flashalign_seeding flashalign_voting fa_zlib)
+    flashalign_core flashalign_index flashalign_dp flashalign_chain
+    flashalign_seed flashalign_vote fa_zlib)
 target_compile_definitions(flashalign_rna PRIVATE FLASHALIGN_BUILDING_RNA)
 
-add_library(flashalign_options STATIC csrc/options/resolve.cpp)
+add_library(flashalign_options STATIC csrc/options/options.cpp)
 flashalign_configure_internal_target(flashalign_options)
 target_link_libraries(flashalign_options PRIVATE
-    flashalign_core flashalign_seeding)
+    flashalign_core flashalign_seed)
 
-add_library(flashalign_engine INTERFACE)
-target_link_libraries(flashalign_engine INTERFACE
+add_library(flashalign_engine STATIC csrc/engine/engine.cpp)
+flashalign_configure_internal_target(flashalign_engine)
+target_link_libraries(flashalign_engine PUBLIC
     flashalign_core flashalign_index flashalign_dna flashalign_rna
     flashalign_threading)
 
 add_library(flashalign_io STATIC
-    csrc/io/bgzf_source.cpp
-    csrc/io/byte_source.cpp
+    csrc/io/reads.cpp
+    csrc/io/gzip.cpp
     csrc/io/deflate_split.cpp
-    csrc/io/gz_member_source.cpp
-    csrc/io/paf.cpp
-    csrc/io/sam.cpp)
+    csrc/io/bgzf.cpp
+    csrc/io/format.cpp)
 flashalign_configure_internal_target(flashalign_io)
-# Threads for the decompression teams (gz_member_source.cpp, bgzf_source.cpp).
+# Threads for the decompression teams (gzip.cpp, bgzf.cpp).
 target_link_libraries(flashalign_io PRIVATE
     flashalign_core fa_zlib Threads::Threads)
 
 add_library(flashalign_api STATIC
-    csrc/api/aligner.cpp
-    csrc/api/reference_kind.cpp)
+    csrc/api/aligner.cpp)
 flashalign_configure_internal_target(flashalign_api)
 target_link_libraries(flashalign_api PRIVATE
     flashalign_engine flashalign_index flashalign_options flashalign_io

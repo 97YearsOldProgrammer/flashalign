@@ -1,21 +1,33 @@
-// The only translation unit that includes engine/aligner.h, so the engine templates are
-// compiled once, here. Every method forwards to LongReadEngine.
-#include "aligner.h"
+// Instantiates the engine templates for both lanes behind the façade; the reference-kind probe.
+#include "api.h"
 
-#include "../core/sequence.h"
-#include "../engine/aligner.h"
-#include "../index/faix.h"
-#include "../options/presets.h"
-#include "../rna/backend.h"
+#include "../engine/engine.h"
+#include "../index/format.h"
+#include "../index/index.h"
+#include "../io/io.h"
+#include "../options/options.h"
+#include "../rna/rna.h"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <zlib.h>
+
+#include <cerrno>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
 #include <vector>
+
+/**** aligner ****/
+// The only translation unit that instantiates the engine templates (engine/engine.h), so
+// they are compiled once, here. Every method forwards to LongReadEngine.
 
 namespace fa {
 namespace cpu {
@@ -55,9 +67,6 @@ PresetSeeding resolve_preset_seeding(std::string_view preset) {
       ::fa::cpu::options::resolve_preset_seeding(preset);
   return PresetSeeding{s.k, s.syncmer_s};
 }
-bool is_hifi_preset(std::string_view preset) {
-  return ::fa::cpu::options::is_hifi_preset(preset);
-}
 bool is_assembly_preset(std::string_view preset) {
   return ::fa::cpu::options::is_assembly_preset(preset);
 }
@@ -69,9 +78,6 @@ bool lane_runs_stage(LaneStage stage, std::string_view preset) {
 }
 bool is_rna_preset(std::string_view preset) {
   return ::fa::cpu::options::is_rna_preset(preset);
-}
-bool is_rna_hifi_preset(std::string_view preset) {
-  return ::fa::cpu::options::is_rna_hifi_preset(preset);
 }
 bool preset_is_valid(std::string_view preset) {
   return ::fa::cpu::options::preset_is_valid(preset);
@@ -155,6 +161,9 @@ void LongReadAligner::reconfigure(const ResolvedOptions& config) {
 int LongReadAligner::get_index_syncmer_s() const {
   return impl_->read([&] { return impl_->a->get_index_syncmer_s(); });
 }
+DnaReadGeometry LongReadAligner::dna_read_geometry(int read_length) const {
+  return impl_->read([&] { return impl_->a->dna_read_geometry(read_length); });
+}
 Alignment LongReadAligner::align(const std::string &read,
                                  std::uint32_t read_name_hash) const {
   return impl_->read([&] {
@@ -184,7 +193,7 @@ LongReadAligner::align_batch(
   });
 }
 
-// Type-erases the backend of engine/aligner.h's WindowedAlignSession: one virtual call per
+// Type-erases the backend of engine/engine.h's WindowedAlignSession: one virtual call per
 // batch.
 struct WindowedAlignSession::Impl {
   struct Arm {
@@ -279,6 +288,81 @@ int LongReadAligner::contig_id(std::string_view name) const {
 int LongReadAligner::contig_dual_rank(std::string_view name,
                                       std::int64_t length) const {
   return impl_->read([&] { return impl_->a->contig_dual_rank(name, length); });
+}
+} // namespace api
+} // namespace cpu
+} // namespace fa
+
+/**** reference_kind ****/
+
+namespace fa {
+namespace cpu {
+namespace api {
+
+ReferenceKind reference_kind(const std::string &path) {
+  if (path == "-")
+    return ReferenceKind::Sequences;
+  const auto refuse = [&](const std::string &why) {
+    return std::runtime_error(path + ": " + why);
+  };
+  // stat() first: opening a named pipe would block, and closing it could end its writer.
+  struct stat st;
+  if (::stat(path.c_str(), &st) != 0)
+    throw refuse(std::strerror(errno));
+  if (S_ISDIR(st.st_mode))
+    throw refuse("is a directory");
+  if (!S_ISREG(st.st_mode))
+    return ReferenceKind::Sequences;
+  const int fd = ::open(path.c_str(), O_RDONLY);
+  if (fd < 0)
+    throw refuse(std::strerror(errno));
+
+  char magic[8] = {};
+  if (::pread(fd, magic, sizeof(magic), 0) == static_cast<ssize_t>(sizeof(magic)) &&
+      (std::memcmp(magic, kFaixMagic, sizeof(magic)) == 0 ||
+       std::memcmp(magic, kFaixDevelopmentMagic, sizeof(magic)) == 0)) {
+    ::close(fd);
+    return ReferenceKind::Index;
+  }
+
+  // zlib reads plain input as is. gzclose() closes the descriptor.
+  gzFile in = gzdopen(fd, "r");
+  if (in == nullptr) {
+    ::close(fd);
+    throw refuse("cannot read the file");
+  }
+  char buffer[4096];
+  char first = 0;
+  while (first == 0) {
+    const int n = gzread(in, buffer, sizeof(buffer));
+    if (n < 0) {
+      int code = 0;
+      const std::string why = gzerror(in, &code);
+      gzclose(in);
+      throw refuse("cannot decompress: " + why);
+    }
+    if (n == 0) {
+      // A gzip file cut before any content: say so before the refusal below.
+      int code = Z_OK;
+      (void)gzerror(in, &code);
+      if (code == Z_BUF_ERROR)
+        ::fa::cpu::io::warn_truncated_gzip(path);
+      break;
+    }
+    for (int i = 0; i < n; ++i) {
+      const char c = buffer[i];
+      if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+        first = c;
+        break;
+      }
+    }
+  }
+  gzclose(in);
+  if (first == 0)
+    throw refuse("the file is empty");
+  if (first != '>' && first != '@')
+    throw refuse("not a FASTA or FASTQ file, nor a FlashAlign index");
+  return ReferenceKind::Sequences;
 }
 
 } // namespace api

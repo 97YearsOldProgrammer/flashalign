@@ -35,10 +35,6 @@ void ksw_arena_destroy(ksw_arena_t* arena) {
   free(arena);
 }
 
-size_t ksw_arena_capacity(const ksw_arena_t* arena) {
-  return arena ? arena->capacity : 0;
-}
-
 void ksw_arena_reset(ksw_arena_t* arena) {
   if (!arena)
     return;

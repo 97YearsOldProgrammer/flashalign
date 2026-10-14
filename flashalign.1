@@ -771,12 +771,16 @@ a k/K/m/M/g/G suffix is accepted. Output bytes and output order do not depend on
 it.
 .TP
 .B \-\-show\-config
-Print the fully resolved configuration to stdout and exit 0. It loads neither
-the reference nor the reads, so
+Print the fully resolved configuration to stdout and exit 0. It reads no
+reference base and no read, so
 .B flashalign align \-x lr:hq \-\-show\-config
 is a complete invocation; of a
 .I .faix
-target it reads the header alone.
+target it reads the header, except that with a DNA preset and a single-part
+index it loads the index without its bases and appends rows tagged
+.BR [resolved] :
+the seed occurrence cap and its parts, the rescue window, the vote's bin width
+and the chain passes' band and reach at four read lengths.
 .TP
 .B \-\-stats
 Print a summary of the run to stderr: reads and bases, mapped reads, records

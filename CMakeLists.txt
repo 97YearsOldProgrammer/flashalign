@@ -91,7 +91,7 @@ include(cmake/Modules.cmake)
 
 # The public C++ API, compiled once and linked into both the shared libflashalign and the
 # Python extension, so the wheel holds a single shared object.
-add_library(flashalign_public OBJECT csrc/api/public.cpp csrc/api/fastx.cpp)
+add_library(flashalign_public OBJECT csrc/api/public.cpp)
 set_target_properties(flashalign_public PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(flashalign_public PUBLIC cxx_std_17)
 target_include_directories(flashalign_public
@@ -120,12 +120,7 @@ add_library(FlashAlign::flashalign ALIAS flashalign_library)
 add_executable(flashalign
     csrc/cli/main.cpp
     csrc/cli/parse.cpp
-    csrc/cli/help.cpp
-    csrc/cli/option_registry.cpp
-    csrc/cli/align_command.cpp
-    csrc/cli/output_writer.cpp
-    csrc/cli/index_command.cpp
-    csrc/cli/report.cpp
+    csrc/cli/align.cpp
 )
 target_include_directories(flashalign PRIVATE csrc ${FA_GENERATED_INCLUDE_DIR})
 # Both targets compile fa_version.h, which fa_version rewrites at build time.
