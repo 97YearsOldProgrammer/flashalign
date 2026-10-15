@@ -56,10 +56,6 @@ static int effective_chain_segment_len(const DnaContext& context,
   return std::max(
       std::max(context.opts.k, 32), std::max(1, read_length));
 }
-
-namespace dna {
-
-} // namespace dna
 } // namespace fa::cpu::lr
 
 /**** catalogue ****/
