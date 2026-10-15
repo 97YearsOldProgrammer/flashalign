@@ -147,7 +147,7 @@ void assign_targets(const DnaContext& context,
 void split_key_runs(const DnaContext& context,
                     const RetainedSeedDensity& seed_index, ReadTargets& out) {
   // The keys the target pools use: every key of a lane with a candidate, but a
-  // key over the pool gate is skipped as chain_candidate skips it.
+  // key over the pool gate is skipped as placement's harvest skips it.
   const internal::PoolGate gate =
       internal::pool_gate(context);
   const std::vector<RetainedSeedRef>* lane_seeds[2] = {
@@ -252,9 +252,9 @@ void build_read_targets(const DnaContext& context,
 }
 
 // Each target is chained once, over the union of its members' pools. A
-// posting is an anchor when chain_candidate's whole-query pass would build it
+// posting is an anchor when placement's whole-query harvest would build it
 // for at least one member, and it is flagged tandem when it is in any of those
-// members' pools. A one-member target so builds chain_candidate's pool, in its
+// members' pools. A one-member target so builds that harvest's pool, in its
 // order.
 
 // A member's harvest window [low, high) on its contig (harvest_window) and its
@@ -393,8 +393,8 @@ void build_target_pool(const DnaContext& context,
   }
 }
 
-// Writes one chain of `chained` into a member's record as chain_candidate
-// writes its accepted whole-query chain.
+// Writes one chain of `chained` into a member's record as placement writes
+// an accepted whole-query chain.
 void accept_target_chain(const DnaPlacementFamily& family, bool reverse,
                          const chaining::ChainResult& chained,
                          const chaining::Chain& chain,
@@ -465,7 +465,7 @@ void window_members(const DnaContext& context,
   }
 }
 
-// Chains one target's pool with chain_candidate's whole-query parameters.
+// Chains one target's pool with placement's whole-query parameters.
 chaining::ChainResult chain_target_pool(const DnaContext& context,
                                         const DnaPlacementFamily& family,
                                         int diagonal_band,
@@ -504,7 +504,7 @@ void hand_out_chains(const DnaPlacementFamily& family, bool reverse,
                         chains[scratch.windowed[rank].candidate]);
 }
 
-// Chains every target of the read once, with chain_candidate's band and
+// Chains every target of the read once, with placement's band and
 // parameters. A target's chains, best score first, go to its members in
 // catalogue order, at most one each; a member left without one keeps NoChain,
 // and chains past the member count are dropped. `chains` is parallel to
@@ -531,7 +531,7 @@ void chain_read_targets(const DnaContext& context,
         reverse ? reverse_query : forward_query;
     const std::vector<RetainedSeedRef>& seeds =
         reverse ? seed_index.fine_reverse() : seed_index.fine_forward();
-    // chain_candidate's refusals, which hold for every member alike.
+    // placement's refusals, which hold for every member alike.
     const DnaPlacementChainStatus refusal = internal::contig_lane_refusal(
         context, static_cast<int>(contig), seeds, query, read_length);
     window_members(context, family, target, contig, refusal, scratch, chains);

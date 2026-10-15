@@ -340,7 +340,7 @@ enum class LaneStage {
   BaseAlignment,   // base-level alignment: DP scoring, bands, CIGAR operators
   SamOutput,       // the shape of SAM output
   Selection,       // primary and secondary selection
-  CandidateChains, // each catalogue candidate's own whole-query chain
+  CandidateChains, // the catalogue candidates' whole-query chains
   OverlapPairs,    // which reads of an overlap pair print it
 };
 

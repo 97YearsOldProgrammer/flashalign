@@ -271,9 +271,10 @@ neither bands base alignment there, and
 sets both [200000,200000].
 .TP
 .BI \-b \ NUM
-Chaining bandwidth [20000; 100000 on asm5, asm10, asm20]. It bands each
-candidate's dense chain over the whole read: a chain keeps only the anchors
-whose diagonal lies within the band of the candidate's, and the chain links
+Chaining bandwidth [20000; 100000 on asm5, asm10, asm20]. It bands the
+dense chain over the whole read, one for each contig and strand of the read's
+candidates: each candidate contributes only the anchors whose diagonal lies
+within the band of its own, and the chain links
 anchors across at most the band, or
 .BR \-g 's
 chaining gap where that is larger, whatever the read length. It acts on

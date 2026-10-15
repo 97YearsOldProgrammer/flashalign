@@ -595,9 +595,10 @@ struct DnaPlacementCandidateChain {
   std::vector<std::vector<chaining::Anchor>> sibling_paths;
   // Parallel to sibling_paths: each sibling's chain score. rival_sibling is
   // the index of the sibling rival_chain_score came from
-  // (ChainPartition::f2_index), or -1 when there is none or it was not
-  // materialized. Whole-query passes only; read by the ownership selection
-  // (select_block_owners).
+  // (ChainPartition::f2_index, or the best sibling of a record that does not
+  // hold its group's primary; placement.cpp chain_pooled_groups), or -1 when
+  // there is none or it was not materialized. Whole-query passes only; read by
+  // the ownership selection (select_block_owners).
   std::vector<int> sibling_scores;
   int rival_sibling = -1;
   DnaPlacementChainStatus status = DnaPlacementChainStatus::NotSelected;
@@ -621,7 +622,8 @@ struct DnaPlacementCandidateChain {
   // by the deferred restore, the pool.
   std::uint64_t deferred_anchors = 0;
   std::uint64_t rescued_anchors = 0;
-  // Runs produced by the whole-query pass's collapse.
+  // Runs produced by the whole-query pass's collapse; on the
+  // group's first member with a window only.
   std::int64_t dense_runs = 0;
 };
 
@@ -634,8 +636,8 @@ inline constexpr int kDnaMapqRivalChains = 2;
 // owner's vote are taken; the rest still enter the MAPQ through their vote.
 inline constexpr int kDnaMapqRivalVoteDenominator = 4;
 
-// A catalogue rival chained over the whole query for the MAPQ; a candidate's
-// own chain partition only sees rivals inside its window. Evidence only: kept
+// A catalogue rival chained over the whole query for the MAPQ; a group's
+// chain partition only sees rivals inside its members' windows. Evidence only: kept
 // out of `candidates`, which is parallel to family.candidates and drives
 // selection.
 struct DnaRivalExactChain {
@@ -727,8 +729,8 @@ DnaPlacementChainingResult build_dna_placement_chains(
 /**** placement_chaining_internal ****/
 // The interface shared by the DNA chaining files, placement.cpp and
 // ava.cpp: the harvest rules, each stated once for
-// chain_candidate's passes and the all-chains lane's target pools, and the
-// pool and record steps both take.
+// placement's whole-query passes and the all-chains lane's target pools, and
+// the pool and record steps both take.
 
 namespace fa::cpu::lr {
 namespace internal {

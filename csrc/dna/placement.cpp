@@ -1,4 +1,4 @@
-// Placement chaining from the catalogue: every candidate's whole-query dense pass and the ownership of the read's blocks on those chains.
+// Placement chaining from the catalogue: one whole-query dense pass per (contig, strand) of its candidates and the ownership of the read's blocks on those chains.
 #include "dna.h"
 
 #include "../chain/chain.h"
@@ -92,8 +92,8 @@ int selected_tiles(
   return scratch;
 }
 
-// Per-thread slices of one chain_candidate pass, by density entry: an entry's
-// interval is this pass's while its stamp equals `pass`.
+// Per-thread slices of one harvest (harvest_window_anchors), by density entry:
+// an entry's interval is this harvest's while its stamp equals `pass`.
 struct PassSlices {
   std::vector<std::uint32_t> stamp;
   std::vector<KmerPostingIntervalView> interval;
@@ -283,15 +283,8 @@ void write_primary_chain(const DnaPlacementFamily& family, bool reverse,
 
 namespace {
 
-// A candidate's whole-query pass: every admissible slice is deferred and its
-// anchors are built after the scan, then the pool is chained densely.
-bool chain_candidate(
-    const DnaContext& context,
-    const DnaPlacementFamily& family,
-    const DnaPlacementCandidate& candidate,
-    const std::vector<std::uint8_t>& query,
-    RetainedSeedDensity& seed_index,
-    DnaPlacementCandidateChain& record) {
+// Clears what a whole-query pass writes into `record`.
+void reset_pass_record(DnaPlacementCandidateChain& record) {
   record.dense_support = {};
   record.primary.clear();
   record.sibling_paths.clear();
@@ -308,20 +301,14 @@ bool chain_candidate(
   record.deferred_anchors = 0;
   record.rescued_anchors = 0;
   record.dense_runs = 0;
-  const bool reverse = candidate.peak.is_rc;
-  const std::vector<RetainedSeedRef>& seeds =
-      reverse ? seed_index.fine_reverse() : seed_index.fine_forward();
-  const DnaPlacementChainStatus refusal = internal::contig_lane_refusal(
-      context, candidate.peak.chr, seeds, query, family.read_length);
-  if (refusal != DnaPlacementChainStatus::Accepted) {
-    record.status = refusal;
-    record.exact = true;
-    return false;
-  }
+}
 
-  const int seed_length = family.seed_length;
-  const int chromosome_length =
-      static_cast<int>(context.ref.contig_length(candidate.peak.chr));
+// The candidate's whole-query window on its contig, of `chromosome_length`;
+// empty when high <= low.
+internal::HarvestWindow pass_window(const DnaContext& context,
+                                    const DnaPlacementFamily& family,
+                                    const DnaPlacementCandidate& candidate,
+                                    int chromosome_length) {
   const std::int64_t expected = candidate.peak.raw_ref_start;
   internal::HarvestWindow window = internal::harvest_window(
       context, candidate.peak, family.read_length, chromosome_length);
@@ -342,11 +329,25 @@ bool chain_candidate(
             chromosome_length,
             expected + family.read_length + widen + interval_pad));
   }
-  if (window.high <= window.low) {
-    record.status = DnaPlacementChainStatus::InvalidReference;
-    record.exact = true;
-    return false;
-  }
+  return window;
+}
+
+// Appends to `anchors` the candidate's anchors over `window` from `seeds`, its
+// lane's fine seeds, and counts the harvest into `record`. Every
+// admissible slice is deferred and its anchors are built after the scan.
+void harvest_window_anchors(const DnaContext& context,
+                            const DnaPlacementFamily& family,
+                            const DnaPlacementCandidate& candidate,
+                            RetainedSeedDensity& seed_index,
+                            const std::vector<RetainedSeedRef>& seeds,
+                            internal::HarvestWindow window,
+                            DnaPlacementCandidateChain& record,
+                            std::vector<chaining::Anchor>& anchors) {
+  const bool reverse = candidate.peak.is_rc;
+  const int seed_length = family.seed_length;
+  const int chromosome_length =
+      static_cast<int>(context.ref.contig_length(candidate.peak.chr));
+  const std::int64_t expected = candidate.peak.raw_ref_start;
   const std::uint64_t* offsets = context.ref.index->chrom_offsets_data();
   const std::uint64_t chromosome_base =
       offsets[static_cast<std::size_t>(candidate.peak.chr)];
@@ -409,7 +410,6 @@ bool chain_candidate(
     }
   }
 
-  std::vector<chaining::Anchor> anchors;
   // Restore every deferred slice, in order.
   for (std::size_t slot = 0; slot < deferred.size(); ++slot) {
     // Prefetch the next slice's first postings, which the binary search that
@@ -429,54 +429,212 @@ bool chain_candidate(
         family.read_length, anchors, record);
     record.rescued_anchors += anchors.size() - before;
   }
-  if (anchors.empty()) {
-    record.status = record.interval_hits == 0
-                        ? DnaPlacementChainStatus::NoIntervalHits
-                        : DnaPlacementChainStatus::NoChain;
-    record.exact = true;
-    return false;
-  }
+}
+
+// One pass's chains over its pool: the chain call's result, its partition, and
+// the call's statistics and parameters.
+struct PassChains {
+  chaining::ChainResult chained;
+  chaining::ChainPartition partition;
+  chaining::DenseChainStats stats;
+  chaining::DenseChainParams params;
+};
+
+// The chain half of a pass: sorts and deduplicates the pool, chains it densely,
+// and partitions the chains. Sets the record's run count.
+void chain_pool(const DnaContext& context, const DnaPlacementFamily& family,
+                std::vector<chaining::Anchor> anchors,
+                DnaPlacementCandidateChain& record,
+                PassChains& out) {
   internal::sort_unique_pool_anchors(anchors);
 
   const chaining::ColinearChainParams chain_params =
-      dna_candidate_chain_params(context, diagonal_band, seed_length);
-  chaining::DenseChainStats dense_stats;
-  chaining::DenseChainParams dense_params = dna_dense_chain_params(
-      chain_params, seed_length, context.opts.dna_dense_diag_min_runs);
+      dna_candidate_chain_params(context, internal::pass_diagonal_band(context),
+                                 family.seed_length);
+  chaining::DenseChainStats& dense_stats = out.stats;
+  out.params = dna_dense_chain_params(chain_params, family.seed_length,
+                                      context.opts.dna_dense_diag_min_runs);
   // The dense chain: the pool collapsed to exact diagonal runs.
-  const chaining::ChainResult chained = chaining::chain_dense_colinear(
-      std::move(anchors), dense_params, &dense_stats);
+  out.chained = chaining::chain_dense_colinear(std::move(anchors), out.params,
+                                              &dense_stats);
+  const chaining::ChainResult& chained = out.chained;
   record.dense_runs = dense_stats.runs;
-  const chaining::ChainPartition partition =
+  out.partition =
       chaining::partition_chains(chained, ::fa::cpu::split::kHalfFloor);
-  if (partition.primary < 0) {
-    record.status = DnaPlacementChainStatus::NoChain;
-    record.exact = true;
-    return false;
+}
+
+// The catalogue's whole-query passes, one per (contig, strand) group of its
+// candidates, groups in catalogue order of their first member. Each member's
+// harvest over its own window is appended to the group's pool, which is
+// deduplicated, chained and partitioned once. The partition's primary and
+// every other chain of at least two anchors go to one member: among the
+// members whose window holds the chain's median anchor (else among all), the
+// one whose expected diagonal is nearest that anchor's, ties to catalogue
+// order. Each member's chains are written with its best as primary. The member
+// holding the partition's primary keeps its f2 and n_sub; another takes its
+// best other chain's score as f2 and n_sub 0. A member left without a chain has
+// the status its own empty pass would have. Every record is exact. Each member
+// keeps its harvest counters; the group's run count goes to its first member
+// with a window. A one-member group is that candidate's own pass.
+void chain_pooled_groups(const DnaContext& context,
+                         const DnaPlacementFamily& family,
+                         DnaPlacementChainingResult& result,
+                         RetainedSeedDensity& seed_index,
+                         const std::vector<std::uint8_t>& forward_query,
+                         const std::vector<std::uint8_t>& reverse_query) {
+  std::vector<std::int64_t> keys;
+  std::vector<std::vector<std::size_t>> groups;
+  for (std::size_t index = 0; index < family.candidates.size(); ++index) {
+    const VotePeak& peak = family.candidates[index].peak;
+    const std::int64_t key =
+        static_cast<std::int64_t>(peak.chr) * 2 + (peak.is_rc ? 1 : 0);
+    const auto found = std::find(keys.begin(), keys.end(), key);
+    if (found == keys.end()) {
+      keys.push_back(key);
+      groups.emplace_back(1, index);
+    } else {
+      groups[static_cast<std::size_t>(found - keys.begin())].push_back(index);
+    }
   }
-  const chaining::Chain& primary =
-      chained.chains[static_cast<std::size_t>(partition.primary)];
-  internal::write_primary_chain(family, reverse, chained, primary, record);
-  record.rival_chain_score = partition.f2;
-  record.overlapping_rivals = partition.n_sub;
-  for (std::size_t which = 0; which < chained.chains.size(); ++which) {
-    if (static_cast<int>(which) == partition.primary) continue;
-    const chaining::Chain& sibling = chained.chains[which];
-    if (sibling.idx.size() < 2) continue;
-    std::vector<chaining::Anchor> path;
-    path.reserve(sibling.idx.size());
-    for (const std::int32_t index : sibling.idx)
-      path.push_back(chained.anchors[static_cast<std::size_t>(index)]);
-    // Record which sibling the partition's f2 came from, so the MAPQ can
-    // realize it.
-    if (static_cast<int>(which) == partition.f2_index)
-      record.rival_sibling = static_cast<int>(record.sibling_paths.size());
-    record.sibling_paths.push_back(std::move(path));
-    record.sibling_scores.push_back(sibling.score);
+  struct Member {
+    std::size_t index = 0;
+    internal::HarvestWindow window;
+  };
+  std::vector<Member> windowed;
+  std::vector<std::vector<std::size_t>> owned;
+  for (const std::vector<std::size_t>& group : groups) {
+    const VotePeak& lead = family.candidates[group.front()].peak;
+    const bool reverse = lead.is_rc;
+    const std::vector<std::uint8_t>& query =
+        reverse ? reverse_query : forward_query;
+    for (const std::size_t index : group) {
+      reset_pass_record(result.candidates[index]);
+      result.candidates[index].exact = true;
+    }
+    // The group's pass.
+    DnaPlacementCandidateChain pass;
+    const std::vector<RetainedSeedRef>& seeds =
+        reverse ? seed_index.fine_reverse() : seed_index.fine_forward();
+    const DnaPlacementChainStatus refusal = internal::contig_lane_refusal(
+        context, lead.chr, seeds, query, family.read_length);
+    if (refusal != DnaPlacementChainStatus::Accepted) {
+      for (const std::size_t index : group)
+        result.candidates[index].status = refusal;
+      continue;
+    }
+    const int chromosome_length =
+        static_cast<int>(context.ref.contig_length(lead.chr));
+    windowed.clear();
+    std::vector<chaining::Anchor> anchors;
+    for (const std::size_t index : group) {
+      const internal::HarvestWindow member_window = pass_window(
+          context, family, family.candidates[index], chromosome_length);
+      DnaPlacementCandidateChain& record = result.candidates[index];
+      if (member_window.high <= member_window.low) {
+        record.status = DnaPlacementChainStatus::InvalidReference;
+        continue;
+      }
+      windowed.push_back({index, member_window});
+      harvest_window_anchors(context, family, family.candidates[index],
+                             seed_index, seeds, member_window, record,
+                             anchors);
+    }
+    // A member's own pass with no chain: no interval hit, or no chain.
+    const auto chainless = [&result](std::size_t index) {
+      DnaPlacementCandidateChain& record = result.candidates[index];
+      record.status = record.interval_hits == 0
+                          ? DnaPlacementChainStatus::NoIntervalHits
+                          : DnaPlacementChainStatus::NoChain;
+    };
+    if (anchors.empty()) {
+      for (const Member& member : windowed) chainless(member.index);
+      continue;
+    }
+    DnaPlacementCandidateChain& first_record =
+        result.candidates[windowed.front().index];
+    PassChains chains;
+    chain_pool(context, family, std::move(anchors), pass, chains);
+    first_record.dense_runs = pass.dense_runs;
+    const chaining::ChainResult& chained = chains.chained;
+    const chaining::ChainPartition& partition = chains.partition;
+
+    owned.assign(windowed.size(), {});
+    for (std::size_t which = 0;
+         partition.primary >= 0 && which < chained.chains.size(); ++which) {
+      const chaining::Chain& chain = chained.chains[which];
+      if (static_cast<int>(which) != partition.primary && chain.idx.size() < 2)
+        continue;
+      const chaining::Anchor& median = chained.anchors[static_cast<std::size_t>(
+          chain.idx[chain.idx.size() / 2])];
+      const std::int64_t diagonal =
+          static_cast<std::int64_t>(median.r) - median.q;
+      std::size_t best = 0;
+      std::pair<bool, std::int64_t> best_key;
+      for (std::size_t at = 0; at < windowed.size(); ++at) {
+        const internal::HarvestWindow& bounds = windowed[at].window;
+        const VotePeak& peak = family.candidates[windowed[at].index].peak;
+        const std::int64_t expected =
+            peak.line_gate
+                ? peak.line_a + vote_slope_stretch(median.q, peak.line_b_q20)
+                : peak.raw_ref_start;
+        const std::pair<bool, std::int64_t> key{
+            median.r < bounds.low || median.r >= bounds.high,
+            diagonal > expected ? diagonal - expected : expected - diagonal};
+        if (at == 0 || key < best_key) {
+          best = at;
+          best_key = key;
+        }
+      }
+      owned[best].push_back(which);
+    }
+
+    for (std::size_t at = 0; at < windowed.size(); ++at) {
+      DnaPlacementCandidateChain& record =
+          result.candidates[windowed[at].index];
+      const std::vector<std::size_t>& mine = owned[at];
+      if (mine.empty()) {
+        chainless(windowed[at].index);
+        continue;
+      }
+      const bool holds_primary =
+          std::find(mine.begin(), mine.end(),
+                    static_cast<std::size_t>(partition.primary)) != mine.end();
+      std::size_t primary = static_cast<std::size_t>(partition.primary);
+      if (!holds_primary) {
+        primary = mine.front();
+        for (const std::size_t which : mine)
+          if (chained.chains[which].score > chained.chains[primary].score)
+            primary = which;
+      }
+      internal::write_primary_chain(family, reverse, chained,
+                                    chained.chains[primary], record);
+      if (holds_primary) {
+        record.rival_chain_score = partition.f2;
+        record.overlapping_rivals = partition.n_sub;
+      }
+      for (const std::size_t which : mine) {
+        if (which == primary) continue;
+        const chaining::Chain& sibling = chained.chains[which];
+        std::vector<chaining::Anchor> path;
+        path.reserve(sibling.idx.size());
+        for (const std::int32_t index : sibling.idx)
+          path.push_back(chained.anchors[static_cast<std::size_t>(index)]);
+        // The sibling the MAPQ can realize as the rival: the partition's f2
+        // chain, or the member's best other chain.
+        const bool rival =
+            holds_primary ? static_cast<int>(which) == partition.f2_index
+                          : (record.rival_sibling < 0 ||
+                             sibling.score > record.rival_chain_score);
+        if (rival) {
+          if (!holds_primary) record.rival_chain_score = sibling.score;
+          record.rival_sibling = static_cast<int>(record.sibling_paths.size());
+        }
+        record.sibling_paths.push_back(std::move(path));
+        record.sibling_scores.push_back(sibling.score);
+      }
+      record.status = DnaPlacementChainStatus::Accepted;
+    }
   }
-  record.exact = true;
-  record.status = DnaPlacementChainStatus::Accepted;
-  return true;
 }
 
 // The blocks owned on the accepted whole-query chains' anchors
@@ -712,22 +870,19 @@ void chain_mapq_rivals(const DnaContext& context,
   }
 }
 
-// Placement: every catalogue candidate's whole-query
-// pass, in catalogue order, then the ownership walk over every accepted
-// chain's primary and siblings, which decides the blocks, then the MAPQ's
-// rivals. The read is accepted when one chain is.
+// Placement: the catalogue's whole-query passes, one per
+// (contig, strand) group of its candidates, then the ownership walk over every
+// accepted chain's primary and siblings, which decides the blocks, then the
+// MAPQ's rivals. The read is accepted when one chain is.
 void chain_and_own_every_candidate(
     const DnaContext& context, DnaPlacementFamily& family,
     DnaPlacementChainingResult& result, RetainedSeedDensity& seed_index,
     const std::vector<std::uint8_t>& forward_query,
     const std::vector<std::uint8_t>& reverse_query) {
   result.strand_filter_seeds = &seed_index;
-  for (std::size_t index = 0; index < family.candidates.size(); ++index) {
-    const DnaPlacementCandidate& candidate = family.candidates[index];
-    DnaPlacementCandidateChain& record = result.candidates[index];
-    chain_candidate(context, family, candidate,
-                    candidate.peak.is_rc ? reverse_query : forward_query,
-                    seed_index, record);
+  chain_pooled_groups(context, family, result, seed_index, forward_query,
+                      reverse_query);
+  for (const DnaPlacementCandidateChain& record : result.candidates) {
     if (record.status == DnaPlacementChainStatus::Accepted)
       result.accepted = true;
   }
