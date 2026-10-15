@@ -44,8 +44,6 @@ DnaChainOccThresholds dna_chain_occ_thresholds(
   thresholds.pool_gate_occ = mapping.dna_pool_gate_occ == kDnaPoolGateVoteCap
                                  ? vote_cap
                                  : mapping.dna_pool_gate_occ;
-  thresholds.global_occ =
-      vote_cap > 0 ? vote_cap : std::numeric_limits<int>::max();
   return thresholds;
 }
 
@@ -62,7 +60,8 @@ namespace options {
 // Asm marks the experimental assembly-to-reference rows.
 enum class DnaPresetKind { Ont, HiFi, Asm };
 
-// The placement values --vote-seeds and --tiles replace.
+// The placement values: the vote's seeds per strand, which --vote-seeds
+// replaces, and the query tiles per read, which no option sets.
 struct DnaPlacementDefaults {
   int vote_seeds;
   int query_tiles;
@@ -74,13 +73,6 @@ constexpr DnaPlacementDefaults kReadPlacement{
 constexpr DnaPlacementDefaults kAssemblyPlacement{4096, 2048};
 constexpr DnaPlacementDefaults kOntOverlapPlacement{
     256, ::fa::cpu::voting::kQueryTileCount};
-
-// -b: the dense (whole-query) chain passes' diagonal band and the screening
-// pass's.
-struct DnaChainBand {
-  int dense;
-  int screen;
-};
 
 // An all-vs-all overlap row turns on both of its mechanisms (options.h
 // skip_self, all_chains) and replaces --max-cands and --vote-ratio, and -m and
@@ -115,7 +107,6 @@ struct DnaPresetProfile {
   // 0 or less drops the length term.
   int vote_diag_slope_den;
   int vote_diag_width_max;
-  ::fa::cpu::voting::QueryPartitionParameters query_partition;
   int cigar_dp_match;
   int cigar_dp_mismatch;
   int cigar_dp_ambi;
@@ -144,7 +135,8 @@ struct DnaPresetProfile {
   // The dense chain's maximum gap; the splice presets borrow it as the fine
   // chain's query gap. -g sets it.
   int chain_max_gap;
-  DnaChainBand chain_band;
+  // The dense (whole-query) chain passes' diagonal band; -b sets it.
+  int chain_band;
   DnaPlacementDefaults placement;
   DnaOverlapDefaults overlap;
 };
@@ -152,48 +144,47 @@ struct DnaPresetProfile {
 constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
     // End row as minimap2: lr is map-ont (-A2 -B4 -O4,24 -E2,1), lr:hq is
     // map-hifi (-A1 -B4 -O6,26 -E2,1). The fill rows are gentler on gaps.
-    {"lr", DnaPresetKind::Ont, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
+    {"lr", DnaPresetKind::Ont, 21, 9, 64, 128, 2048,
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
-     20000, {20000, 20000}, kReadPlacement, kNoOverlap},
-    {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048, {4, 12, 0, 1, 2},
+     20000, 20000, kReadPlacement, kNoOverlap},
+    {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048,
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
      10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
-     10000, {20000, 20000}, kReadPlacement, kNoOverlap},
+     10000, 20000, kReadPlacement, kNoOverlap},
     // minimap2's asm5, asm10 and asm20 scoring with its -r1k,100k -g10k -s200
     // -z200, one row for the fills and the read ends, and its 100k bandwidth
-    // as the dense chains' band; lr's seeding, vote width, chain gap and
-    // screening band.
-    {"asm5", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
+    // as the dense chains' band; lr's seeding, vote width and chain gap.
+    {"asm5", DnaPresetKind::Asm, 21, 9, 64, 128, 2048,
      1, 19, 1, 39, 3, 81, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 19, 1, 39, 3, 81, 1, 200, 200,
-     20000, {100000, 20000}, kAssemblyPlacement, kNoOverlap},
-    {"asm10", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
+     20000, 100000, kAssemblyPlacement, kNoOverlap},
+    {"asm10", DnaPresetKind::Asm, 21, 9, 64, 128, 2048,
      1, 9, 1, 16, 2, 41, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 9, 1, 16, 2, 41, 1, 200, 200,
-     20000, {100000, 20000}, kAssemblyPlacement, kNoOverlap},
-    {"asm20", DnaPresetKind::Asm, 21, 9, 64, 128, 2048, {4, 12, 0, 1, 2},
+     20000, 100000, kAssemblyPlacement, kNoOverlap},
+    {"asm20", DnaPresetKind::Asm, 21, 9, 64, 128, 2048,
      1, 4, 1, 6, 2, 26, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 4, 1, 6, 2, 26, 1, 200, 200,
-     20000, {100000, 20000}, kAssemblyPlacement, kNoOverlap},
+     20000, 100000, kAssemblyPlacement, kNoOverlap},
     // Experimental all-vs-all read overlap, map-only: lr's row at k17 with
     // the vote width L/64, and lr:hq's row, as overlap rows. They follow the
     // row of their kind, which dna_preset_profile returns.
-    {"ava-ont", DnaPresetKind::Ont, 17, 9, 64, 64, 2048, {4, 12, 0, 1, 2},
+    {"ava-ont", DnaPresetKind::Ont, 17, 9, 64, 64, 2048,
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
-     20000, {20000, 20000}, kOntOverlapPlacement, kOntOverlap},
-    {"ava-hifi", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048, {4, 12, 0, 1, 2},
+     20000, 20000, kOntOverlapPlacement, kOntOverlap},
+    {"ava-hifi", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048,
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
      10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
-     10000, {20000, 20000}, kReadPlacement, kHiFiOverlap},
+     10000, 20000, kReadPlacement, kHiFiOverlap},
 }};
 
 static const DnaPresetProfile* find_dna_preset_profile(
@@ -223,7 +214,6 @@ static void set_dna_long_platform_fields(
     // it to the index's mid-occurrence quantile when larger
     // (seed/seed.h), up to long_occ_ceiling.
     mapping.long_occ_cap = 200;
-    mapping.query_partition = profile.query_partition;
     mapping.query_tiles = profile.placement.query_tiles;
     mapping.vote_admission_ratio = lr::kDnaProductionVoteAdmissionRatio;
     common.min_support = 3;
@@ -241,10 +231,9 @@ static void set_dna_long_platform_fields(
     // minimap2's min_ksw_len, the piece length of its gap-filling loop.
     mapping.cigar_dp_min_ksw_len = lr::kDnaMinKswLen;
     const bool hifi_row = profile.kind == DnaPresetKind::HiFi;
-    // The vote's cap N is also the dense chain's pool gate and
-    // cigar_local_global_occ (engine/engine.cpp make_dna_context). lr:hq caps
-    // N at minimap2's map-hifi 500. --max-chain-occ replaces N on the gate
-    // only.
+    // The vote's cap N is also the dense chain's pool gate
+    // (engine/engine.cpp make_dna_context). lr:hq caps N at minimap2's
+    // map-hifi 500. --max-chain-occ replaces N on the gate only.
     mapping.long_occ_ceiling =
         hifi_row ? lr::kDnaHiFiOccCeiling : lr::kDnaOccCeiling;
     mapping.dna_pool_gate_occ = lr::kDnaPoolGateVoteCap;
@@ -268,8 +257,7 @@ static void set_dna_long_platform_fields(
     mapping.cigar_dp_tail_end_bonus = profile.cigar_dp_tail_end_bonus;
     mapping.cigar_dp_bw = profile.cigar_dp_bw;
     mapping.cigar_dp_bw_long = profile.cigar_dp_bw_long;
-    mapping.chain_band = profile.chain_band.dense;
-    mapping.screen_diag_band = profile.chain_band.screen;
+    mapping.chain_band = profile.chain_band;
     mapping.cigar_dp_max_gap = profile.cigar_dp_max_gap;
     mapping.cigar_dp_min_dp_max = profile.cigar_dp_min_dp_max;
     mapping.fill_dp_match = profile.fill_dp_match;
@@ -310,7 +298,7 @@ bool lane_runs_stage(LaneStage stage, std::string_view preset) {
         case LaneStage::BaseAlignment:
         case LaneStage::SamOutput:
         case LaneStage::Selection:
-        case LaneStage::Partition:
+        case LaneStage::CandidateChains:
             return !overlap;
         case LaneStage::OverlapPairs:
             return overlap;
@@ -494,50 +482,15 @@ void apply_secondary_and_junction_overrides(bool rna_mode,
   }
 }
 
-// The DNA presets' placement: --tile-score, --max-cands and --tiles.
-void apply_placement_overrides(const ResolveRequest& request, bool rna_mode,
+// The DNA presets' placement: --max-cands.
+void apply_placement_overrides(bool rna_mode,
     ::fa::cpu::lr::DnaLongOptions& mapping, const UserOverrides& user) {
-  const bool has_tile_override =
-      user.query_tile_supported_reward || user.query_tile_block_open_cost ||
-      user.query_tile_null_cost || user.query_tile_unsupported_cost;
-  if (rna_mode && has_tile_override) {
-    throw std::invalid_argument(
-        "--tile-score is incompatible with RNA preset '" +
-        request.preset + "'");
-  }
-  const auto validate_tile_cost = [](int value, const char* key) {
-    if (value < 0) {
-      throw std::invalid_argument(
-          std::string("tile score '") + key +
-          "' must be nonnegative");
-    }
-  };
-  if (user.query_tile_supported_reward) {
-    if (*user.query_tile_supported_reward <= 0) {
-      throw std::invalid_argument(
-          "tile score 'hit' must be positive");
-    }
-    mapping.query_partition.supported_tile_reward =
-        *user.query_tile_supported_reward;
-  }
-  if (user.query_tile_block_open_cost) {
-    validate_tile_cost(*user.query_tile_block_open_cost, "block");
-    mapping.query_partition.block_open_cost = *user.query_tile_block_open_cost;
-  }
-  if (user.query_tile_null_cost) {
-    validate_tile_cost(*user.query_tile_null_cost, "null");
-    mapping.query_partition.null_tile_cost = *user.query_tile_null_cost;
-  }
-  if (user.query_tile_unsupported_cost) {
-    validate_tile_cost(*user.query_tile_unsupported_cost, "miss");
-    mapping.query_partition.unsupported_ownership_cost =
-        *user.query_tile_unsupported_cost;
-  }
   if (user.max_cands) {
     if (rna_mode)
       throw std::invalid_argument(
           "--max-cands is valid only with a DNA preset");
-    // The all-chains lane partitions nothing and takes a wider bound.
+    // The all-chains lane chains each contig and strand once and takes a
+    // wider bound.
     const int ceiling = mapping.all_chains
                             ? ::fa::cpu::voting::kAllChainsLaneBound
                             : ::fa::cpu::voting::kMaxCatalogueLaneBound;
@@ -545,18 +498,6 @@ void apply_placement_overrides(const ResolveRequest& request, bool rna_mode,
       throw std::invalid_argument("--max-cands must be within [1," +
                                   std::to_string(ceiling) + "]");
     mapping.max_cands = *user.max_cands;
-  }
-  // --tiles: the splice presets keep their own partition.
-  if (user.query_tiles) {
-    if (rna_mode)
-      throw std::invalid_argument("--tiles is valid only with a DNA preset");
-    if (*user.query_tiles < ::fa::cpu::voting::kMinQueryTiles ||
-        *user.query_tiles > ::fa::cpu::voting::kMaxQueryTiles)
-      throw std::invalid_argument(
-          "--tiles must be within [" +
-          std::to_string(::fa::cpu::voting::kMinQueryTiles) + "," +
-          std::to_string(::fa::cpu::voting::kMaxQueryTiles) + "]");
-    mapping.query_tiles = *user.query_tiles;
   }
 }
 
@@ -609,8 +550,7 @@ void resolve_index_identity(const ResolveRequest& request, IndexIdentity& index,
 
 // Threads and the requested CIGAR with --cs, --MD and --eqx.
 void apply_output_overrides(const ResolveRequest& request, bool overlap_mode,
-    CommonOptions& common, ::fa::cpu::lr::DnaLongOptions& mapping,
-    const UserOverrides& user) {
+    CommonOptions& common, const UserOverrides& user) {
   if (user.num_threads)
     common.num_threads = *user.num_threads;
   if (user.enable_full_read_cigar) {
@@ -790,14 +730,11 @@ void apply_band_and_gap_overrides(bool rna_mode,
     mapping.cigar_local_interval_anchor_chain_max_gap =
         mapping.cigar_dp_max_gap;
   }
-  // -b: the dense chain passes' band and the screening pass's.
-  if (user.chain_band || user.chain_band_screen) {
+  // -b: the dense chain passes' band.
+  if (user.chain_band) {
     if (rna_mode)
       throw std::invalid_argument("-b is valid only with a DNA preset");
-    if (user.chain_band)
-      mapping.chain_band = std::max(1, *user.chain_band);
-    if (user.chain_band_screen)
-      mapping.screen_diag_band = std::max(1, *user.chain_band_screen);
+    mapping.chain_band = std::max(1, *user.chain_band);
   }
 }
 
@@ -936,10 +873,10 @@ ResolvedMapOptions resolve_options(const ResolveRequest& request) {
 
   apply_secondary_and_junction_overrides(rna_mode, mapping, rna, user);
 
-  apply_placement_overrides(request, rna_mode, mapping, user);
+  apply_placement_overrides(rna_mode, mapping, user);
   resolve_index_identity(request, index, seeding, user);
 
-  apply_output_overrides(request, overlap_mode, common, mapping, user);
+  apply_output_overrides(request, overlap_mode, common, user);
   apply_vote_overrides(rna_mode, overlap_mode, common, mapping, rna, user);
   apply_vote_width_overrides(rna_mode, mapping, user);
   // On lr and lr:hq -A -B -O -E -z --score-N set the gap-fill row and the

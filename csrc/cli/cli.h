@@ -78,19 +78,16 @@ enum class OptionId {
     VoteDiagBinWidth,
     VoteDiagSlopeDen, VoteDiagWidthMax,
     MinSupport,
-    // align: the vote's seeds per strand, its candidates per strand and the
-    // partition's tiles
-    VoteSeeds, MaxCands, Tiles,
+    // align: the vote's seeds per strand and its candidates per strand
+    VoteSeeds, MaxCands,
     // align: DP scoring (minimap2 -A/-B/-O/-E/-z, --score-N, --end-bonus).
     // DpMinScore is minimap2's -s, spelled -S here.
     DpMatch, DpMismatch, DpGapOpen, DpGapExtend, DpZdrop, DpScoreN, DpEndBonus,
     DpMinScore,
     // align: band geometry (minimap2 -r) and maximum gap (minimap2 -g).
     DpBw, DpMaxGap,
-    // the DNA chain passes' bands (-b)
+    // the DNA dense chain passes' band (-b)
     ChainBand,
-    // DNA tile objective, key=value list
-    TileScore,
     // RNA intron bounds, strand and junction annotation
     MinIntron, MaxIntron, SpliceStrand, RnaJunctionBed, RnaJunctionBonus,
     // Secondary retention ratio (-p), the RNA retention band
@@ -221,19 +218,12 @@ struct AlignOptions {
     // strand, 1..64, or 1..16383 in the all-chains lane
     // (check_max_cands_range). DNA presets only.
     std::optional<int> max_cands;
-    // --tiles INT: the query partition's tiles per read, 2..4096. DNA
-    // presets only.
-    std::optional<int> tiles;
     // -m: minimap2's minimal chain score, >= 1. DNA presets only.
     std::optional<int> min_chain_score;
     // --dual yes|no: whether an overlap preset prints a pair from both of its
     // reads or, with no, only from its shorter read, ties broken by name.
     // Unset, the preset's value. Overlap presets only.
     std::optional<bool> dual;
-    std::optional<int> tile_supported_reward;
-    std::optional<int> tile_block_open_cost;
-    std::optional<int> tile_null_cost;
-    std::optional<int> tile_unsupported_cost;
     std::optional<int> vote_diag_bin_width;
     // --dw-slope-den / --dw-max: coefficients of the adaptive vote-width model.
     // Unlike --dw they do not switch it off. DNA presets only.
@@ -249,8 +239,8 @@ struct AlignOptions {
     std::optional<std::string> splice_strand;
     std::optional<std::string> rna_junction_bed;
     std::optional<int> rna_junction_bonus;
-    // -p: the DNA alternative's credibility ratio, the RNA rival retention
-    // ratio.
+    // -p: the DNA -c lane's secondary credibility ratio, the RNA rival
+    // retention ratio.
     std::optional<double> pri_ratio;
     // RNA: the secondary retention band (--rival-min-diff) and the catalogue
     // depth (-N + 1), which also sets the realization budget.
@@ -287,10 +277,8 @@ struct AlignOptions {
     // -g: the DP's maximum gap and the chains' gap (on a splice preset the
     // fine chain's query gap).
     std::optional<int> dp_max_gap;
-    // -b NUM[,NUM]: the dense chain passes' band and the screening pass's,
-    // each >= 1; a lone NUM sets both. DNA presets only.
+    // -b NUM: the dense chain passes' band, >= 1. DNA presets only.
     std::optional<int> chain_band;
-    std::optional<int> chain_band_screen;
     // Every option the command line gave, filled where the parser dispatches
     // a spelling.
     std::set<OptionId> given_options;

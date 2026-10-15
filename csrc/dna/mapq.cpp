@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,12 @@
 // record is scored on its own candidate's chain, with its own dp1 and
 // identity. The divergence contrast (kDnaChainMapqDivergentRecord*) is a
 // family-level cap applied beside it.
+//
+// The rivals are the catalogue candidates that own no block and the candidate
+// dp2 came from, each on its whole-query chain (whole_query_chain). With CIGAR
+// output every record the controller realized is a rival too, the secondaries
+// it drops included, each on its own region's chain, and dp2 is owned by the
+// realized record it came from.
 //
 // Two shadow refinements are carried on the evidence and on by default: a
 // chained shadow's vote counts for the winner (shadow_vote_credit), and the
@@ -711,12 +718,14 @@ int chain_mapq_study_bits(const DnaContext& dctx) noexcept {
   return dna_chain_mapq_study_bits(dctx.opts.chain_mapq_hifi_margin);
 }
 
-// One catalogue rival's MAPQ evidence (see whole_query_chain). A rival with no
-// accepted whole-query chain keeps only its vote and screening span.
+// One catalogue rival's MAPQ evidence (see whole_query_chain; `realized` for
+// the dp_max2 owner). A rival with no accepted whole-query chain keeps only
+// its vote and its record's query span.
 DnaChainMapqRival
 chain_mapq_rival_from_placement(const DnaPlacementFamily& catalogue,
                                 const DnaPlacementChainingResult& placement,
-                                ::fa::cpu::voting::CandidateId id) {
+                                ::fa::cpu::voting::CandidateId id,
+                                bool realized = false) {
   DnaChainMapqRival rival;
   rival.candidate = id;
   if (const DnaPlacementCandidate* candidate = catalogue.find(id)) {
@@ -725,7 +734,8 @@ chain_mapq_rival_from_placement(const DnaPlacementFamily& catalogue,
     rival.reverse = candidate->peak.is_rc;
     rival.peak_diagonal = candidate->peak.raw_ref_start;
   }
-  const DnaPlacementCandidateChain* whole = placement.whole_query_chain(id);
+  const DnaPlacementCandidateChain* whole =
+      placement.whole_query_chain(id, realized);
   const DnaPlacementCandidateChain* record = placement.find(id);
   if (whole != nullptr)
     rival.status = static_cast<int>(whole->status);
@@ -741,8 +751,8 @@ chain_mapq_rival_from_placement(const DnaPlacementFamily& catalogue,
     rival.ref_begin = whole->reference_begin;
     rival.ref_end = whole->reference_end;
   } else if (record != nullptr) {
-    rival.q_begin = record->screening_forward_query_begin;
-    rival.q_end = record->screening_forward_query_end;
+    rival.q_begin = record->forward_query_begin;
+    rival.q_end = record->forward_query_end;
   }
   return rival;
 }
@@ -826,8 +836,8 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
 
   evidence.rivals.reserve(ids.size());
   for (const ::fa::cpu::voting::CandidateId id : ids) {
-    DnaChainMapqRival rival =
-        chain_mapq_rival_from_placement(catalogue, placement, id);
+    DnaChainMapqRival rival = chain_mapq_rival_from_placement(
+        catalogue, placement, id, id == dp2_owner);
     rival.owns_dp2 = id == dp2_owner;
     evidence.rivals.push_back(rival);
   }
@@ -839,6 +849,65 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
                             std::tie(a.vote_evidence, b.candidate);
                    });
   return evidence;
+}
+
+// The realized secondaries of other candidates join the rivals, each on its
+// own region's chain, and the dp2 seat moves to the one dp_max2 came from. A
+// path -1 secondary is its candidate's whole-query chain: it chains that
+// candidate's entry when the entry has no chain and is not added twice; the
+// segments of one region are one rival. The record's own candidate's
+// secondaries stay in sib_f2 and n_sub.
+void admit_realized_rivals(const DnaPlacementFamily& catalogue,
+                           const std::vector<DnaRealizedRival>& realized,
+                           const DnaRegionPrice& price,
+                           DnaChainMapqEvidence& evidence) {
+  for (DnaChainMapqRival& rival : evidence.rivals) rival.owns_dp2 = false;
+  // The entry each region took, and each candidate's first entry.
+  std::unordered_map<int, std::size_t> taken;
+  std::unordered_map<int, std::size_t> first;
+  for (std::size_t at = 0; at < evidence.rivals.size(); ++at)
+    first.emplace(evidence.rivals[at].candidate, at);
+  for (std::size_t index = 0; index < realized.size(); ++index) {
+    const DnaRealizedRival& source = realized[index];
+    if (source.candidate == price.candidate) continue;
+    std::size_t slot = evidence.rivals.size();
+    if (const auto region = taken.find(source.region); region != taken.end())
+      slot = region->second;
+    else if (source.path < 0)
+      if (const auto entry = first.find(source.candidate); entry != first.end())
+        slot = entry->second;
+    if (slot == evidence.rivals.size()) {
+      DnaChainMapqRival rival;
+      rival.candidate = source.candidate;
+      if (const DnaPlacementCandidate* candidate = catalogue.find(
+              static_cast<::fa::cpu::voting::CandidateId>(source.candidate))) {
+        rival.vote_evidence = candidate->vote_evidence;
+        rival.contig = candidate->peak.chr;
+        rival.reverse = candidate->peak.is_rc;
+        rival.peak_diagonal = candidate->peak.raw_ref_start;
+      }
+      first.emplace(rival.candidate, slot);
+      evidence.rivals.push_back(rival);
+    }
+    taken.emplace(source.region, slot);
+    DnaChainMapqRival& entry = evidence.rivals[slot];
+    if (!entry.chained) {
+      entry.status = static_cast<int>(DnaPlacementChainStatus::Accepted);
+      entry.chained = true;
+      entry.chain_score = source.score0;
+      entry.chain_anchors = source.anchors0;
+      entry.q_begin = source.chain_q_begin;
+      entry.q_end = source.chain_q_end;
+      entry.ref_begin = source.chain_ref_begin;
+      entry.ref_end = source.chain_ref_end;
+    }
+    if (static_cast<int>(index) == price.dp_max2_rival) entry.owns_dp2 = true;
+  }
+  std::stable_sort(evidence.rivals.begin(), evidence.rivals.end(),
+                   [](const DnaChainMapqRival& a, const DnaChainMapqRival& b) {
+                     return std::tie(b.vote_evidence, a.candidate) <
+                            std::tie(a.vote_evidence, b.candidate);
+                   });
 }
 
 // A record printed from family.block_parts[part] is priced on that part
@@ -1282,7 +1351,6 @@ void mark_chain_mapq_record_shadows(
         });
 }
 
-
 } // namespace
 
 } // namespace dna
@@ -1296,15 +1364,17 @@ namespace dna {
 // The MAPQ of the records realization.cpp emits, through the router:
 // each primary record on its own chain with dp1 its dp_max and dp2 its
 // dp_max2 (owned by the record that gave it, when that is another catalogue
-// candidate's). The region stands in for the block part (price_block_part):
-// f1 and cnt its whole chain's, score and cnt its own, sib_f2 and n_sub
-// mm_set_parent's over the secondaries from its own candidate's chains. An
-// inversion middle takes its flanks' MAPQ.
+// candidate's; every realized secondary of another candidate is a rival,
+// admit_realized_rivals). The region stands in for the block part
+// (price_block_part): f1 and cnt its whole chain's, score and cnt its own,
+// sib_f2 and n_sub mm_set_parent's over the secondaries from its own
+// candidate's chains. An inversion middle takes its flanks' MAPQ.
 void price_dna_regions(const DnaContext& dctx,
                        const DnaPlacementFamily& family,
                        const DnaPlacementChainingResult& placement,
-                       const std::vector<DnaRegionPrice>& prices, int read_len,
-                       dna::Result& realized) {
+                       const std::vector<DnaRegionPrice>& prices,
+                       const std::vector<DnaRealizedRival>& rivals,
+                       int read_len, dna::Result& realized) {
   const std::size_t count = 1 + realized.supplementary.size();
   if (prices.size() != count)
     return;
@@ -1377,6 +1447,7 @@ void price_dna_regions(const DnaContext& dctx,
     evidence.winner_ref_end = price.chain_ref_end;
     evidence.dp1_raw = static_cast<double>(price.dp_max0);
     evidence.dp2_raw = static_cast<double>(price.dp_max2_0);
+    admit_realized_rivals(family, rivals, price, evidence);
     if (family_map_wanted)
       mark_chain_mapq_record_shadows(dctx, family, placement, family_map, index,
                                      owner, read_len, evidence);

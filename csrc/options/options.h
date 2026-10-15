@@ -76,10 +76,9 @@ inline constexpr int kDnaMinKswLen = 200;
 
 // The pool occurrence gate (--max-chain-occ). At N > 0 the whole-query pass
 // drops every seed whose exact reference occurrence
-// (KmerPostingIntervalView::global_count) exceeds N, the same test the
-// screening pass applies. Like minimap2's cap before chaining, it matters most
-// on ONT, whose errors break exact runs so that an ungated pool is mostly
-// short, noisy runs. The gate and the run collapse are complementary: the
+// (KmerPostingIntervalView::global_count) exceeds N. Like minimap2's cap
+// before chaining, it matters most on ONT, whose errors break exact runs so
+// that an ungated pool is mostly short, noisy runs. The gate and the run collapse are complementary: the
 // high-occurrence postings it removes are the ones that scatter across
 // diagonals and collapse poorly. 0 is the ungated pass. Nothing else bounds
 // the pool, so at 0 nothing does.
@@ -91,7 +90,7 @@ inline constexpr int kDnaPoolGateOcc = 0;
 //   lr     N = max(200, mm_idx_cal_max_occ(index, 1.81e-4))
 //   lr:hq  N = min(500, max(200, mm_idx_cal_max_occ(index, 1.81e-4)))
 // where 500 is minimap2's map-hifi max_mid_occ. dna_chain_occ_thresholds()
-// hands N to the pool gate and to the global cap read by the screening pass.
+// hands N to the pool gate.
 // --max-vote-occ INT sets N for the vote and the chain alike, and 0 removes
 // every cap; --max-chain-occ INT replaces N on the pool gate only.
 //
@@ -108,9 +107,8 @@ inline constexpr int kDnaHiFiOccCeiling = 500;
 // read_pos), and that seed is also an exact-refine view. Per read and strand,
 // in tile order, a rescue that would take the rescued occurrence past
 // kDnaTileRescueBudget is skipped; reads shorter than kDnaTileRescueMinLen bp
-// are not rescued (both constants in seed/seed.h). Placement's screening
-// pass admits a rescued seed past its gate, and the whole-query pool admits
-// exactly the seeds the vote rescued (dna/dna.h); the
+// are not rescued (both constants in seed/seed.h). The whole-query pool
+// admits exactly the seeds the vote rescued (dna/dna.h); the
 // inversion probe keeps its gate. With no cap, or N >= M, nothing is rescued.
 // lr's M is minimap2's max_max_occ, a constant there too; the RNA presets
 // install 0.
@@ -125,10 +123,8 @@ struct DnaLongOptions {
   // lane bound (dna_chain_max_candidates) as a cost bound only; 0 admits by
   // count. DNA presets install kDnaProductionVoteAdmissionRatio.
   double vote_admission_ratio = 0.0;
-  // Objective of the query partition (--tile-score), per tile.
-  ::fa::cpu::voting::QueryPartitionParameters query_partition;
-  // The query partition's tiles per read (--tiles),
-  // kMinQueryTiles..kMaxQueryTiles. DNA presets only; the splice presets
+  // The query tiles per read, the grid of the catalogue's masks and of the
+  // read's blocks: the preset's, which no option sets. The splice presets
   // partition into kQueryTileCount.
   int query_tiles = ::fa::cpu::voting::kQueryTileCount;
   // A read that is itself in the index, found by its exact name, is left out
@@ -143,8 +139,8 @@ struct DnaLongOptions {
   // candidates on each contig and strand share one whole-query chain call and
   // take its chains best first, one each, and each chain at -m or above is
   // printed once, MAPQ 0 and tp:A:S (dna/map.cpp emit_all_chains). No
-  // tile mask, partition, -p, -N or MAPQ runs, so its lane bound (max_cands)
-  // may reach kAllChainsLaneBound. Map-only.
+  // tile mask, block ownership, -p, -N or MAPQ runs, so its lane bound
+  // (max_cands) may reach kAllChainsLaneBound. Map-only.
   bool all_chains = false;
   // In the all-chains lane, whether a pair prints from both of its reads.
   // When false (--dual=no) the reads are ordered by length, then name, and a
@@ -213,9 +209,8 @@ struct DnaLongOptions {
   int fill_dp_tail_zdrop = 800;
   int fill_dp_inversion_zdrop = 200;
   int fill_dp_min_dp_max = 160;
-  // minimap2's -p (pri_ratio): the alternative and the -c lane's secondary
-  // records are credible at p times the owner's chain score, or within 2k of
-  // it.
+  // minimap2's -p (pri_ratio): the -c lane's secondary records are credible
+  // at p times the owner's chain score, or within 2k of it.
   double pri_ratio = 0.8;
   // minimap2's -m (min_chain_score): the DNA emission floor, the MAPQ's subsc
   // floor and the minimum size of an inversion middle. DNA presets only.
@@ -230,10 +225,8 @@ struct DnaLongOptions {
   // The chains' maximum gap (-g); on a splice preset the fine chain's query
   // gap.
   int cigar_local_interval_anchor_chain_max_gap = 5000;
-  // The DNA chain passes' diagonal bands (-b): the dense (whole-query)
-  // passes' and the screening pass's.
+  // The dense (whole-query) chain passes' diagonal band (-b).
   int chain_band = 20000;
-  int screen_diag_band = 20000;
   bool cigar_local_occ_mode_global = true;
   // Global occurrence cap: seeds whose exact reference occurrence exceeds it
   // are dropped. Only the RNA path reads this field (compose_rna_runtime); the
@@ -256,9 +249,6 @@ struct DnaLongOptions {
   // The vote's empty-tile rescue M (kDnaTileRescueOcc); 0 is none. DNA
   // presets install it; not settable.
   int dna_tile_rescue_occ = 0;
-  // The alternatives whose whole-query chains enter the ownership selection
-  // (dna/placement.cpp); not settable.
-  int alternative_realize_max = 1;
   // -N: the rivals the -c lane realizes and keeps; one prices the MAPQ.
   int secondary_max = 1;
 };
@@ -269,11 +259,9 @@ struct DnaLongOptions {
 int dna_chain_max_candidates(const DnaLongOptions& mapping) noexcept;
 
 // Chain-side occurrence thresholds (dna/dna.h). pool_gate_occ is N, or
-// the --max-chain-occ value; 0 is ungated. global_occ is N, or INT_MAX when
-// the vote has no cap.
+// the --max-chain-occ value; 0 is ungated.
 struct DnaChainOccThresholds {
   int pool_gate_occ = 0;
-  int global_occ = 0;
 };
 
 DnaChainOccThresholds dna_chain_occ_thresholds(
@@ -352,7 +340,7 @@ enum class LaneStage {
   BaseAlignment,   // base-level alignment: DP scoring, bands, CIGAR operators
   SamOutput,       // the shape of SAM output
   Selection,       // primary and secondary selection
-  Partition,       // the query partition
+  CandidateChains, // each catalogue candidate's own whole-query chain
   OverlapPairs,    // which reads of an overlap pair print it
 };
 
@@ -435,10 +423,6 @@ struct UserOverrides {
   std::optional<int> min_chain_score;
   // --vote-seeds, >= 0. DNA presets only.
   std::optional<int> max_query_seeds_per_strand;
-  std::optional<int> query_tile_supported_reward;
-  std::optional<int> query_tile_block_open_cost;
-  std::optional<int> query_tile_null_cost;
-  std::optional<int> query_tile_unsupported_cost;
   std::optional<int>
       num_threads; // the CLI passes the resolved count
   std::optional<bool> enable_full_read_cigar;
@@ -475,10 +459,8 @@ struct UserOverrides {
   std::optional<int> dp_bw;
   std::optional<int> dp_bw_long;
   std::optional<int> dp_max_gap;
-  // -b NUM[,NUM]: the dense chain passes' diagonal band and the screening
-  // pass's, each >= 1. DNA presets only.
+  // -b NUM: the dense chain passes' diagonal band, >= 1. DNA presets only.
   std::optional<int> chain_band;
-  std::optional<int> chain_band_screen;
   std::optional<int> rna_min_intron;
   std::optional<int> rna_max_intron;
   // RNA transcript strand (-u) as rna::StrandMode: 0 auto, 1 forward,
@@ -486,8 +468,8 @@ struct UserOverrides {
   std::optional<int> rna_strand;
   std::optional<std::string> rna_junction_bed;
   std::optional<int> rna_junction_bonus;
-  // -p: on a DNA preset the credibility ratio of the alternative and of the
-  // -c lane's secondary records, on a splice preset the rival retention ratio.
+  // -p: on a DNA preset the credibility ratio of the -c lane's secondary
+  // records, on a splice preset the rival retention ratio.
   std::optional<double> pri_ratio;
   // RNA rival retention band (--rival-min-diff) and catalogue depth (-N + 1),
   // which also sets the realization budget to one fewer.
@@ -508,8 +490,6 @@ struct UserOverrides {
   // candidates per strand, 1..64, or 1..16383 in the all-chains lane. DNA
   // presets only.
   std::optional<int> max_cands;
-  // --tiles: the query partition's tiles per read, 2..4096. DNA presets only.
-  std::optional<int> query_tiles;
   // --dual: whether an overlap preset prints a pair from both of its reads.
   // Overlap presets only.
   std::optional<bool> dual;
@@ -579,8 +559,8 @@ bool is_assembly_preset(std::string_view preset);
 bool is_overlap_preset(std::string_view preset);
 
 // Whether the lane `preset` selects runs `stage`. The all-chains lane of an
-// overlap row prints map-only PAF and every chain, solves no partition, and
-// alone chooses which reads of a pair print it.
+// overlap row prints map-only PAF and every chain, chains each contig and
+// strand once, and alone chooses which reads of a pair print it.
 bool lane_runs_stage(LaneStage stage, std::string_view preset);
 
 bool is_rna_preset(std::string_view preset);

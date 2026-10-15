@@ -224,10 +224,10 @@ Stop alignment elongation if there are no seeds within
 DNA preset two pieces of a read join into one record only across gaps of at most
 .IR NUM .
 Under a DNA preset it is also the maximum gap of chaining, whose reach is never
-below the chain's band and grows with the read length, so values under the band
-leave that chain unchanged. The band is
-.BR \-b 's
-first value for the dense chains and its second for the screening chain.
+below the chain's band
+.RB ( \-b )
+and grows with the read length, so values under the band leave that chain
+unchanged.
 Under a splice preset it bounds base alignment and is also the maximum
 query gap of the fine chain; there
 .B \-G
@@ -271,19 +271,18 @@ neither bands base alignment there, and
 .B \-G
 sets both [200000,200000].
 .TP
-.B \-b \fINUM1\fR[,\fINUM2\fR]
-Chaining bandwidth [20000,20000; 100000,20000 on asm5, asm10, asm20].
-.I NUM1
-bands each candidate's dense chain over the whole read and
-.I NUM2
-its bounded screening chain: a chain keeps only the anchors whose diagonal lies
-within the band of the candidate's, and long reads chain with a reach that
-grows with their length. It acts on placement, so also on plain PAF output.
-A single value sets both. Each value may end with k/K/m/M/g/G. The long form is
+.BI \-b \ NUM
+Chaining bandwidth [20000; 100000 on asm5, asm10, asm20]. It bands each
+candidate's dense chain over the whole read: a chain keeps only the anchors
+whose diagonal lies within the band of the candidate's, and long reads chain
+with a reach that grows with their length. It acts on placement, so also on
+plain PAF output.
+.I NUM
+may end with k/K/m/M/g/G. The long form is
 .BR \-\-chain\-band .
 DNA presets only;
 .BR ava\-ont " and " ava\-hifi ,
-which do not partition the read, refuse it.
+which chain each contig and strand of the read once, refuse it.
 .TP
 .BI \-m \ INT
 Discard alignments with chaining score
@@ -312,12 +311,11 @@ and
 .B XA
 report, and is a record of its own under
 .BR \-\-secondary=yes .
-Under a DNA preset it decides which alternative loci enter the ownership
-selection, which chains attached to an owner are aligned beside it and kept as
-secondary alignments, and which rival a piece of a split read is weighed against
-in the mapping quality: one whose chain scores at least
+Under a DNA preset it acts with a CIGAR: it decides which chains attached to an
+owner are aligned beside it and kept as secondary alignments, those whose chain
+scores at least
 .I FLOAT
-times the primary's, or within 2\fIk\fR of it.
+times the owner's, or within 2\fIk\fR of it.
 .TP
 .BI \-N \ INT
 Retain at most
@@ -428,7 +426,7 @@ Vote peaks and placement candidates kept per strand, 1 to 64 [16]; 1 to 16383
 .B ava\-ont
 and
 .BR ava\-hifi ,
-which partition nothing. Elsewhere, unset, it is
+which chain each contig and strand of the read once. Elsewhere, unset, it is
 16 when vote peaks are admitted by their ratio to the best
 .RB ( \-\-vote\-ratio ),
 where it only bounds the cost, and 4 when
@@ -436,47 +434,6 @@ where it only bounds the cost, and 4 when
 is 0, where it selects; a value replaces whichever applies. With a CIGAR the secondary alignments come from these
 candidates' chains, so a wider bound can add secondaries.
 DNA presets only.
-.TP
-.BI \-\-tiles \ INT
-Query tiles the read is cut into for placement, 2 to 4096 [128; 2048 on asm5,
-asm10, asm20]. The exact query
-partition gives each tile one candidate or none, and an owned block needs two
-tiles with seed support. Under the default
-.BR \-\-tile\-score ,
-2 tiles place no read: a two\-tile block scores 8 \- 12 = \-4, below the \-2
-of leaving both tiles unowned. The
-.B \-\-tile\-score
-terms are per tile, so their weight against each other and against the read's
-length moves with
-.IR INT .
-A candidate starts with the tiles in which a voting seed supports it, so with
-fewer voting seeds than tiles
-.RB ( \-\-vote\-seeds )
-most tiles start unsupported and candidates are hard to admit; keep
-.B \-\-vote\-seeds
-at least
-.IR INT .
-Above 2048 tiles, candidates are admitted by comparing their supports on 2048
-tiles. The partition's work grows with
-.IR INT .
-DNA presets only.
-.TP
-.B \-\-tile\-score \fIhit\fR=\fIINT\fR,\fIblock\fR=\fIINT\fR,\fInull\fR=\fIINT\fR,\fImiss\fR=\fIINT\fR
-Objective of the exact query partition, which decides for each of the read's
-query tiles
-.RB ( \-\-tiles )
-which candidate owns it [hit=4,block=12,null=1,miss=0]. Under a DNA preset the
-partition picks the candidates chained over the whole read, and the anchors of
-those chains then decide which chain owns each part of the read.
-.I hit
-rewards an owned tile the seeds support and is at least 1;
-.I block
-is charged each time an ownership block opens,
-.I null
-per valid tile left unowned, and
-.I miss
-per owned tile without seed support, each at least 0. Any subset of the keys may
-be given, and a repeated key keeps its last value. DNA presets only.
 .SS Alignment options
 Under a DNA preset,
 .BR \-A ", " \-B ", " \-O ", " \-E ", " \-z " and " \-\-score\-N
@@ -872,7 +829,7 @@ and the MAPQ coverage threshold (0.70 against 0.55).
 Experimental. Long assembly to reference mapping
 .RB ( \-k21
 .B \-s9 \-A1 \-B19 \-O39,81 \-E3,1 \-z200,200 \-\-score\-N 1 \-r1000,100000
-.BR "\-b100000,20000 \-S200 \-\-vote\-seeds 4096 \-\-tiles 2048" ).
+.BR "\-b100000 \-S200 \-\-vote\-seeds 4096" ).
 Use this preset if the average divergence is not much higher than 0.1%.
 .TP
 .B asm10

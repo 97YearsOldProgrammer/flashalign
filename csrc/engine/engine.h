@@ -47,14 +47,12 @@ void lpt_read_order(const std::vector<std::string> &reads, int n_threads,
                     std::vector<int> &order);
 
 // What the DNA lane derives from the read length L under the current options:
-// the vote's diagonal bin width and, for the whole-query (dense) and the
-// screening chain pass, the chain's band and its reach (max_dist_x/y).
+// the vote's diagonal bin width and, for the whole-query (dense) chain pass,
+// the chain's band and its reach (max_dist_x/y).
 struct DnaReadGeometry {
   int vote_diag_bin_width = 0;
   int dense_band = 0;
   int dense_reach = 0;
-  int screen_band = 0;
-  int screen_reach = 0;
 };
 
 class LongReadEngine {

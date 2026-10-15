@@ -59,7 +59,6 @@ static int effective_chain_segment_len(const DnaContext& context,
 
 namespace dna {
 
-
 } // namespace dna
 } // namespace fa::cpu::lr
 
@@ -421,6 +420,7 @@ AlignResult map_read(const DnaContext& base_dctx,
   // The -c lane: the controller's records (realization.cpp) and what
   // the MAPQ reads for each primary.
   std::vector<DnaRegionPrice> region_prices;
+  std::vector<DnaRealizedRival> region_rivals;
   if (dctx.opts.enable_full_read_cigar) {
     const std::vector<uint8_t>& reverse_query = ensure_rc_enc();
     DnaFamilyRealizationRequest request;
@@ -434,6 +434,7 @@ AlignResult map_read(const DnaContext& base_dctx,
     realized = std::move(outcome.output);
     realized.read_len = read_len;
     region_prices = std::move(regions.prices);
+    region_rivals = std::move(regions.rivals);
     if (!realized.mapped()) {
       if (regions.floored)
         demote_unmapped(realized);
@@ -460,7 +461,7 @@ AlignResult map_read(const DnaContext& base_dctx,
     }
     if (dctx.opts.enable_full_read_cigar) {
       price_dna_regions(dctx, placement_family, placement_chaining,
-                        region_prices, read_len, realized);
+                        region_prices, region_rivals, read_len, realized);
     } else if (realized.mapped()) {
       // Map-only joins the block records that pass the bridge test, so the
       // MAPQ below scores a joined record on its owner's chain.

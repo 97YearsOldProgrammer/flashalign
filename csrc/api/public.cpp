@@ -83,14 +83,6 @@ fa::cpu::options::ResolvedOptions resolve_config(
   }
   if (source.vote_seed_spacing >= 0)
     request.user.rna_vote_seed_spacing = source.vote_seed_spacing;
-  if (source.tile_score_hit)
-    request.user.query_tile_supported_reward = *source.tile_score_hit;
-  if (source.tile_score_block)
-    request.user.query_tile_block_open_cost = *source.tile_score_block;
-  if (source.tile_score_null)
-    request.user.query_tile_null_cost = *source.tile_score_null;
-  if (source.tile_score_miss)
-    request.user.query_tile_unsupported_cost = *source.tile_score_miss;
   request.user.enable_full_read_cigar = source.full_read_cigar;
   request.user.syncmer_downsample =
       std::max(1, source.syncmer_downsample);
@@ -185,14 +177,6 @@ Config to_public_config(const fa::cpu::options::ResolvedOptions& source,
   config.max_query_seeds =
       rna ? -1 : source.common.max_query_seeds_per_strand;
   config.vote_seed_spacing = rna ? rna->vote_seed_spacing : -1;
-  // A splice preset rejects --tile-score, so report None there.
-  if (!rna) {
-    config.tile_score_hit = mapping.query_partition.supported_tile_reward;
-    config.tile_score_block = mapping.query_partition.block_open_cost;
-    config.tile_score_null = mapping.query_partition.null_tile_cost;
-    config.tile_score_miss =
-        mapping.query_partition.unsupported_ownership_cost;
-  }
   config.full_read_cigar = source.common.enable_full_read_cigar;
   config.syncmer_s = source.index.syncmer_s;
   config.syncmer_downsample = source.index.syncmer_downsample;

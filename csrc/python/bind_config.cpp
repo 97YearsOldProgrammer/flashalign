@@ -1,9 +1,7 @@
 #include "bindings.h"
 
-#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 
-#include <optional>
 #include <string_view>
 #include <sstream>
 #include <stdexcept>
@@ -61,14 +59,6 @@ void append(std::ostringstream& out, const char* name,
             const std::string& value) {
   out << name << "='" << value << '\'';
 }
-void append(std::ostringstream& out, const char* name,
-            const std::optional<int>& value) {
-  out << name << '=';
-  if (value)
-    out << *value;
-  else
-    out << "None";
-}
 
 } // namespace
 
@@ -116,15 +106,6 @@ void append(std::ostringstream& out, const char* name,
     "dp_bw_long, which a value of their own then replaces.")                   \
   X(rna_strand_mode,                                                           \
     "Transcript strand [-u]: -1 unset, 0 auto, 1 forward, 2 reverse, 3 none.") \
-  X(tile_score_hit,                                                            \
-    "Query-tile supported reward [--tile-score]. None = preset-owned.")        \
-  X(tile_score_block,                                                          \
-    "Query-tile block-open cost [--tile-score]. None = preset-owned.")         \
-  X(tile_score_null,                                                           \
-    "Query-tile null cost [--tile-score]. None = preset-owned.")               \
-  X(tile_score_miss,                                                           \
-    "Query-tile unsupported-ownership cost [--tile-score]. None = "            \
-    "preset-owned.")                                                           \
   X(rna_junction_bed,                                                          \
     "Known-junction BED6/BED12 path [--junc-bed]; splice only.")               \
   X(rna_junction_bonus,                                                        \
@@ -150,15 +131,15 @@ void bind_config(nb::module_& module) {
   nb::class_<flashalign::Config> config(
       module, "Config",
       "Mapping options, named as `flashalign align --show-config` prints\n"
-      "them; a dot there (tile_score.hit) is an underscore here.\n"
+      "them; a dot there (rna_rival.pri_ratio) is an underscore here.\n"
       "\n"
-      "-1 (or None, or \"\") means \"take the preset's value\"; anything else\n"
+      "-1 (or \"\") means \"take the preset's value\"; anything else\n"
       "is an explicit setting, which may be rejected with a ValueError.\n"
       "\n"
       "    fa.Config(preset='lr:hq', threads=8, dp_min_score=50)\n"
       "\n"
       "Aligner.config returns the resolved configuration, with every field\n"
-      "set to the value in use, or -1 / None where the preset decides it.");
+      "set to the value in use, or -1 where the preset decides it.");
 
   config.def(
       "__init__",

@@ -167,16 +167,14 @@ DnaReadGeometry LongReadEngine::dna_read_geometry(int read_length) const {
       effective_vote_diag_bin_width(make_seed_context(), read_length);
   const ::fa::cpu::lr::DnaContext dctx = make_dna_context();
   const int seed_length = std::max(1, dctx.opts.k);
-  const auto pass = [&](bool whole_query, int& band, int& reach) {
-    const auto params =
-        ::fa::cpu::lr::dna_candidate_chain_params(
-            dctx, ::fa::cpu::lr::internal::pass_diagonal_band(dctx, whole_query),
-            seed_length, read_length);
+  const auto pass = [&](int diagonal_band, int& band, int& reach) {
+    const auto params = ::fa::cpu::lr::dna_candidate_chain_params(
+        dctx, diagonal_band, seed_length, read_length);
     band = params.bw;
     reach = params.max_dist_x;
   };
-  pass(true, geometry.dense_band, geometry.dense_reach);
-  pass(false, geometry.screen_band, geometry.screen_reach);
+  pass(::fa::cpu::lr::internal::pass_diagonal_band(dctx), geometry.dense_band,
+       geometry.dense_reach);
   return geometry;
 }
 
@@ -345,7 +343,7 @@ void LongReadEngine::compose_rna_runtime(
   rna::ResolvedOptions opts;
   opts.cfg = rc;
   opts.splice_controller = controller;
-  // RNA uses the preset value; DNA takes the resolved vote cap (make_dna_context).
+  // RNA uses the preset value.
   opts.cigar_local_global_occ = mapping.cigar_local_global_occ;
   opts.cigar_local_interval_anchor_chain_max_gap =
       mapping.cigar_local_interval_anchor_chain_max_gap;
@@ -541,10 +539,8 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.cigar_local_interval_anchor_chain_max_gap =
       mapping.cigar_local_interval_anchor_chain_max_gap;
   dctx.opts.chain_band = mapping.chain_band;
-  dctx.opts.screen_diag_band = mapping.screen_diag_band;
   dctx.opts.dna_dense_diag_min_runs = mapping.dna_dense_diag_min_runs;
   dctx.opts.dna_pool_gate_occ = chain_occ.pool_gate_occ;
-  dctx.opts.cigar_local_global_occ = chain_occ.global_occ;
   dctx.opts.k = cfg_.index.k;
   dctx.opts.cigar_dp_ambi = mapping.cigar_dp_ambi;
   dctx.opts.cigar_dp_bw = mapping.cigar_dp_bw;
@@ -580,12 +576,10 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.cigar_replay_request = cigar_replay_request_for(cfg_.common);
   dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
   dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
-  dctx.opts.alternative_realize_max = mapping.alternative_realize_max;
   dctx.opts.secondary_max = mapping.secondary_max;
   dctx.opts.chain_syncmer_s = cfg_.index.syncmer_s;
   dctx.opts.chain_syncmer_downsample = cfg_.index.syncmer_downsample;
   dctx.opts.vote_admission_ratio = mapping.vote_admission_ratio;
-  dctx.opts.query_partition = mapping.query_partition;
   dctx.opts.query_tiles = mapping.query_tiles;
   dctx.opts.all_chains = mapping.all_chains;
   dctx.opts.catalogue_lane_bound =

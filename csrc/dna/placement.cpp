@@ -1,4 +1,4 @@
-// Placement chaining from the catalogue: each candidate's screening chain, the whole-query dense pass, and the one alternative hypothesis.
+// Placement chaining from the catalogue: every candidate's whole-query dense pass and the ownership of the read's blocks on those chains.
 #include "dna.h"
 
 #include "../chain/chain.h"
@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <tuple>
@@ -21,9 +20,8 @@
 namespace fa::cpu::lr {
 namespace internal {
 
-int pass_diagonal_band(const DnaContext& context, bool whole_query) {
-  return std::max(1, whole_query ? context.opts.chain_band
-                                 : context.opts.screen_diag_band);
+int pass_diagonal_band(const DnaContext& context) {
+  return std::max(1, context.opts.chain_band);
 }
 
 HarvestWindow harvest_window(const DnaContext& context,
@@ -44,13 +42,11 @@ bool skips_own_diagonal(const DnaContext& context, int contig,
   return !reverse && contig == context.self_contig;
 }
 
-PoolGate pool_gate(const DnaContext& context, bool whole_query) {
+PoolGate pool_gate(const DnaContext& context) {
   const int pool_gate_occ = context.opts.dna_pool_gate_occ;
   PoolGate gate;
-  gate.gates = !whole_query || pool_gate_occ > 0;
-  gate.cap = static_cast<std::uint32_t>(
-      std::max(1, whole_query ? pool_gate_occ
-                              : context.opts.cigar_local_global_occ));
+  gate.gates = pool_gate_occ > 0;
+  gate.cap = static_cast<std::uint32_t>(std::max(1, pool_gate_occ));
   gate.skips_keys = gate.gates;
   return gate;
 }
@@ -73,189 +69,6 @@ DnaPlacementChainStatus contig_lane_refusal(
 }  // namespace internal
 }  // namespace fa::cpu::lr
 
-/**** alternative_hypothesis ****/
-
-namespace fa::cpu::lr {
-namespace {
-
-constexpr int kShadowFloorBp = 2000;
-constexpr int kShadowFraction = 10;
-
-// minimap2's mm_select_sub: a rival is credible at pri_ratio times the
-// owner's score or within credible_gap of it. Exact for int scores at
-// p = 0.8, where it is 5 * score >= 4 * owner.
-bool credible_rival(int score, int owner, double pri_ratio, int credible_gap) {
-  return static_cast<double>(score) >=
-             pri_ratio * static_cast<double>(owner) ||
-         owner - score <= credible_gap;
-}
-
-int query_overlap(int left_begin, int left_end, int right_begin,
-                  int right_end) {
-  return std::max(0, std::min(left_end, right_end) -
-                         std::max(left_begin, right_begin));
-}
-
-bool same_locus_shadow(const DnaPlacementCandidate& candidate,
-                       const DnaPlacementCandidate& selected,
-                       int read_length) {
-  if (candidate.peak.chr != selected.peak.chr ||
-      candidate.peak.is_rc != selected.peak.is_rc)
-    return false;
-  const std::int64_t window = std::max<std::int64_t>(
-      kShadowFloorBp, read_length / kShadowFraction);
-  return std::llabs(candidate.peak.raw_ref_start -
-                    selected.peak.raw_ref_start) <= window;
-}
-
-// A qualifying candidate's sort key: (-score, -anchors, -overlap, id).
-using RankKey = std::tuple<int, int, int, ::fa::cpu::voting::CandidateId>;
-
-// select_dna_alternative_hypothesis, which also appends every qualifying
-// candidate's key to `qualified` when given.
-DnaAlternativeSelection select_alternative(
-    const DnaContext& context, const DnaPlacementFamily& family,
-    const DnaPlacementChainingResult& stable,
-    std::vector<RankKey>* qualified) {
-  DnaAlternativeSelection out;
-  if (!stable.accepted) return out;
-
-  int non_null_blocks = 0;
-  int block_begin = 0;
-  int block_end = 0;
-  for (const auto& block : family.partition.selected.blocks) {
-    if (block.candidate == ::fa::cpu::voting::kNullCandidate) continue;
-    ++non_null_blocks;
-    out.incumbent = block.candidate;
-    block_begin = ::fa::cpu::voting::query_tile_begin(
-        block.query_tile_begin, family.read_length, family.seed_length,
-        family.tile_count);
-    block_end = ::fa::cpu::voting::query_tile_end(
-        block.query_tile_end, family.read_length, family.seed_length,
-        family.tile_count);
-  }
-  if (non_null_blocks != 1) {
-    out.refusal = DnaAlternativeRefusal::NotSingleBlock;
-    return out;
-  }
-  const DnaPlacementCandidateChain* incumbent = stable.find(out.incumbent);
-  if (incumbent == nullptr) return out;
-
-  std::vector<::fa::cpu::voting::CandidateId> selected;
-  for (const auto id : family.partition.selected.assignment) {
-    if (id != ::fa::cpu::voting::kNullCandidate &&
-        std::find(selected.begin(), selected.end(), id) == selected.end())
-      selected.push_back(id);
-  }
-  const int contig_count = context.ref.names == nullptr
-      ? 0 : static_cast<int>(context.ref.names->size());
-  const int credible_gap = 2 * std::max(1, context.opts.k);
-  DnaAlternativeRefusal worst = DnaAlternativeRefusal::NoCandidate;
-  const auto note = [&](DnaAlternativeRefusal refusal) {
-    if (static_cast<int>(refusal) > static_cast<int>(worst)) worst = refusal;
-  };
-
-  const DnaPlacementCandidate* best = nullptr;
-  const DnaPlacementCandidateChain* best_record = nullptr;
-  int best_overlap = 0;
-  for (const DnaPlacementCandidate& candidate : family.candidates) {
-    if (std::find(selected.begin(), selected.end(), candidate.id) !=
-        selected.end())
-      continue;
-    if (candidate.peak.chr < 0 || candidate.peak.chr >= contig_count) {
-      note(DnaAlternativeRefusal::NoLocus);
-      continue;
-    }
-    const DnaPlacementCandidateChain* record = stable.find(candidate.id);
-    if (record == nullptr || record->screening_chain_score <= 0 ||
-        record->screening_forward_query_begin < 0 ||
-        record->screening_forward_query_end <=
-            record->screening_forward_query_begin) {
-      note(DnaAlternativeRefusal::NoChain);
-      continue;
-    }
-    bool shadow = false;
-    for (const auto id : selected) {
-      const DnaPlacementCandidate* chosen = family.find(id);
-      if (chosen != nullptr &&
-          same_locus_shadow(candidate, *chosen, family.read_length)) {
-        shadow = true;
-        break;
-      }
-    }
-    if (shadow) {
-      note(DnaAlternativeRefusal::ShadowOnly);
-      continue;
-    }
-    const int span = record->screening_forward_query_end -
-                     record->screening_forward_query_begin;
-    const int overlap = query_overlap(
-        record->screening_forward_query_begin,
-        record->screening_forward_query_end, block_begin, block_end);
-    const int shorter = std::min(span, std::max(0, block_end - block_begin));
-    if (static_cast<std::int64_t>(overlap) * 2 < shorter) {
-      note(DnaAlternativeRefusal::DisjointOnly);
-      continue;
-    }
-    const int score = record->screening_chain_score;
-    const int incumbent_score = incumbent->screening_chain_score;
-    if (!credible_rival(score, incumbent_score, context.opts.pri_ratio,
-                        credible_gap)) {
-      note(DnaAlternativeRefusal::IncredibleOnly);
-      continue;
-    }
-    if (qualified != nullptr)
-      qualified->emplace_back(-score, -record->screening_chain_anchors,
-                              -overlap, candidate.id);
-    if (best == nullptr ||
-        std::tuple(-score, -record->screening_chain_anchors, -overlap,
-                   candidate.id) <
-            std::tuple(-best_record->screening_chain_score,
-                       -best_record->screening_chain_anchors, -best_overlap,
-                       best->id)) {
-      best = &candidate;
-      best_record = record;
-      best_overlap = overlap;
-    }
-  }
-  if (best == nullptr) {
-    out.refusal = worst;
-    return out;
-  }
-  out.candidate = best->id;
-  out.refusal = DnaAlternativeRefusal::None;
-  return out;
-}
-
-// Picks at most one alternative to the owner of a single-block family, from
-// the screening chains. A candidate qualifies when it is not selected, is not
-// a shadow of a selected locus (same contig and strand, vote start within
-// max(2 kb, read length / 10)), overlaps the block by at least half the
-// shorter query span, and scores at least -p (0.8) times the owner or within
-// 2k of it. Best by (score, anchors, overlap, lowest id).
-DnaAlternativeSelection select_dna_alternative_hypothesis(
-    const DnaContext& context, const DnaPlacementFamily& family,
-    const DnaPlacementChainingResult& stable) {
-  return select_alternative(context, family, stable, nullptr);
-}
-
-}  // namespace
-
-std::vector<::fa::cpu::voting::CandidateId> rank_dna_alternative_hypotheses(
-    const DnaContext& context, const DnaPlacementFamily& family,
-    const DnaPlacementChainingResult& stable, std::size_t limit) {
-  std::vector<RankKey> qualified;
-  select_alternative(context, family, stable, &qualified);
-  std::sort(qualified.begin(), qualified.end());
-  if (qualified.size() > limit) qualified.resize(limit);
-  std::vector<::fa::cpu::voting::CandidateId> ranked;
-  ranked.reserve(qualified.size());
-  for (const RankKey& key : qualified) ranked.push_back(std::get<3>(key));
-  return ranked;
-}
-
-}  // namespace fa::cpu::lr
-
 /**** placement_chaining ****/
 
 namespace fa::cpu::lr {
@@ -269,42 +82,11 @@ struct DeferredSlice {
   KmerPostingIntervalView interval;
 };
 
-::fa::cpu::voting::QueryTileMask valid_tiles(int read_length, int seed_length,
-                                             int tile_count) {
-  ::fa::cpu::voting::QueryTileMask result;
-  for (int tile = 0; tile < tile_count; ++tile) {
-    if (::fa::cpu::voting::query_tile_end(tile + 1, read_length, seed_length,
-                                          tile_count) >
-        ::fa::cpu::voting::query_tile_begin(tile, read_length, seed_length,
-                                            tile_count)) {
-      result.set(tile);
-    }
-  }
-  return result;
-}
-
 int selected_tiles(
     const ::fa::cpu::voting::QueryPartitionPath& path,
     ::fa::cpu::voting::CandidateId candidate) {
   return static_cast<int>(std::count(
       path.assignment.begin(), path.assignment.end(), candidate));
-}
-
-::fa::cpu::voting::QueryPartitionResult repartition(
-    const DnaContext& context, const DnaPlacementFamily& family) {
-  ::fa::cpu::voting::QueryPartitionProblem problem;
-  problem.tile_count = family.tile_count;
-  problem.valid_tiles =
-      valid_tiles(family.read_length, family.seed_length, family.tile_count);
-  problem.parameters = context.opts.query_partition;
-  problem.catalogue.candidates.reserve(family.candidates.size());
-  for (const DnaPlacementCandidate& candidate : family.candidates) {
-    problem.catalogue.candidates.push_back(
-        {candidate.id, candidate.equivalence_key, candidate.lane,
-         candidate.catalogue_rank, candidate.vote_evidence,
-         candidate.screening_chain_score, candidate.support});
-  }
-  return ::fa::cpu::voting::solve_query_partition(problem);
 }
 
 // Per-thread radix ping-pong buffer and histograms for the pool sort below.
@@ -465,11 +247,6 @@ void set_spans(DnaPlacementCandidateChain& record, bool reverse,
   record.reference_end = reference_end;
 }
 
-enum class CandidateChainPass : std::uint8_t {
-  BoundedScreening,
-  WholeQueryExact,
-};
-
 }  // namespace
 
 namespace internal {
@@ -509,43 +286,15 @@ void write_primary_chain(const DnaPlacementFamily& family, bool reverse,
 
 namespace {
 
-// Writes into `to` what a chain_candidate call wrote into `from`, where the
-// call returned `accepted`. The call leaves the record's candidate,
-// sparse_support, screening_* and selected-tile counts alone, and its spans
-// unless accepted.
-void copy_chain_call(const DnaPlacementCandidateChain& from, bool accepted,
-                     DnaPlacementCandidateChain& to) {
-  DnaPlacementCandidateChain kept = std::move(to);
-  to = from;
-  to.candidate = kept.candidate;
-  to.sparse_support = kept.sparse_support;
-  to.screening_chain_score = kept.screening_chain_score;
-  to.screening_chain_anchors = kept.screening_chain_anchors;
-  to.screening_forward_query_begin = kept.screening_forward_query_begin;
-  to.screening_forward_query_end = kept.screening_forward_query_end;
-  to.initial_selected_tiles = kept.initial_selected_tiles;
-  to.final_selected_tiles = kept.final_selected_tiles;
-  if (!accepted) {
-    to.oriented_query_begin = kept.oriented_query_begin;
-    to.oriented_query_end = kept.oriented_query_end;
-    to.forward_query_begin = kept.forward_query_begin;
-    to.forward_query_end = kept.forward_query_end;
-    to.reference_begin = kept.reference_begin;
-    to.reference_end = kept.reference_end;
-  }
-}
-
+// A candidate's whole-query pass: every admissible slice is deferred and its
+// anchors are built after the scan, then the pool is chained densely.
 bool chain_candidate(
     const DnaContext& context,
     const DnaPlacementFamily& family,
     const DnaPlacementCandidate& candidate,
     const std::vector<std::uint8_t>& query,
     RetainedSeedDensity& seed_index,
-    DnaPlacementCandidateChain& record,
-    CandidateChainPass pass) {
-  // The whole-query pass defers every admissible slice and builds its anchors
-  // after the scan. The screening pass defers nothing and uses chain_colinear.
-  const bool whole_query_exact = pass != CandidateChainPass::BoundedScreening;
+    DnaPlacementCandidateChain& record) {
   record.dense_support = {};
   record.primary.clear();
   record.sibling_paths.clear();
@@ -559,21 +308,17 @@ bool chain_candidate(
   record.overlapping_rivals = 0;
   record.chain_anchors = 0;
   record.exact = false;
-  record.sparse_anchors = 0;
   record.deferred_anchors = 0;
   record.rescued_anchors = 0;
   record.dense_runs = 0;
   const bool reverse = candidate.peak.is_rc;
   const std::vector<RetainedSeedRef>& seeds =
-      whole_query_exact
-          ? (reverse ? seed_index.fine_reverse()
-                     : seed_index.fine_forward())
-          : (reverse ? seed_index.reverse() : seed_index.forward());
+      reverse ? seed_index.fine_reverse() : seed_index.fine_forward();
   const DnaPlacementChainStatus refusal = internal::contig_lane_refusal(
       context, candidate.peak.chr, seeds, query, family.read_length);
   if (refusal != DnaPlacementChainStatus::Accepted) {
     record.status = refusal;
-    record.exact = whole_query_exact;
+    record.exact = true;
     return false;
   }
 
@@ -583,48 +328,41 @@ bool chain_candidate(
   const std::int64_t expected = candidate.peak.raw_ref_start;
   internal::HarvestWindow window = internal::harvest_window(
       context, candidate.peak, family.read_length, chromosome_length);
-  // The whole-query pass of a candidate whose screening pass held a chain also
-  // harvests [low - pad, high + L + pad] over that chain's lowest and highest
-  // diagonal.
-  if (whole_query_exact && candidate.screening_diagonals) {
+  // The window reaches min(band, max(pad, L / 8)) further on both sides, and
+  // the line-widened winner keeps its wider bound.
+  {
     const int interval_pad =
         context.opts.cigar_local_interval_anchor_interval_pad;
+    const std::int64_t widen = std::min<std::int64_t>(
+        internal::pass_diagonal_band(context),
+        std::max<std::int64_t>(interval_pad, family.read_length / 8));
     window.low = std::min(
         window.low,
-        std::max<std::int64_t>(
-            0, static_cast<std::int64_t>(candidate.screening_diagonal_low) -
-                   interval_pad));
+        std::max<std::int64_t>(0, expected - widen - interval_pad));
     window.high = std::max(
         window.high,
         std::min<std::int64_t>(
             chromosome_length,
-            static_cast<std::int64_t>(candidate.screening_diagonal_high) +
-                family.read_length + interval_pad));
+            expected + family.read_length + widen + interval_pad));
   }
   if (window.high <= window.low) {
     record.status = DnaPlacementChainStatus::InvalidReference;
-    record.exact = whole_query_exact;
+    record.exact = true;
     return false;
   }
   const std::uint64_t* offsets = context.ref.index->chrom_offsets_data();
   const std::uint64_t chromosome_base =
       offsets[static_cast<std::size_t>(candidate.peak.chr)];
-  const internal::PoolGate gate =
-      internal::pool_gate(context, whole_query_exact);
-  const int diagonal_band =
-      internal::pass_diagonal_band(context, whole_query_exact);
+  const internal::PoolGate gate = internal::pool_gate(context);
+  const int diagonal_band = internal::pass_diagonal_band(context);
   const VotePeak* line_peak =
       candidate.peak.line_gate ? &candidate.peak : nullptr;
   const bool skip_own_diagonal = internal::skips_own_diagonal(
       context, candidate.peak.chr, reverse);
 
-  std::vector<chaining::Anchor> sparse;
+  // No anchor is built in the loop below; every admissible slice is deferred.
   std::vector<DeferredSlice> deferred;
-  // The whole-query pass builds no anchors in the loop below; every
-  // admissible slice is deferred instead.
-  const bool defer_every_slice = whole_query_exact;
-  sparse.reserve(defer_every_slice ? 0 : seeds.size());
-  deferred.reserve(defer_every_slice ? seeds.size() : seeds.size() / 8 + 1);
+  deferred.reserve(seeds.size());
   // Every seed resolves against the same (chr, low, high) window, so each
   // distinct entry is sliced once, in batches through slice_batch; seeds are
   // still processed in order.
@@ -660,9 +398,8 @@ bool chain_candidate(
     for (std::size_t at = first; at < next; ++at) {
       const RetainedSeedRef& seed = seeds[at];
       const KmerPostingIntervalView& interval = slices.interval[seed.entry];
-      // A rescued seed passes the gate (RetainedSeedRef::rescued): the vote
-      // seed on the screening pass, its fine twin on the whole-query pass. Its
-      // key's interval is shared with the seeds that do not.
+      // A rescued seed's fine twin passes the gate (RetainedSeedRef::rescued).
+      // Its key's interval is shared with the seeds that do not.
       const bool over_pool_gate =
           gate.drops(interval.global_count, seed.rescued);
       if (!interval.found() || interval.count == 0 || over_pool_gate) {
@@ -670,51 +407,36 @@ bool chain_candidate(
           record.filtered_hits += static_cast<int>(interval.count);
         continue;
       }
-      // The screening pass builds its anchors directly; the whole-query pass
-      // defers every slice and builds its anchors after the scan.
-      if (whole_query_exact) {
-        deferred.push_back({seed, interval});
-        record.deferred_anchors += interval.count;
-      } else {
-        internal::append_interval_anchors(
-            interval, seed, chromosome_base, chromosome_length,
-            static_cast<int>(expected), line_peak, seed_length, diagonal_band,
-            reverse, skip_own_diagonal,
-            family.read_length, sparse, record);
-      }
+      deferred.push_back({seed, interval});
+      record.deferred_anchors += interval.count;
     }
   }
-  record.sparse_anchors = sparse.size();
 
-  std::vector<chaining::Anchor> anchors = std::move(sparse);
-  if (whole_query_exact) {
-    // Restore every deferred slice, in order.
-    for (std::size_t slot = 0; slot < deferred.size(); ++slot) {
-      // Prefetch the next slice's first postings, which the binary search
-      // that bounded it never touched.
-      if (slot + 1 < deferred.size()) {
-        const KmerPostingIntervalView& next = deferred[slot + 1].interval;
-        __builtin_prefetch(next.positions.data(), 0, 1);
-        if (next.count > 8)
-          __builtin_prefetch(next.positions.data() + 8, 0, 1);
-      }
-      const DeferredSlice& item = deferred[slot];
-      const std::size_t before = anchors.size();
-      internal::append_interval_anchors(
-          item.interval, item.seed, chromosome_base, chromosome_length,
-          static_cast<int>(expected), line_peak, seed_length, diagonal_band,
-          reverse, skip_own_diagonal,
-          family.read_length, anchors, record);
-      record.rescued_anchors += anchors.size() - before;
+  std::vector<chaining::Anchor> anchors;
+  // Restore every deferred slice, in order.
+  for (std::size_t slot = 0; slot < deferred.size(); ++slot) {
+    // Prefetch the next slice's first postings, which the binary search that
+    // bounded it never touched.
+    if (slot + 1 < deferred.size()) {
+      const KmerPostingIntervalView& next = deferred[slot + 1].interval;
+      __builtin_prefetch(next.positions.data(), 0, 1);
+      if (next.count > 8)
+        __builtin_prefetch(next.positions.data() + 8, 0, 1);
     }
+    const DeferredSlice& item = deferred[slot];
+    const std::size_t before = anchors.size();
+    internal::append_interval_anchors(
+        item.interval, item.seed, chromosome_base, chromosome_length,
+        static_cast<int>(expected), line_peak, seed_length, diagonal_band,
+        reverse, skip_own_diagonal,
+        family.read_length, anchors, record);
+    record.rescued_anchors += anchors.size() - before;
   }
   if (anchors.empty()) {
-    record.status = whole_query_exact
-                        ? (record.interval_hits == 0
-                               ? DnaPlacementChainStatus::NoIntervalHits
-                               : DnaPlacementChainStatus::NoChain)
-                        : DnaPlacementChainStatus::NotSelected;
-    record.exact = whole_query_exact;
+    record.status = record.interval_hits == 0
+                        ? DnaPlacementChainStatus::NoIntervalHits
+                        : DnaPlacementChainStatus::NoChain;
+    record.exact = true;
     return false;
   }
   internal::sort_unique_pool_anchors(anchors);
@@ -725,19 +447,15 @@ bool chain_candidate(
   chaining::DenseChainStats dense_stats;
   chaining::DenseChainParams dense_params = dna_dense_chain_params(
       chain_params, seed_length, context.opts.dna_dense_diag_min_runs);
-  // The whole-query pass runs the dense chain (the pool collapsed to exact
-  // diagonal runs); the screening pass runs the plain colinear chain.
-  const chaining::ChainResult chained =
-      whole_query_exact
-          ? chaining::chain_dense_colinear(std::move(anchors), dense_params,
-                                           &dense_stats)
-          : chaining::chain_colinear(std::move(anchors), chain_params);
+  // The dense chain: the pool collapsed to exact diagonal runs.
+  const chaining::ChainResult chained = chaining::chain_dense_colinear(
+      std::move(anchors), dense_params, &dense_stats);
   record.dense_runs = dense_stats.runs;
   const chaining::ChainPartition partition =
       chaining::partition_chains(chained, ::fa::cpu::split::kHalfFloor);
   if (partition.primary < 0) {
     record.status = DnaPlacementChainStatus::NoChain;
-    record.exact = whole_query_exact;
+    record.exact = true;
     return false;
   }
   const chaining::Chain& primary =
@@ -745,78 +463,32 @@ bool chain_candidate(
   internal::write_primary_chain(family, reverse, chained, primary, record);
   record.rival_chain_score = partition.f2;
   record.overlapping_rivals = partition.n_sub;
-  if (whole_query_exact) {
-    for (std::size_t which = 0; which < chained.chains.size(); ++which) {
-      if (static_cast<int>(which) == partition.primary) continue;
-      const chaining::Chain& sibling = chained.chains[which];
-      if (sibling.idx.size() < 2) continue;
-      std::vector<chaining::Anchor> path;
-      path.reserve(sibling.idx.size());
-      for (const std::int32_t index : sibling.idx)
-        path.push_back(chained.anchors[static_cast<std::size_t>(index)]);
-      // Record which sibling the partition's f2 came from, so the MAPQ can
-      // realize it.
-      if (static_cast<int>(which) == partition.f2_index)
-        record.rival_sibling = static_cast<int>(record.sibling_paths.size());
-      record.sibling_paths.push_back(std::move(path));
-      record.sibling_scores.push_back(sibling.score);
-    }
+  for (std::size_t which = 0; which < chained.chains.size(); ++which) {
+    if (static_cast<int>(which) == partition.primary) continue;
+    const chaining::Chain& sibling = chained.chains[which];
+    if (sibling.idx.size() < 2) continue;
+    std::vector<chaining::Anchor> path;
+    path.reserve(sibling.idx.size());
+    for (const std::int32_t index : sibling.idx)
+      path.push_back(chained.anchors[static_cast<std::size_t>(index)]);
+    // Record which sibling the partition's f2 came from, so the MAPQ can
+    // realize it.
+    if (static_cast<int>(which) == partition.f2_index)
+      record.rival_sibling = static_cast<int>(record.sibling_paths.size());
+    record.sibling_paths.push_back(std::move(path));
+    record.sibling_scores.push_back(sibling.score);
   }
-  record.exact = whole_query_exact;
-  record.status = whole_query_exact ? DnaPlacementChainStatus::Accepted
-                                : DnaPlacementChainStatus::Sparse;
-  return true;
-}
-
-// Stabilization: chain every owner of the partition that is not yet exact
-// over the whole query, and accept the family when every owner has an
-// accepted whole-query chain. A family with an owner lacking one stays
-// unaccepted, and the read is unmapped.
-bool stabilize_selected_family(
-    const DnaContext& context, DnaPlacementFamily& family,
-    DnaPlacementChainingResult& result, RetainedSeedDensity& seed_index,
-    const std::vector<std::uint8_t>& forward_query,
-    const std::vector<std::uint8_t>& reverse_query) {
-  for (const auto& block : family.partition.selected.blocks) {
-    if (block.candidate == ::fa::cpu::voting::kNullCandidate) continue;
-    auto record_it = std::find_if(
-        result.candidates.begin(), result.candidates.end(),
-        [&](const DnaPlacementCandidateChain& record) {
-          return record.candidate == block.candidate;
-        });
-    auto candidate_it = std::find_if(
-        family.candidates.begin(), family.candidates.end(),
-        [&](const DnaPlacementCandidate& candidate) {
-          return candidate.id == block.candidate;
-        });
-    if (record_it == result.candidates.end() ||
-        candidate_it == family.candidates.end())
-      return false;
-    // An owner chained over the whole query is never chained again.
-    if (record_it->exact) continue;
-    chain_candidate(context, family, *candidate_it,
-                    candidate_it->peak.is_rc ? reverse_query : forward_query,
-                    seed_index, *record_it,
-                    CandidateChainPass::WholeQueryExact);
-  }
-  result.accepted = true;
-  for (const auto& block : family.partition.selected.blocks) {
-    if (block.candidate == ::fa::cpu::voting::kNullCandidate) continue;
-    const DnaPlacementCandidateChain* record = result.find(block.candidate);
-    if (record == nullptr || !record->exact ||
-        record->status != DnaPlacementChainStatus::Accepted)
-      result.accepted = false;
-  }
+  record.exact = true;
+  record.status = DnaPlacementChainStatus::Accepted;
   return true;
 }
 
 // The blocks owned on the accepted whole-query chains' anchors
-// (dna/dna.h), every candidate's primary and siblings, replace
-// the tile owners: each block becomes one block of partition.selected, in
-// query order, with its chain range and bounds in family.block_parts, and a
-// tile goes to the block holding its middle. False, with the partition left
-// as it is, when no chain qualifies to own. `kept` receives the selection's
-// items and roles.
+// (dna/dna.h), every candidate's primary and siblings: each block becomes one
+// block of partition.selected, in query order, with its chain range and bounds
+// in family.block_parts, and a tile goes to the block holding its middle.
+// False, with the partition left as it is, when no chain qualifies to own.
+// `kept` receives the selection's items and roles.
 bool select_block_owners(const DnaContext& context, DnaPlacementFamily& family,
                          const DnaPlacementChainingResult& result,
                          DnaKeptSelection& kept) {
@@ -913,16 +585,13 @@ bool select_block_owners(const DnaContext& context, DnaPlacementFamily& family,
   return true;
 }
 
-// Chains the top kDnaMapqRivalChains catalogue rivals of the committed family
-// over the whole query, into result.rival_exact; only the MAPQ reads them.
-// Rivals own no selected block; they are ranked by vote, then catalogue rank.
-// An existing whole-query chain (the alternative, or an owner of the
-// tile partition that owns no block) is reused.
-void chain_mapq_rivals(
-    const DnaContext& context, const DnaPlacementFamily& family,
-    DnaPlacementChainingResult& result, RetainedSeedDensity& seed_index,
-    const std::vector<std::uint8_t>& forward_query,
-    const std::vector<std::uint8_t>& reverse_query) {
+// Copies the whole-query chains of the top kDnaMapqRivalChains catalogue
+// rivals of the committed family into result.rival_exact; only the MAPQ reads
+// them. Rivals own no selected block; they are ranked by vote, then catalogue
+// rank.
+void chain_mapq_rivals(const DnaContext& context,
+                       const DnaPlacementFamily& family,
+                       DnaPlacementChainingResult& result) {
   if (result.candidates.size() != family.candidates.size()) return;
   // A rival with little vote is not worth a whole-query chain: it still
   // enters the MAPQ through its vote factor. The strongest owner's vote
@@ -968,7 +637,7 @@ void chain_mapq_rivals(
   // kDnaChainMapqStudyBlockRivals: on a split family each selected block
   // also gets its own top rivals, with the vote floor of that block's owner
   // and mask_level against the block's query span (using the candidate's
-  // screening span). The union is chained below.
+  // whole-query span). The union is copied below.
   if ((::fa::cpu::lr::dna_chain_mapq_study_bits(
            context.opts.chain_mapq_hifi_margin) &
        kDnaChainMapqStudyBlockRivals) != 0) {
@@ -1005,12 +674,12 @@ void chain_mapq_rivals(
           }
           if (owns_selected_block) continue;
           const DnaPlacementCandidateChain& record = result.candidates[index];
-          const int span = record.screening_forward_query_end -
-                           record.screening_forward_query_begin;
-          if (record.screening_forward_query_begin < 0 || span <= 0) continue;
+          const int span =
+              record.forward_query_end - record.forward_query_begin;
+          if (record.forward_query_begin < 0 || span <= 0) continue;
           const int overlap =
-              std::min(record.screening_forward_query_end, block_end) -
-              std::max(record.screening_forward_query_begin, block_begin);
+              std::min(record.forward_query_end, block_end) -
+              std::max(record.forward_query_begin, block_begin);
           if (overlap <= 0 || static_cast<std::int64_t>(overlap) * 2 <=
                                   std::min(span, block_span))
             continue;
@@ -1039,59 +708,42 @@ void chain_mapq_rivals(
   }
   result.rival_exact.reserve(ranked.size());
   for (const std::size_t index : ranked) {
-    const DnaPlacementCandidate& candidate = family.candidates[index];
     DnaRivalExactChain rival;
-    rival.candidate = candidate.id;
-    const bool is_retained_alternative =
-        result.alternative.refusal == DnaAlternativeRefusal::None &&
-        result.alternative.candidate == candidate.id;
-    if (is_retained_alternative && result.alternative_exact.exact) {
-      rival.chain = result.alternative_exact;
-      rival.reused = true;
-    } else if (result.candidates[index].exact) {
-      rival.chain = result.candidates[index];
-      rival.reused = true;
-    } else {
-      rival.chain.candidate = candidate.id;
-      chain_candidate(context, family, candidate,
-                      candidate.peak.is_rc ? reverse_query : forward_query,
-                      seed_index, rival.chain,
-                      CandidateChainPass::WholeQueryExact);
-      ++result.mapq_rival_chains;
-    }
+    rival.candidate = family.candidates[index].id;
     // Kept whatever the outcome; `status` says whether it chained.
+    rival.chain = result.candidates[index];
     result.rival_exact.push_back(std::move(rival));
   }
 }
 
-// Restores an alternative's exact whole-query chain into `exact`. A candidate
-// already holding an accepted whole-query chain would chain to the same
-// result again, so that chain is copied. False unless the restore is
-// accepted with a primary path.
-bool restore_alternative_exact(const DnaContext& context,
-                               const DnaPlacementFamily& family,
-                               const DnaPlacementChainingResult& result,
-                               RetainedSeedDensity& seed_index,
-                               const std::vector<std::uint8_t>& forward_query,
-                               const std::vector<std::uint8_t>& reverse_query,
-                               ::fa::cpu::voting::CandidateId id,
-                               DnaPlacementCandidateChain& exact) {
-  const DnaPlacementCandidate* candidate = family.find(id);
-  const DnaPlacementCandidateChain* attempted = result.find(id);
-  exact.candidate = id;
-  const bool chained_before =
-      candidate != nullptr && attempted != nullptr && attempted->exact &&
-      attempted->status == DnaPlacementChainStatus::Accepted;
-  if (chained_before)
-    copy_chain_call(*attempted, true, exact);
-  const bool restored = chained_before ||
-      (candidate != nullptr &&
-       chain_candidate(
-           context, family, *candidate,
-           candidate->peak.is_rc ? reverse_query : forward_query, seed_index,
-           exact, CandidateChainPass::WholeQueryExact));
-  return restored && exact.status == DnaPlacementChainStatus::Accepted &&
-         !exact.primary.empty();
+// Placement: every catalogue candidate's whole-query
+// pass, in catalogue order, then the ownership walk over every accepted
+// chain's primary and siblings, which decides the blocks, then the MAPQ's
+// rivals. The read is accepted when one chain is.
+void chain_and_own_every_candidate(
+    const DnaContext& context, DnaPlacementFamily& family,
+    DnaPlacementChainingResult& result, RetainedSeedDensity& seed_index,
+    const std::vector<std::uint8_t>& forward_query,
+    const std::vector<std::uint8_t>& reverse_query) {
+  result.strand_filter_seeds = &seed_index;
+  for (std::size_t index = 0; index < family.candidates.size(); ++index) {
+    const DnaPlacementCandidate& candidate = family.candidates[index];
+    DnaPlacementCandidateChain& record = result.candidates[index];
+    chain_candidate(context, family, candidate,
+                    candidate.peak.is_rc ? reverse_query : forward_query,
+                    seed_index, record);
+    if (record.status == DnaPlacementChainStatus::Accepted)
+      result.accepted = true;
+  }
+  if (result.accepted &&
+      !select_block_owners(context, family, result, result.kept_selection)) {
+    result.accepted = false;
+    result.no_owner_chain = true;
+  }
+  for (DnaPlacementCandidateChain& record : result.candidates)
+    record.final_selected_tiles =
+        selected_tiles(family.partition.selected, record.candidate);
+  chain_mapq_rivals(context, family, result);
 }
 
 }  // namespace
@@ -1141,14 +793,21 @@ const DnaPlacementCandidateChain* DnaPlacementChainingResult::find(
 }
 
 const DnaPlacementCandidateChain* DnaPlacementChainingResult::whole_query_chain(
-    ::fa::cpu::voting::CandidateId candidate) const noexcept {
+    ::fa::cpu::voting::CandidateId candidate, bool realized) const noexcept {
   for (const DnaRivalExactChain& chained : rival_exact)
     if (chained.candidate == candidate) return &chained.chain;
-  if (alternative.refusal == DnaAlternativeRefusal::None &&
-      alternative.candidate == candidate && alternative_exact.exact)
-    return &alternative_exact;
   const DnaPlacementCandidateChain* record = find(candidate);
-  return record != nullptr && record->exact ? record : nullptr;
+  if (record == nullptr || !record->exact) return nullptr;
+  // Every chained record is exact; the MAPQ reads only the vote's picks
+  // (rival_exact), the owners and the realized rival.
+  if (!realized &&
+      std::none_of(family.partition.selected.blocks.begin(),
+                   family.partition.selected.blocks.end(),
+                   [candidate](const auto& block) {
+                     return block.candidate == candidate;
+                   }))
+    return nullptr;
+  return record;
 }
 
 const std::vector<chaining::Anchor>*
@@ -1176,31 +835,16 @@ DnaPlacementChainingResult build_dna_placement_chains(
     const std::vector<std::uint32_t>* fine_reverse_slots,
     RetainedSeedDensity& seed_index) {
   DnaPlacementChainingResult result;
-  // A deferred first partition is solved only where the family is returned
-  // before the re-solve below. The initial_* fields then read an empty
-  // partition, and nothing reads them.
-  const auto settle_partition = [&context, &family] {
-    if (!family.partition_deferred) return;
-    family.partition = repartition(context, family);
-    family.partition_deferred = false;
-  };
-  result.initial_score = family.partition.selected.score;
-  result.initial_blocks = family.partition.selected.non_null_blocks;
-  const std::vector<::fa::cpu::voting::CandidateId> initial_assignment =
-      family.partition.selected.assignment;
   result.candidates.reserve(family.candidates.size());
   for (const DnaPlacementCandidate& candidate : family.candidates) {
     DnaPlacementCandidateChain record;
     record.candidate = candidate.id;
     record.sparse_support = candidate.support;
-    record.initial_selected_tiles =
-        selected_tiles(family.partition.selected, candidate.id);
     result.candidates.push_back(std::move(record));
   }
   if (!family.valid || context.ref.index == nullptr ||
       context.ref.encoded == nullptr || fine_forward_seeds == nullptr ||
       fine_reverse_seeds == nullptr || lookup_cache == nullptr) {
-    settle_partition();
     result.family = std::move(family);
     return result;
   }
@@ -1209,7 +853,6 @@ DnaPlacementChainingResult build_dna_placement_chains(
           *context.ref.index, forward_seeds, reverse_seeds, fine_forward_seeds,
           fine_reverse_seeds, lookup_cache, fine_forward_slots,
           fine_reverse_slots)) {
-    settle_partition();
     result.family = std::move(family);
     return result;
   }
@@ -1219,113 +862,8 @@ DnaPlacementChainingResult build_dna_placement_chains(
       context.opts.enable_full_read_cigar)
     result.inversion_gate_seeds = &seed_index;
 
-  // The screening pass over the catalogue: one cheap chain per candidate from
-  // the representative seeds, with no deferral.
-  for (std::size_t index = 0; index < family.candidates.size(); ++index) {
-    DnaPlacementCandidate& candidate = family.candidates[index];
-    DnaPlacementCandidateChain& record = result.candidates[index];
-    const bool sparse = chain_candidate(
-        context, family, candidate,
-        candidate.peak.is_rc ? reverse_query : forward_query,
-        seed_index, record, CandidateChainPass::BoundedScreening);
-    // Keep the screening result before the exact restore overwrites it.
-    candidate.screening_chain_score = record.chain_score;
-    record.screening_chain_score = record.chain_score;
-    record.screening_chain_anchors = record.chain_anchors;
-    record.screening_forward_query_begin = record.forward_query_begin;
-    record.screening_forward_query_end = record.forward_query_end;
-    if (sparse) {
-      int low = std::numeric_limits<int>::max();
-      int high = std::numeric_limits<int>::min();
-      for (const chaining::Anchor& anchor : record.primary) {
-        low = std::min(low, anchor.r - anchor.q);
-        high = std::max(high, anchor.r - anchor.q);
-      }
-      candidate.screening_diagonals = true;
-      candidate.screening_diagonal_low = low;
-      candidate.screening_diagonal_high = high;
-
-      // Screening may add support but never removes vote support.
-      candidate.support = candidate.support | record.dense_support;
-    }
-  }
-  family.partition = repartition(context, family);
-  family.partition_deferred = false;
-
-  if (!stabilize_selected_family(context, family, result, seed_index,
-                                 forward_query, reverse_query)) {
-    result.family = std::move(family);
-    return result;
-  }
-  // The blocks are owned on the dense chains' anchors. A family with owners
-  // none of whose chains qualifies maps nothing.
-  if (result.accepted &&
-      std::any_of(family.partition.selected.blocks.begin(),
-                  family.partition.selected.blocks.end(),
-                  [](const auto& block) {
-                    return block.candidate !=
-                           ::fa::cpu::voting::kNullCandidate;
-                  }) &&
-      !select_block_owners(context, family, result, result.kept_selection)) {
-    result.accepted = false;
-    result.no_owner_chain = true;
-  }
-  for (DnaPlacementCandidateChain& record : result.candidates) {
-    record.final_selected_tiles =
-        selected_tiles(family.partition.selected, record.candidate);
-  }
-  result.alternative =
-      select_dna_alternative_hypothesis(context, family, result);
-  if (result.alternative.refusal == DnaAlternativeRefusal::None &&
-      !restore_alternative_exact(context, family, result, seed_index,
-                                 forward_query, reverse_query,
-                                 result.alternative.candidate,
-                                 result.alternative_exact)) {
-    result.alternative.refusal = DnaAlternativeRefusal::ExactRestoreFailed;
-    result.alternative.candidate = ::fa::cpu::voting::kNullCandidate;
-    result.alternative_exact = {};
-  }
-  // Every candidate the alternative ranking restores (the alternative, and
-  // ranks 2..n under -N n) takes its whole-query chain into its own record,
-  // as an owner of the partition does, and the ownership selection runs
-  // again with those chains as items.
-  std::vector<::fa::cpu::voting::CandidateId> entered;
-  if (result.accepted &&
-      result.alternative.refusal == DnaAlternativeRefusal::None) {
-    const std::vector<::fa::cpu::voting::CandidateId> ranked =
-        rank_dna_alternative_hypotheses(
-            context, family, result,
-            static_cast<std::size_t>(context.opts.alternative_realize_max));
-    for (const ::fa::cpu::voting::CandidateId id : ranked) {
-      const auto record = std::find_if(
-          result.candidates.begin(), result.candidates.end(),
-          [id](const DnaPlacementCandidateChain& chain) {
-            return chain.candidate == id;
-          });
-      if (record == result.candidates.end() || record->exact) continue;
-      DnaPlacementCandidateChain exact;
-      if (id == result.alternative.candidate)
-        exact = result.alternative_exact;
-      else if (!restore_alternative_exact(context, family, result, seed_index,
-                                          forward_query, reverse_query, id,
-                                          exact))
-        continue;
-      copy_chain_call(exact, true, *record);
-      entered.push_back(id);
-    }
-    if (!entered.empty()) {
-      select_block_owners(context, family, result, result.kept_selection);
-      for (DnaPlacementCandidateChain& record : result.candidates)
-        record.final_selected_tiles =
-            selected_tiles(family.partition.selected, record.candidate);
-    }
-  }
-  // After the alternative restore: the family is final, seed_index is alive
-  // and the alternative's chain can be reused.
-  chain_mapq_rivals(context, family, result, seed_index, forward_query,
-                    reverse_query);
-  result.selection_changed =
-      initial_assignment != family.partition.selected.assignment;
+  chain_and_own_every_candidate(context, family, result, seed_index,
+                                forward_query, reverse_query);
   result.family = std::move(family);
   return result;
 }

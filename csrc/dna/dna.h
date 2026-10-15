@@ -33,8 +33,7 @@ namespace fa {
 namespace cpu {
 namespace lr {
 
-// Projection and realization refuse a block with fewer supporting tiles; the
-// partition's own blocks need two.
+// Projection and realization refuse a block with fewer supporting tiles.
 inline constexpr int kDnaPostCommitRecordMinBlockTiles = 1;
 
 // minimap2's default opt->min_chain_score (-m), which map-ont and map-hifi
@@ -49,14 +48,8 @@ struct ResolvedDnaOptions {
   // Local interval-anchor harvest.
   int cigar_local_interval_anchor_interval_pad = 512;
   int cigar_local_interval_anchor_chain_max_gap = 5000;
-  // The chain passes' diagonal bands (-b): the dense (whole-query) passes'
-  // and the screening pass's.
+  // The whole-query passes' diagonal band (-b).
   int chain_band = 20000;
-  int screen_diag_band = 20000;
-  // Global occurrence cap: the screening pass's pool gate. Set to the vote's
-  // resolved cap (INT_MAX when it has none); 200 is the vote's cap on a human
-  // index.
-  int cigar_local_global_occ = 200;
   // Run count at or above which the dense chain uses the diagonal-keyed
   // predecessor search instead of the linear scan. Both are exact; 0 always
   // uses the diagonal search, -1 never does.
@@ -81,9 +74,8 @@ struct ResolvedDnaOptions {
   int cigar_dp_min_dp_max = 80;
   // minimap2 opt->zdrop_inv, for the local-inversion probe (mm_test_zdrop).
   int cigar_dp_inversion_zdrop = 200;
-  // minimap2 opt->pri_ratio (-p): the credibility ratio of the alternative
-  // (dna.h) and of the -c lane's secondary records
-  // (realization.cpp).
+  // minimap2 opt->pri_ratio (-p): the credibility ratio of the -c lane's
+  // secondary records (realization.cpp).
   double pri_ratio = 0.8;
   // minimap2 opt->min_chain_score (-m): the emission floor, the MAPQ's subsc
   // floor and the minimum size of an inversion middle.
@@ -117,9 +109,6 @@ struct ResolvedDnaOptions {
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (dna.h).
   bool inversion_probe_local_gate = false;
-  // The alternatives whose whole-query chains enter the ownership selection,
-  // best first (placement.cpp).
-  int alternative_realize_max = 1;
   // -N, minimap2's best_n: the -c lane's cap on secondary alignments
   // (realization.cpp).
   int secondary_max = 1;
@@ -134,8 +123,7 @@ struct ResolvedDnaOptions {
   // Admit vote peaks by their ratio to the read's best vote; 0 admits by
   // count. See catalogue_lane_bound.
   double vote_admission_ratio = 0.0;
-  ::fa::cpu::voting::QueryPartitionParameters query_partition;
-  // The query partition's tiles per read, kMinQueryTiles..kMaxQueryTiles.
+  // The query tiles per read, the preset's (options/options.h query_tiles).
   int query_tiles = ::fa::cpu::voting::kQueryTileCount;
   // The all-chains lane (options/options.h all_chains).
   bool all_chains = false;
@@ -255,8 +243,6 @@ class RetainedSeedDensity {
              const std::vector<std::uint32_t>* fine_forward_slots = nullptr,
              const std::vector<std::uint32_t>* fine_reverse_slots = nullptr);
 
-  const std::vector<RetainedSeedRef>& forward() const { return forward_; }
-  const std::vector<RetainedSeedRef>& reverse() const { return reverse_; }
   const std::vector<RetainedSeedRef>& fine_forward() const {
     return fine_forward_;
   }
@@ -455,13 +441,6 @@ struct DnaPlacementCandidate {
   int lane = 0;
   int catalogue_rank = 0;
   int vote_evidence = 0;
-  // Chain score over the screening-pass anchors.
-  int screening_chain_score = 0;
-  // The lowest and highest diagonal (oriented r - q) of the screening chain's
-  // anchors, when the screening pass held a chain.
-  bool screening_diagonals = false;
-  int screening_diagonal_low = 0;
-  int screening_diagonal_high = 0;
 };
 
 // The chain a block prints from and its bounds in forward-read bp
@@ -487,7 +466,7 @@ struct DnaBlockPart {
 struct DnaPlacementFamily {
   int read_length = 0;
   int seed_length = 0;
-  // The partition's tiles (--tiles); masks, blocks and assignments use them.
+  // The read's query tiles; masks, blocks and assignments use them.
   int tile_count = ::fa::cpu::voting::kQueryTileCount;
   int forward_candidates = 0;
   int reverse_candidates = 0;
@@ -497,9 +476,6 @@ struct DnaPlacementFamily {
   // Parallel to partition.selected.blocks once the owners are decided on the
   // dense chains' anchors; empty before.
   std::vector<DnaBlockPart> block_parts;
-  // Set when build_dna_placement_family left `partition` unsolved for
-  // build_dna_placement_chains to solve.
-  bool partition_deferred = false;
   bool valid = false;
 
   const DnaPlacementCandidate* find(
@@ -513,52 +489,14 @@ int dna_forward_query_tile(
     int oriented_seed_position, bool reverse, int read_length, int seed_length,
     int tile_count) noexcept;
 
-// Builds the candidate catalogue from the whole-read vote peaks and, for a
-// non-empty catalogue, defers the query partition solve (see
-// partition_deferred). A candidate's support is the set of forward query tiles
-// holding a retained seed with a posting compatible with its geometry.
+// Builds the candidate catalogue from the whole-read vote peaks. A candidate's
+// support is the set of forward query tiles holding a retained seed with a
+// posting compatible with its geometry.
 DnaPlacementFamily build_dna_placement_family(
     const DnaContext& context, const std::vector<std::uint8_t>& forward_query,
     const std::vector<VotePeak>& whole_read_peaks,
     const ChainWindowPeakScratch& forward_scratch,
     const ChainWindowPeakScratch& reverse_scratch);
-
-}  // namespace fa::cpu::lr
-
-/**** alternative_hypothesis ****/
-
-namespace fa::cpu::lr {
-
-struct DnaContext;
-struct DnaPlacementCandidateChain;
-struct DnaPlacementChainingResult;
-
-enum class DnaAlternativeRefusal : std::uint8_t {
-  None,
-  NoStableFamily,
-  NotSingleBlock,
-  NoCandidate,
-  NoLocus,
-  NoChain,
-  ShadowOnly,
-  DisjointOnly,
-  IncredibleOnly,
-  ExactRestoreFailed,
-};
-
-struct DnaAlternativeSelection {
-  ::fa::cpu::voting::CandidateId incumbent =
-      ::fa::cpu::voting::kNullCandidate;
-  ::fa::cpu::voting::CandidateId candidate =
-      ::fa::cpu::voting::kNullCandidate;
-  DnaAlternativeRefusal refusal = DnaAlternativeRefusal::NoStableFamily;
-};
-
-// Every candidate select_dna_alternative_hypothesis would qualify, best first
-// in its order, at most `limit`: the first is its choice.
-std::vector<::fa::cpu::voting::CandidateId> rank_dna_alternative_hypotheses(
-    const DnaContext& context, const DnaPlacementFamily& family,
-    const DnaPlacementChainingResult& stable, std::size_t limit);
 
 }  // namespace fa::cpu::lr
 
@@ -631,18 +569,16 @@ DnaOwnershipSelection select_chain_owners(
 
 /**** placement_chaining ****/
 // Placement chaining. The whole-read vote catalogue is the only source of
-// candidates; this stage screens each candidate with a cheap chain, solves the
-// partition on the screening chains, chains its owners over the whole query
-// and decides the read's blocks on those chains' anchors. Both map-only
+// candidates; this stage chains every candidate over the whole query and
+// decides the read's blocks on those chains' anchors. Both map-only
 // projection and CIGAR realization consume the resulting family and anchor
 // paths. No DP runs here.
 
 namespace fa::cpu::lr {
 
 enum class DnaPlacementChainStatus : std::uint8_t {
-  NotSelected,
-  Sparse,
-  Accepted,
+  NotSelected = 0,
+  Accepted = 2,
   InvalidReference,
   MissingSeeds,
   NoIntervalHits,
@@ -672,31 +608,20 @@ struct DnaPlacementCandidateChain {
   int rival_chain_score = 0;
   int overlapping_rivals = 0;
   int chain_anchors = 0;
-  // The screening pass's result, kept because the exact restore later
-  // overwrites the chain fields of selected candidates.
-  int screening_chain_score = 0;
-  int screening_chain_anchors = 0;
-  int screening_forward_query_begin = -1;
-  int screening_forward_query_end = -1;
   int oriented_query_begin = -1;
   int oriented_query_end = -1;
   int forward_query_begin = -1;
   int forward_query_end = -1;
   int reference_begin = -1;
   int reference_end = -1;
-  int initial_selected_tiles = 0;
   int final_selected_tiles = 0;
   bool exact = false;
-  // Harvest counters. sparse_anchors: anchors built inside the harvest loop.
-  // deferred_anchors: postings of the slices deferred as metadata, within
-  // this candidate's window. rescued_anchors: anchors built by the deferred
-  // restore. The pool is sparse + rescued. The whole-query pass defers every
-  // slice, so there sparse_anchors is 0 and rescued_anchors is the pool; the
-  // screening pass defers nothing.
-  std::uint64_t sparse_anchors = 0;
+  // Harvest counters. deferred_anchors: postings of the slices deferred as
+  // metadata, within this candidate's window. rescued_anchors: anchors built
+  // by the deferred restore, the pool.
   std::uint64_t deferred_anchors = 0;
   std::uint64_t rescued_anchors = 0;
-  // Runs produced by the whole-query pass's collapse; 0 on the screening pass.
+  // Runs produced by the whole-query pass's collapse.
   std::int64_t dense_runs = 0;
 };
 
@@ -706,7 +631,7 @@ struct DnaPlacementCandidateChain {
 // kDnaChainMapqStudyBlockRivals each block also ranks its own.
 inline constexpr int kDnaMapqRivalChains = 2;
 // Only rivals with at least 1/kDnaMapqRivalVoteDenominator of the strongest
-// owner's vote are chained; the rest still enter the MAPQ through their vote.
+// owner's vote are taken; the rest still enter the MAPQ through their vote.
 inline constexpr int kDnaMapqRivalVoteDenominator = 4;
 
 // A catalogue rival chained over the whole query for the MAPQ; a candidate's
@@ -716,9 +641,6 @@ inline constexpr int kDnaMapqRivalVoteDenominator = 4;
 struct DnaRivalExactChain {
   ::fa::cpu::voting::CandidateId candidate = ::fa::cpu::voting::kNullCandidate;
   DnaPlacementCandidateChain chain;
-  // Taken from a record that already had a whole-query chain instead of
-  // chained again.
-  bool reused = false;
 };
 
 // One chain of the final ownership selection, kept for the -c lane's
@@ -742,22 +664,18 @@ struct DnaKeptSelection {
 struct DnaPlacementChainingResult {
   DnaPlacementFamily family;
   std::vector<DnaPlacementCandidateChain> candidates;
-  DnaAlternativeSelection alternative;
-  DnaPlacementCandidateChain alternative_exact;
   // The MAPQ's cross-locus rivals; empty when none is worth chaining.
   std::vector<DnaRivalExactChain> rival_exact;
-  // Whole-query chains built for the MAPQ rivals, reused ones excluded.
-  int mapq_rival_chains = 0;
   // The read's seed density when realization gates the late inversion probe
   // on it (dna.h); null otherwise. It is the caller's and lives
   // until the caller's next build.
   const RetainedSeedDensity* inversion_gate_seeds = nullptr;
-  std::int64_t initial_score = 0;
-  int initial_blocks = 0;
-  bool selection_changed = false;
+  // The same density, for the -c controller's divergence filter
+  // (dna/realization.cpp retain_regions).
+  const RetainedSeedDensity* strand_filter_seeds = nullptr;
   bool accepted = false;
-  // Not accepted because the partition's owners have no whole-query chain
-  // that qualifies to own a block (dna/dna.h).
+  // Not accepted because no accepted whole-query chain qualifies to own a
+  // block (dna/dna.h).
   bool no_owner_chain = false;
   // The final ownership selection.
   DnaKeptSelection kept_selection;
@@ -766,11 +684,12 @@ struct DnaPlacementChainingResult {
   find(::fa::cpu::voting::CandidateId candidate) const noexcept;
 
   // A candidate's whole-query exact chain: its MAPQ rival chain (any status),
-  // else the alternative's exact restore, else its own record if it
-  // was exact-restored. Null when there is none. Callers that need an
-  // accepted chain check the status.
+  // else its own record, read only for a block owner or a `realized` rival
+  // (the CIGAR lane's dp_max2 owner). Null when there is none. Callers that
+  // need an accepted chain check the status.
   const DnaPlacementCandidateChain*
-  whole_query_chain(::fa::cpu::voting::CandidateId candidate) const noexcept;
+  whole_query_chain(::fa::cpu::voting::CandidateId candidate,
+                    bool realized = false) const noexcept;
 
   // A kept selection item's anchors, in chain order; null when gone.
   const std::vector<chaining::Anchor>*
@@ -815,8 +734,8 @@ namespace fa::cpu::lr {
 namespace internal {
 
 // The band of a chain pass, for both its harvest and its chain: -b's first
-// value on the whole-query (dense) passes, its second on the screening pass.
-int pass_diagonal_band(const DnaContext& context, bool whole_query);
+// value.
+int pass_diagonal_band(const DnaContext& context);
 
 // A candidate's harvest window [low, high) on its contig: the read's span from
 // its peak's expected start, padded on both sides by
@@ -848,9 +767,8 @@ bool skips_own_diagonal(const DnaContext& context, int contig,
                         bool reverse);
 // The harvest's occurrence gate. A seed whose key occurs more than `cap` times
 // genome-wide gives no anchor unless it is rescued (RetainedSeedRef::rescued).
-// The screening pass always gates, at the global cap; the whole-query pass
-// gates at dna_pool_gate_occ (by default the vote's cap, or --max-chain-occ)
-// and not at all when that is 0.
+// The cap is dna_pool_gate_occ (by default the vote's cap, or
+// --max-chain-occ); there is no gate when that is 0.
 struct PoolGate {
   bool gates = false;
   std::uint32_t cap = 1;
@@ -869,7 +787,7 @@ struct PoolGate {
            !seed_index.holds_rescued(entry);
   }
 };
-PoolGate pool_gate(const DnaContext& context, bool whole_query);
+PoolGate pool_gate(const DnaContext& context);
 
 // The refusal every candidate on `contig` in the lane of `seeds` meets alike,
 // or Accepted when there is none: MissingSeeds when the lane has no seeds,
@@ -928,9 +846,9 @@ void write_primary_chain(const DnaPlacementFamily& family, bool reverse,
 namespace fa::cpu::lr {
 
 // The all-chains lane: the whole-query exact chains of the catalogue's
-// candidates, parallel to family.candidates, with no screening pass and no
-// partition. The candidates on one target, a contig and strand, are chained in
-// one call, over the union of their pools, and take its chains best score
+// candidates, parallel to family.candidates, with no partition. The
+// candidates on one target, a contig and strand, are chained in one call,
+// over the union of their pools, and take its chains best score
 // first, in catalogue order, one each. A candidate that receives no chain
 // keeps the refusing status, and one on a contig ranked below the read
 // (DnaContext::dual_rank) is not chained (NotSelected). Empty when the read's
@@ -1900,6 +1818,27 @@ struct DnaRegionPrice {
   int n_sub = 0;
   double pool_subsc = 0.0;
   int pool_n_sub = 0;
+  // The entry of DnaRegionOutcome::rivals that dp_max2 came from, -1 for
+  // none.
+  int dp_max2_rival = -1;
+};
+
+// A record the controller realized that mm_set_parent made a secondary,
+// whether select_records kept it or not, with its region's whole chain as the
+// MAPQ reads a rival's.
+struct DnaRealizedRival {
+  int candidate = -1;
+  // Its chain's path in the candidate (DnaSelectionItem::path).
+  int path = -1;
+  int region = -1;
+  // The chain's score and anchors (DnaRegionPrice score0 / anchors0) and its
+  // forward-query and reference spans.
+  int score0 = 0;
+  int anchors0 = 0;
+  int chain_q_begin = -1;
+  int chain_q_end = -1;
+  int chain_ref_begin = -1;
+  int chain_ref_end = -1;
 };
 
 struct DnaRegionOutcome {
@@ -1912,6 +1851,8 @@ struct DnaRegionOutcome {
   // unit_count the records before the filter.
   DnaFamilyRealizationOutcome family;
   std::vector<DnaRegionPrice> prices;
+  // Every realized secondary.
+  std::vector<DnaRealizedRival> rivals;
   bool floored = false;
 };
 
@@ -2017,8 +1958,7 @@ inline constexpr int kDnaChainMapqChainShadowFloorBp = 2000;
 inline constexpr int kDnaChainMapqChainShadowFraction = 5;
 // Shadow rule, un-chained rivals: a vote peak on the winner's contig and strand
 // within max(floor, read_len / fraction) of the winner's diagonal, with no
-// more vote than the winner, is the winner's own locus. The same window as
-// the alternative hypothesis's shadow test.
+// more vote than the winner, is the winner's own locus.
 inline constexpr int kDnaChainMapqPeakShadowFloorBp = 2000;
 inline constexpr int kDnaChainMapqPeakShadowFraction = 10;
 // The rule bits (header comment).
@@ -2039,8 +1979,8 @@ inline constexpr int dna_chain_mapq_study_bits(bool hifi_margin_rule) noexcept {
 }
 
 // One catalogue rival of the committed hypothesis. A chained rival carries its
-// whole-query chain; an un-chained one only its vote evidence and screening
-// query span, enough for the vote factor but not for f2 / n_sub.
+// whole-query chain; an un-chained one only its vote evidence and query
+// span, enough for the vote factor but not for f2 / n_sub.
 struct DnaChainMapqRival {
   // candidate and status are not read by the formula.
   int candidate = -1;
@@ -2282,12 +2222,14 @@ namespace fa::cpu::lr {
 namespace dna {
 
 // The MAPQ of the -c lane's records, each priced on its own region; `prices`
-// is parallel to the realized family (index 0 the primary).
+// is parallel to the realized family (index 0 the primary) and `rivals` holds
+// the realized secondaries (DnaRegionOutcome::rivals).
 void price_dna_regions(const DnaContext& dctx,
                        const DnaPlacementFamily& family,
                        const DnaPlacementChainingResult& placement,
-                       const std::vector<DnaRegionPrice>& prices, int read_len,
-                       dna::Result& realized);
+                       const std::vector<DnaRegionPrice>& prices,
+                       const std::vector<DnaRealizedRival>& rivals,
+                       int read_len, dna::Result& realized);
 
 // The MAPQ of map-only's records, each priced on the block part it prints from.
 void price_dna_blocks(const DnaContext& dctx,

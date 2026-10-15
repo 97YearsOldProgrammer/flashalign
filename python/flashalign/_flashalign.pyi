@@ -12,15 +12,15 @@ __version__: str
 class Config:
     """
     Mapping options, named as `flashalign align --show-config` prints
-    them; a dot there (tile_score.hit) is an underscore here.
+    them; a dot there (rna_rival.pri_ratio) is an underscore here.
 
-    -1 (or None, or "") means "take the preset's value"; anything else
+    -1 (or "") means "take the preset's value"; anything else
     is an explicit setting, which may be rejected with a ValueError.
 
         fa.Config(preset='lr:hq', threads=8, dp_min_score=50)
 
     Aligner.config returns the resolved configuration, with every field
-    set to the value in use, or -1 / None where the preset decides it.
+    set to the value in use, or -1 where the preset decides it.
     """
 
     def __init__(self, preset: str = 'lr', **fields) -> None:
@@ -224,36 +224,6 @@ class Config:
 
     @rna_strand_mode.setter
     def rna_strand_mode(self, arg: int, /) -> None: ...
-
-    @property
-    def tile_score_hit(self) -> int | None:
-        """Query-tile supported reward [--tile-score]. None = preset-owned."""
-
-    @tile_score_hit.setter
-    def tile_score_hit(self, arg: int | None, /) -> None: ...
-
-    @property
-    def tile_score_block(self) -> int | None:
-        """Query-tile block-open cost [--tile-score]. None = preset-owned."""
-
-    @tile_score_block.setter
-    def tile_score_block(self, arg: int | None, /) -> None: ...
-
-    @property
-    def tile_score_null(self) -> int | None:
-        """Query-tile null cost [--tile-score]. None = preset-owned."""
-
-    @tile_score_null.setter
-    def tile_score_null(self, arg: int | None, /) -> None: ...
-
-    @property
-    def tile_score_miss(self) -> int | None:
-        """
-        Query-tile unsupported-ownership cost [--tile-score]. None = preset-owned.
-        """
-
-    @tile_score_miss.setter
-    def tile_score_miss(self, arg: int | None, /) -> None: ...
 
     @property
     def rna_junction_bed(self) -> str:

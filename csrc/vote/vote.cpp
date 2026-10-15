@@ -988,7 +988,6 @@ CandidateCatalogue build_candidate_catalogue(
     candidate.lane = input.lane;
     candidate.catalogue_rank = input.catalogue_rank;
     candidate.vote_evidence = input.vote_evidence;
-    candidate.chain_evidence = input.chain_evidence;
     candidate.support = mask_of(index);
     result.candidates.push_back(candidate);
   }

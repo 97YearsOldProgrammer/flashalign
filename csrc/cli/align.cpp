@@ -687,29 +687,6 @@ std::string resolved_config_text(const AlignOptions& opt,
       src(opt.vote_diag_slope_den.has_value(), "preset"));
   row("vote_diag_width_max", i2s(mapping.vote_diag_width_max),
       src(opt.vote_diag_width_max.has_value(), "preset"));
-  if (!is_rna) {
-    row("tile_score.hit", i2s(mapping.query_partition.supported_tile_reward),
-        src(opt.tile_supported_reward.has_value(), "preset"));
-    row("tile_score.block", i2s(mapping.query_partition.block_open_cost),
-        src(opt.tile_block_open_cost.has_value(), "preset"));
-    row("tile_score.null", i2s(mapping.query_partition.null_tile_cost),
-        src(opt.tile_null_cost.has_value(), "preset"));
-    row("tile_score.miss",
-        i2s(mapping.query_partition.unsupported_ownership_cost),
-        src(opt.tile_unsupported_cost.has_value(), "preset"));
-    row("partition.min_tiles",
-        i2s(mapping.query_partition.minimum_supported_tiles_per_non_null_block),
-        "preset");
-    row("partition.tiles", i2s(mapping.query_tiles),
-        src(opt.tiles.has_value(), "preset"));
-    // Ratio admission compares masks on at most kMaxAdmissionQueryTiles tiles.
-    row("partition.admission_tiles",
-        mapping.vote_admission_ratio > 0.0
-            ? i2s(std::min(mapping.query_tiles,
-                           fa::cpu::voting::kMaxAdmissionQueryTiles))
-            : std::string("none (count admission)"),
-        "derived");
-  }
   row("mapq.output_range", "0..60", "fixed");
 
   // On a splice preset, the fine chain's query gap.
@@ -724,15 +701,12 @@ std::string resolved_config_text(const AlignOptions& opt,
   else
     row("chain_max_cands", i2s(fa::cpu::lr::dna_chain_max_candidates(mapping)),
         src(opt.max_cands.has_value(), overlap ? "preset" : "derived"));
-  // -b's bands; the dense band only where its stage runs.
+  // -b's band, only where its stage runs.
   if (!is_rna &&
-      fa::cpu::api::lane_runs_stage(fa::cpu::api::LaneStage::Partition,
-                                    opt.preset))
+      fa::cpu::api::lane_runs_stage(
+          fa::cpu::api::LaneStage::CandidateChains, opt.preset))
     row("chain_band", i2s(mapping.chain_band),
         src(opt.chain_band.has_value(), "preset"));
-  if (!is_rna)
-    row("screen_band", i2s(mapping.screen_diag_band),
-        src(opt.chain_band_screen.has_value(), "preset"));
 
   // lr, lr:hq: -A -B -O -E -z --score-N are the gap-fill row; the end row,
   // which prices every path, is the preset's (dp_end_row). The assembly
@@ -863,16 +837,11 @@ std::string resolved_config_text(const AlignOptions& opt,
         "builtin");
     row("dna_rival.pri_ratio", f2s(mapping.pri_ratio),
         src(opt.pri_ratio.has_value(), "builtin"));
-    // Each row only where its stage runs: the cap in the -c lane, the
-    // alternative count in the ownership selection.
+    // The cap only where the -c lane runs.
     if (fa::cpu::api::lane_runs_stage(fa::cpu::api::LaneStage::BaseAlignment,
                                       opt.preset))
       row("dna_rival.secondary_max", i2s(mapping.secondary_max),
           src(opt.dna_secondary_max.has_value(), "builtin"));
-    if (fa::cpu::api::lane_runs_stage(fa::cpu::api::LaneStage::Partition,
-                                      opt.preset))
-      row("dna_alternative.realize_max",
-          i2s(mapping.alternative_realize_max), "builtin");
   } else if (rna != nullptr) {
     row("rna_rival.pri_ratio", f2s(rna->rival_pri_ratio),
         src(opt.pri_ratio.has_value(), "builtin"));
@@ -969,7 +938,6 @@ void show_index_resolved(const fa::cpu::api::LongReadAligner& aligner,
                                       : std::to_string(cap);
   };
   row("chain_occ.pool_gate", chain_cap_text(chain_occ.pool_gate_occ));
-  row("chain_occ.global", chain_cap_text(chain_occ.global_occ));
 
   // M, the empty-tile rescue: a tile's rarest seed over N and at most M
   // (seed/seed.h VoteTileRescue).
@@ -994,19 +962,16 @@ void show_index_resolved(const fa::cpu::api::LongReadAligner& aligner,
   else
     rule << std::max(1, mapping.vote_diag_bin_width);
   row("vote_diag_width.rule", rule.str());
-  std::ostringstream width, dense, screen;
+  std::ostringstream width, dense;
   for (const int length : kReadLengths) {
     const fa::cpu::api::DnaReadGeometry g = aligner.dna_read_geometry(length);
     const char* sep = length == kReadLengths[0] ? "" : " ";
     width << sep << "L=" << length << ':' << g.vote_diag_bin_width;
     dense << sep << "L=" << length << ':' << g.dense_band << '/'
           << g.dense_reach;
-    screen << sep << "L=" << length << ':' << g.screen_band << '/'
-           << g.screen_reach;
   }
   row("vote_diag_width.at", width.str());
   row("chain.band/reach", dense.str());
-  row("screen.band/reach", screen.str());
   out << os.str();
 }
 
@@ -1180,22 +1145,12 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.dna_vote_admission_ratio = *opt.dna_vote_admission_ratio;
   if (opt.max_chain_occ)
     u.dna_pool_gate_occ = *opt.max_chain_occ;
-  if (opt.tile_supported_reward)
-    u.query_tile_supported_reward = *opt.tile_supported_reward;
-  if (opt.tile_block_open_cost)
-    u.query_tile_block_open_cost = *opt.tile_block_open_cost;
-  if (opt.tile_null_cost)
-    u.query_tile_null_cost = *opt.tile_null_cost;
-  if (opt.tile_unsupported_cost)
-    u.query_tile_unsupported_cost = *opt.tile_unsupported_cost;
   if (opt.min_support)
     u.min_support = *opt.min_support;
   if (opt.vote_seeds)
     u.max_query_seeds_per_strand = *opt.vote_seeds;
   if (opt.max_cands)
     u.max_cands = *opt.max_cands;
-  if (opt.tiles)
-    u.query_tiles = *opt.tiles;
   if (opt.min_chain_score)
     u.min_chain_score = *opt.min_chain_score;
   if (opt.dual)
@@ -1245,8 +1200,6 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.dp_max_gap = *opt.dp_max_gap;
   if (opt.chain_band)
     u.chain_band = *opt.chain_band;
-  if (opt.chain_band_screen)
-    u.chain_band_screen = *opt.chain_band_screen;
   // Passed as given; the resolver validates the intron bounds.
   if (opt.min_intron)
     u.rna_min_intron = *opt.min_intron;
@@ -1355,7 +1308,6 @@ void refuse_sam_text_reads(const std::vector<std::string>& paths) {
         "unaligned BAM -- convert with 'samtools fastq'");
   }
 }
-
 
 // --show-config resolves options only: no read is mapped and no reference base
 // is read; an index is known by its header, and on a DNA preset by its postings

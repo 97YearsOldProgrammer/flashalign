@@ -149,7 +149,7 @@ void split_key_runs(const DnaContext& context,
   // The keys the target pools use: every key of a lane with a candidate, but a
   // key over the pool gate is skipped as chain_candidate skips it.
   const internal::PoolGate gate =
-      internal::pool_gate(context, /*whole_query=*/true);
+      internal::pool_gate(context);
   const std::vector<RetainedSeedRef>* lane_seeds[2] = {
       &seed_index.fine_forward(), &seed_index.fine_reverse()};
   out.runs_begin.assign(seed_index.entry_count(), kNoTarget);
@@ -301,7 +301,7 @@ void build_target_pool(const DnaContext& context,
   const int interval_pad =
       context.opts.cigar_local_interval_anchor_interval_pad;
   const internal::PoolGate gate =
-      internal::pool_gate(context, /*whole_query=*/true);
+      internal::pool_gate(context);
   const bool skip_own_diagonal =
       internal::skips_own_diagonal(context, static_cast<int>(contig), reverse);
 
@@ -524,7 +524,7 @@ void chain_read_targets(const DnaContext& context,
   const std::size_t target_count = targets.target_cells.size();
   const int read_length = family.read_length;
   const int diagonal_band =
-      internal::pass_diagonal_band(context, /*whole_query=*/true);
+      internal::pass_diagonal_band(context);
   for (std::size_t target = 0; target < target_count; ++target) {
     const std::uint32_t cell = targets.target_cells[target];
     const std::uint32_t contig = cell >> 1;

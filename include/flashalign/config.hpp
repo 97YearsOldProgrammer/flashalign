@@ -1,6 +1,5 @@
 #pragma once
 
-#include <optional>
 #include <string>
 #include <utility>
 
@@ -11,7 +10,7 @@ enum class CsMode { None, Short, Long };
 
 /**
  * Mapping options, named as `flashalign align --show-config` prints them (a dot there is an
- * underscore here). -1, an empty optional or an empty string means "take the preset's
+ * underscore here). -1 or an empty string means "take the preset's
  * value"; anything else is an explicit setting, which the option resolver may reject with
  * std::invalid_argument. The bracketed names are the matching CLI options.
  */
@@ -50,12 +49,6 @@ struct Config {
   /// splice: transcript strand [-u]: -1 unset, 0 auto, 1 forward, 2 reverse, 3 none (no
   /// splice-motif scoring).
   int rna_strand_mode = -1;
-  /// Query-tile partition scores [--tile-score]: supported-tile reward, block-open cost,
-  /// null-tile cost and unsupported-tile cost.
-  std::optional<int> tile_score_hit;
-  std::optional<int> tile_score_block;
-  std::optional<int> tile_score_null;
-  std::optional<int> tile_score_miss;
   std::string rna_junction_bed;  ///< splice: known junctions, BED6/BED12 [--junc-bed]
   int rna_junction_bonus = -1;   ///< splice: known-junction bonus [--junc-bonus]
   double rna_rival_pri_ratio = -1.0;  ///< splice: secondary-to-primary score ratio [-p], [0,1]

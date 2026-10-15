@@ -1,4 +1,4 @@
-// The DNA lane's catalogue step: each vote peak's factual tile support, then the catalogue and the partition over them.
+// The DNA lane's catalogue step: each vote peak's factual tile support, then the catalogue over them.
 #include "dna.h"
 
 #include "../index/format.h"
@@ -19,7 +19,6 @@ namespace {
 using ::fa::cpu::voting::CandidateCatalogue;
 using ::fa::cpu::voting::CandidateId;
 using ::fa::cpu::voting::CandidateInput;
-using ::fa::cpu::voting::QueryPartitionProblem;
 using ::fa::cpu::voting::QueryTileMask;
 
 // `packed` is the posting word `global` was decoded from.
@@ -341,26 +340,13 @@ DnaPlacementFamily build_dna_placement_family(
     inputs.push_back(input);
   }
 
-  QueryPartitionProblem problem;
-  problem.tile_count = family.tile_count;
-  for (int tile = 0; tile < problem.tile_count; ++tile) {
-    if (::fa::cpu::voting::query_tile_end(tile + 1, family.read_length,
-                                          family.seed_length,
-                                          family.tile_count) >
-        ::fa::cpu::voting::query_tile_begin(tile, family.read_length,
-                                            family.seed_length,
-                                            family.tile_count)) {
-      problem.valid_tiles.set(tile);
-    }
-  }
-  problem.parameters = context.opts.query_partition;
   // Under ratio admission the per-lane count is only a cost ceiling; the
   // ratio does the selecting.
   RankedPeakMaskSource mask_source(context, forward_query, ranked,
                                    forward_scratch, reverse_scratch,
                                    family.exact_posting_tests,
                                    admission_tiles);
-  problem.catalogue = ::fa::cpu::voting::build_candidate_catalogue(
+  CandidateCatalogue catalogue = ::fa::cpu::voting::build_candidate_catalogue(
       std::move(inputs), context.opts.catalogue_lane_bound,
       ratio_admission ? context.opts.vote_admission_ratio : 0.0,
       ratio_admission ? &mask_source : nullptr, admission_tiles,
@@ -368,7 +354,7 @@ DnaPlacementFamily build_dna_placement_family(
   // Admitted on the coarser grid, a candidate's support is rebuilt on the
   // family's.
   if (ratio_admission && admission_tiles != family.tile_count) {
-    for (auto& generic : problem.catalogue.candidates) {
+    for (auto& generic : catalogue.candidates) {
       const VotePeak& peak =
           key_peaks[static_cast<std::size_t>(generic.equivalence_key - 1)];
       generic.support = factual_forward_support(
@@ -377,7 +363,7 @@ DnaPlacementFamily build_dna_placement_family(
           family.exact_posting_tests, family.tile_count);
     }
   }
-  for (const auto& generic : problem.catalogue.candidates) {
+  for (const auto& generic : catalogue.candidates) {
     const std::size_t key_index =
         static_cast<std::size_t>(generic.equivalence_key - 1);
     if (key_index >= key_peaks.size()) return family;
@@ -394,14 +380,6 @@ DnaPlacementFamily build_dna_placement_family(
       ++family.reverse_candidates;
     else
       ++family.forward_candidates;
-  }
-  // Placement solves the partition after its screening pass; nothing reads
-  // it before then. The all-chains lane has no partition.
-  if (!context.opts.all_chains) {
-    if (family.candidates.empty())
-      family.partition = ::fa::cpu::voting::solve_query_partition(problem);
-    else
-      family.partition_deferred = true;
   }
   family.valid = !family.candidates.empty();
   return family;

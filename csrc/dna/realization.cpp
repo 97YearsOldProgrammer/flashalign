@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -1064,12 +1065,17 @@ constexpr float kMaskLevel = 0.5f;
 constexpr int kMaskLen = INT_MAX;
 constexpr int kRankMinLen = 500;
 constexpr float kRankFrac = 0.9f;
+// The largest tie group (retain_regions), an owner with its tied attached
+// chains, whose ties are realized.
+constexpr int kDnaTieGroupCap = 8;
 
 // One chain of the selection: its anchors in chain order, deduplicated, and
 // its forward-query and reference spans (mm_reg_set_coor).
 struct Chain {
   const DnaSelectionItem* item = nullptr;
   std::vector<chaining::Anchor> anchors;
+  // Its anchors before deduplication, as the ownership walk counted them.
+  int n = 0;
   int q_begin = 0;
   int q_end = 0;
   int ref_begin = 0;
@@ -1085,6 +1091,8 @@ struct Region {
   int n_sub = 0;
   double pool_subsc = 0.0;
   int pool_n_sub = 0;
+  // A tied rival realized beyond -N (retain_regions).
+  bool tied = false;
 };
 
 struct Record {
@@ -1109,6 +1117,12 @@ struct Record {
   int parent = -1;
   // Its rank in an exact dp_max tie (step 4).
   std::uint64_t tie = 0;
+  // From a tied rival's region: last in an exact dp_max tie.
+  bool tied = false;
+  // Its entry of the outcome's rivals and the entry dp_max2 came from; -1 for
+  // none.
+  int rival = -1;
+  int dp_max2_rival = -1;
 };
 
 bool identical_chains(const Chain& a, const Chain& b) {
@@ -1117,35 +1131,134 @@ bool identical_chains(const Chain& a, const Chain& b) {
          a.ref_end == b.ref_end;
 }
 
+// The read's seeds the whole-query harvest admits (key in the index, not over
+// the pool gate), minimap2's mini_pos, as sorted forward-read starts, both
+// lanes.
+std::vector<int> admitted_seed_starts(const DnaContext& context,
+                                      const RetainedSeedDensity& seeds,
+                                      int read_length, int seed_length) {
+  const internal::PoolGate gate = internal::pool_gate(context);
+  std::vector<int> starts;
+  starts.reserve(seeds.fine_forward().size() + seeds.fine_reverse().size());
+  for (const RetainedSeedRef& seed : seeds.fine_forward())
+    if (!gate.drops(seeds.occurrence(seed.entry), seed.rescued))
+      starts.push_back(seed.seed.read_pos);
+  for (const RetainedSeedRef& seed : seeds.fine_reverse())
+    if (!gate.drops(seeds.occurrence(seed.entry), seed.rescued))
+      starts.push_back(read_length - seed.seed.read_pos - seed_length);
+  std::sort(starts.begin(), starts.end());
+  starts.erase(std::unique(starts.begin(), starts.end()), starts.end());
+  return starts;
+}
+
+// mm_est_err (esterr.c 30-63) on one chain: from its first anchor in
+// forward-read order, the walk over the read's admitted seeds matching its
+// anchors in order, one seed more at each end with room on both axes, and
+// 1 - (matched / total)^(1 / k); -1 when the first anchor is not a seed.
+// Every seed spans k, so minimap2's avg_k is k. The right-end test reads
+// q_begin, as minimap2's reads qs.
+float chain_divergence(const Chain& chain, const std::vector<int>& seeds,
+                       int read_length, int seed_length, int contig_length,
+                       bool reverse) {
+  const int cnt = static_cast<int>(chain.anchors.size());
+  const auto forward_start = [&](int k) {
+    const chaining::Anchor& anchor =
+        reverse ? chain.anchors[static_cast<std::size_t>(cnt - 1 - k)]
+                : chain.anchors[static_cast<std::size_t>(k)];
+    return reverse ? read_length - anchor.q - anchor.span : anchor.q;
+  };
+  if (cnt == 0 || seeds.empty()) return -1.0f;
+  const auto first =
+      std::lower_bound(seeds.begin(), seeds.end(), forward_start(0));
+  if (first == seeds.end() || *first != forward_start(0)) return -1.0f;
+  const int n = static_cast<int>(seeds.size());
+  const int st = static_cast<int>(first - seeds.begin());
+  int en = st;
+  int n_match = 1;
+  for (int k = 1, j = st + 1; j < n && k < cnt; ++j) {
+    if (forward_start(k) == seeds[static_cast<std::size_t>(j)]) {
+      ++k;
+      en = j;
+      ++n_match;
+    }
+  }
+  int n_tot = en - st + 1;
+  const float avg_k = static_cast<float>(seed_length);
+  if (chain.q_begin > avg_k && chain.ref_begin > avg_k) ++n_tot;
+  if (read_length - chain.q_begin > avg_k &&
+      contig_length - chain.ref_end > avg_k)
+    ++n_tot;
+  return n_match >= n_tot
+             ? 0.0f
+             : static_cast<float>(
+                   1.0 - std::pow(static_cast<double>(n_match) / n_tot,
+                                  1.0 / avg_k));
+}
+
+// A chain the strand rule kept: its and its owner's divergence and
+// mm_filter_strand_retained's verdict.
+struct StrandVerdict {
+  int item = 0;
+  int owner_item = 0;
+  float div = 0.0f;
+  float owner_div = 0.0f;
+  bool kept = true;
+};
+
 // hit.c 255-281 with check_strand: every owner, and an attached chain within
 // pri_ratio or 2k of its owner, not identical to it, or on the other strand
 // above 0.8 * max_gap, at most best_n per read. The roles are in the parent
-// walk's order, minimap2's chain order.
+// walk's order, minimap2's chain order. An attached chain at its owner's exact
+// score and anchor count, not identical to it, is also kept past best_n while
+// its owner's tie group is at most kDnaTieGroupCap. With
+// `density`, a chain the strand rule keeps then meets mm_filter_strand_retained
+// (hit.c 283-299) on the read's admitted seeds, its best_n slot spent either
+// way (map.c 333-336).
 std::vector<Region> retain_regions(const DnaContext& context,
                                    const DnaKeptSelection& selection,
                                    const std::vector<Chain>& chains,
-                                   int seed_length) {
+                                   int seed_length, int read_length,
+                                   const RetainedSeedDensity* density) {
   std::vector<Region> regions;
   const float pri_ratio = static_cast<float>(context.opts.pri_ratio);
   const int min_diff = 2 * seed_length;
   const int min_strand_sc =
       static_cast<int>(context.opts.cigar_dp_max_gap * 0.8);
   int n_2nd = 0;
+  const auto valid = [&](const DnaOwnershipRole& role) {
+    return role.item >= 0 &&
+           static_cast<std::size_t>(role.item) < chains.size() &&
+           role.owner_item >= 0 &&
+           static_cast<std::size_t>(role.owner_item) < chains.size() &&
+           !chains[static_cast<std::size_t>(role.item)].anchors.empty();
+  };
+  const auto is_tie = [&](const Chain& chain, const Chain& parent) {
+    return chain.item->score == parent.item->score && chain.n == parent.n &&
+           !identical_chains(chain, parent);
+  };
+  // Per owner item: its tie group.
+  std::vector<int> group(chains.size(), 1);
+  for (const DnaOwnershipRole& role : selection.roles)
+    if (valid(role) && role.owner_item != role.item &&
+        is_tie(chains[static_cast<std::size_t>(role.item)],
+               chains[static_cast<std::size_t>(role.owner_item)]))
+      ++group[static_cast<std::size_t>(role.owner_item)];
+  // The read's admitted seeds, built at the first chain the filter tests.
+  std::vector<int> seeds;
+  bool seeds_built = false;
   for (const DnaOwnershipRole& role : selection.roles) {
-    if (role.item < 0 || static_cast<std::size_t>(role.item) >= chains.size() ||
-        role.owner_item < 0 ||
-        static_cast<std::size_t>(role.owner_item) >= chains.size())
-      continue;
+    if (!valid(role)) continue;
     const Chain& chain = chains[static_cast<std::size_t>(role.item)];
-    if (chain.anchors.empty()) continue;
     if (role.owner_item == role.item) {
       regions.push_back({role.item, true, role.subsc, role.n_sub,
                          role.pool_subsc, role.pool_n_sub});
       continue;
     }
-    const Chain& parent = chains[static_cast<std::size_t>(role.owner_item)];
+    const std::size_t owner = static_cast<std::size_t>(role.owner_item);
+    const Chain& parent = chains[owner];
     const int score = chain.item->score;
     const int parent_score = parent.item->score;
+    const bool tie = is_tie(chain, parent);
     if ((static_cast<float>(score) >=
              static_cast<float>(parent_score) * pri_ratio ||
          score + min_diff >= parent_score) &&
@@ -1156,8 +1269,32 @@ std::vector<Region> retain_regions(const DnaContext& context,
       }
     } else if (n_2nd < context.opts.secondary_max && score > min_strand_sc &&
                chain.item->reverse != parent.item->reverse) {
-      regions.push_back({role.item, false});
       ++n_2nd;
+      if (density != nullptr) {
+        if (!seeds_built) {
+          seeds = admitted_seed_starts(context, *density, read_length,
+                                       seed_length);
+          seeds_built = true;
+        }
+        StrandVerdict verdict;
+        verdict.item = role.item;
+        verdict.owner_item = role.owner_item;
+        verdict.div = chain_divergence(
+            chain, seeds, read_length, seed_length,
+            static_cast<int>(context.ref.contig_length(chain.item->contig)),
+            chain.item->reverse);
+        verdict.owner_div = chain_divergence(
+            parent, seeds, read_length, seed_length,
+            static_cast<int>(context.ref.contig_length(parent.item->contig)),
+            parent.item->reverse);
+        verdict.kept = verdict.div < verdict.owner_div * 5.0f ||
+                       verdict.div < 0.01f;
+        if (!verdict.kept) continue;
+      }
+      regions.push_back({role.item, false});
+    } else if (tie && group[owner] <= kDnaTieGroupCap) {
+      regions.push_back({role.item, false});
+      regions.back().tied = true;
     }
   }
   return regions;
@@ -1477,6 +1614,7 @@ DnaRegionOutcome realize_dna_regions(
             context.ref.encoded->size())
       continue;
     chain.anchors = *anchors;
+    chain.n = static_cast<int>(anchors->size());
     family_internal::deduplicate_exact_anchors(chain.anchors);
     const chaining::Anchor& first = chain.anchors.front();
     const chaining::Anchor& last = chain.anchors.back();
@@ -1490,7 +1628,8 @@ DnaRegionOutcome realize_dna_regions(
 
   // 1. Retain.
   const std::vector<Region> regions =
-      retain_regions(context, selection, chains, seed_length);
+      retain_regions(context, selection, chains, seed_length, read_length,
+                     placement.strand_filter_seeds);
   result.block_count = static_cast<int>(regions.size());
   if (regions.empty()) {
     result.failure = DnaFamilyFailure::NoSelectedFamily;
@@ -1613,6 +1752,7 @@ DnaRegionOutcome realize_dna_regions(
           record.n_sub = region.n_sub;
           record.pool_subsc = region.pool_subsc;
           record.pool_n_sub = region.pool_n_sub;
+          record.tied = region.tied;
           records.push_back(std::move(record));
           committed = true;
         }
@@ -1652,9 +1792,10 @@ DnaRegionOutcome realize_dna_regions(
     return out;
   }
 
-  // 4. Re-select on the aligned spans, in dp_max order (mm_hit_sort). An
-  // exact tie goes to the read-seeded hash of the record's contig, strand
-  // and reference start (seed/seed.h), then to contig and start.
+  // 4. Re-select on the aligned spans, in dp_max order (mm_hit_sort). In an
+  // exact tie a tied rival's record (retain_regions) goes after the others,
+  // then the read-seeded hash of the record's contig, strand and reference
+  // start decides (seed/seed.h), then contig and start.
   for (Record& record : records)
     record.tie = tie_locus_hash(context.vote_tie_seed, record.contig,
                                 record.alignment.is_reverse,
@@ -1663,12 +1804,37 @@ DnaRegionOutcome realize_dna_regions(
                    [](const Record& left, const Record& right) {
                      if (left.dp_max != right.dp_max)
                        return left.dp_max > right.dp_max;
+                     if (left.tied != right.tied) return right.tied;
                      return std::tie(left.tie, left.contig,
                                      left.alignment.pos) <
                             std::tie(right.tie, right.contig,
                                      right.alignment.pos);
                    });
   set_parents(context, chains, regions, records);
+  // Every secondary is a MAPQ rival, the ones select_records drops included,
+  // so a dp_max2 source outlives the drop.
+  for (std::size_t i = 0; i < records.size(); ++i) {
+    Record& record = records[i];
+    if (record.parent == static_cast<int>(i) || record.inversion) continue;
+    const Chain& chain = chains[static_cast<std::size_t>(
+        regions[static_cast<std::size_t>(record.region)].item)];
+    DnaRealizedRival rival;
+    rival.candidate = chain.item->candidate;
+    rival.path = chain.item->path;
+    rival.region = record.region;
+    rival.score0 = chain.item->score;
+    rival.anchors0 = static_cast<int>(chain.anchors.size());
+    rival.chain_q_begin = chain.q_begin;
+    rival.chain_q_end = chain.q_end;
+    rival.chain_ref_begin = chain.ref_begin;
+    rival.chain_ref_end = chain.ref_end;
+    record.rival = static_cast<int>(out.rivals.size());
+    out.rivals.push_back(rival);
+  }
+  for (Record& record : records)
+    if (record.dp_max2_from >= 0)
+      record.dp_max2_rival =
+          records[static_cast<std::size_t>(record.dp_max2_from)].rival;
   select_records(context, seed_length, records);
 
   // The first primary is the SAM primary (mm_set_sam_pri), the other
@@ -1713,6 +1879,7 @@ DnaRegionOutcome realize_dna_regions(
     price.n_sub = record.n_sub;
     price.pool_subsc = record.pool_subsc;
     price.pool_n_sub = record.pool_n_sub;
+    price.dp_max2_rival = record.dp_max2_rival;
     const ::fa::cpu::voting::CandidateId candidate =
         price.candidate >= 0
             ? static_cast<::fa::cpu::voting::CandidateId>(price.candidate)

@@ -5,7 +5,6 @@
 
 #include <cctype>
 #include <cerrno>
-#include <charconv>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -41,7 +40,7 @@ constexpr LaneStage kBaseOutput = LaneStage::BaseLevelOutput;
 constexpr LaneStage kBaseAlign = LaneStage::BaseAlignment;
 constexpr LaneStage kSamOutput = LaneStage::SamOutput;
 constexpr LaneStage kSelection = LaneStage::Selection;
-constexpr LaneStage kPartition = LaneStage::Partition;
+constexpr LaneStage kCandidateChains = LaneStage::CandidateChains;
 
 // Section headers of the align screen, in screen order. The index screen is
 // one list under "Options:".
@@ -54,8 +53,6 @@ constexpr std::string_view SEC_IOPT = "options:"; // index subcommand
 constexpr std::string_view HIDDEN = "";           // Dev rows render nowhere
 
 // Why a Dev row is off the help screen (OptionSpec::study).
-constexpr std::string_view STUDY_FLASH_NATIVE =
-    "FlashAlign-specific tuning, not on the help screen";
 constexpr std::string_view STUDY_CLI_MANUAL =
     "documented in flashalign.1, not on the help screen";
 
@@ -76,13 +73,13 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::DpBw, 'r', "", kPair, kStable, A,
          "NUM[,NUM]", SEC_PLACEMENT,
          "alignment bandwidth and gap-fill bandwidth [500,20000]", "", kBaseAlign},
-        // NUM1 bands the dense (whole-query) chain passes and NUM2 the
-        // screening pass; a lone NUM sets both. Sizes as -r's. DNA presets
-        // that partition the query; the asm presets' NUM1 is 100000.
-        {OptionId::ChainBand, 'b', "--chain-band", kPair, kStable, A,
-         "NUM[,NUM]", SEC_PLACEMENT,
-         "chaining bandwidth of the dense chains and the screening chain [20000,20000]", "",
-         kPartition},
+        // NUM bands each catalogue candidate's dense (whole-query) chain
+        // pass. A size, as -r's. DNA presets but the overlap ones; the asm
+        // presets' NUM is 100000.
+        {OptionId::ChainBand, 'b', "--chain-band", kSize, kStable, A,
+         "NUM", SEC_PLACEMENT,
+         "chaining bandwidth of the dense chains [20000]", "",
+         kCandidateChains},
         // minimap2's -m. DNA presets only; the splice presets keep their own
         // chain floors.
         {OptionId::MinChainScore, 'm', "", kInt, kStable, A,
@@ -144,11 +141,6 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::MaxCands, '\0', "--max-cands", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "max placement candidates per strand [16]"},
-        // DNA presets only, 2..4096; the splice presets keep 128. The
-        // --tile-score terms are per tile.
-        {OptionId::Tiles, '\0', "--tiles", kInt, kStable, A,
-         "INT", SEC_PLACEMENT,
-         "query tiles in the read's placement partition [128]", "", kPartition},
 
         // On lr and lr:hq -A -B -O -E -z --score-N set the DP row of the gap
         // fills between anchors; the read ends keep the preset's own row,
@@ -294,13 +286,6 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::SpliceRivalMinDiff, '\0', "--rival-min-diff", kInt, kDev,
          A, "", HIDDEN, "", STUDY_CLI_MANUAL},
 
-        // --tile-score hit=INT,block=INT,null=INT,miss=INT: the DNA tile
-        // objective (--tiles), preset-owned; partial keys merge. hit: reward per
-        // supported tile in a block (>0); block: cost per block opened; null:
-        // cost per tile in no block; miss: penalty per unsupported tile in a
-        // block.
-        {OptionId::TileScore, '\0', "--tile-score", kStr, kDev, A, "",
-         HIDDEN, "", STUDY_FLASH_NATIVE, kPartition},
         // --dual yes|no, also --dual=yes|no: the overlap presets only. no
         // prints a pair once, from its shorter read, ties broken by name
         // (options/options.h dual).
@@ -546,15 +531,12 @@ std::string read_group_line_id(const std::string& line) {
 } // namespace fa::cpu::cli
 
 /**** option_values ****/
-// Option values: integers, k/m/g sizes, ratios, INT[,INT] pairs and --tile-score's
-// key=value list; a bad value throws UsageError naming the option.
+// Option values: integers, k/m/g sizes, ratios and INT[,INT] pairs; a bad value
+// throws UsageError naming the option.
 
 namespace fa::cpu::cli {
 
 namespace {
-
-constexpr int kMaxTileObjectiveTerm =
-    ::fa::cpu::voting::kMaxQueryTileObjectiveTerm;
 
 int parse_int(const std::string& value, const std::string& name) {
     char* end = nullptr;
@@ -570,102 +552,6 @@ int parse_int(const std::string& value, const std::string& name) {
             "integer out of range for " + name + ": " + value);
     }
     return static_cast<int>(parsed);
-}
-
-void reject_composite_whitespace(
-    const std::string& value, const std::string& option) {
-    for (const unsigned char ch : value) {
-        if (std::isspace(ch)) {
-            throw UsageError(
-                option + " rejects whitespace: " + value);
-        }
-    }
-}
-
-int parse_composite_int(
-    const std::string& value, const std::string& option,
-    const std::string& key) {
-    int parsed = 0;
-    const char* begin = value.data();
-    const char* end = begin + value.size();
-    const auto result = std::from_chars(begin, end, parsed, 10);
-    if (value.empty() || result.ec != std::errc{} || result.ptr != end) {
-        throw UsageError(
-            "invalid integer for " + option + " key '" + key + "': " + value);
-    }
-    return parsed;
-}
-
-template <class Assign>
-void parse_composite_entries(
-    const std::string& value, const std::string& option, Assign assign) {
-    if (value.empty()) {
-        throw UsageError(option + " requires at least one key=value");
-    }
-    reject_composite_whitespace(value, option);
-    std::size_t begin = 0;
-    while (begin <= value.size()) {
-        const std::size_t comma = value.find(',', begin);
-        const std::size_t end =
-            comma == std::string::npos ? value.size() : comma;
-        if (end == begin) {
-            throw UsageError(option + " rejects empty entries");
-        }
-        const std::string entry = value.substr(begin, end - begin);
-        const std::size_t equal = entry.find('=');
-        if (equal == std::string::npos || equal == 0 ||
-            equal + 1 == entry.size() ||
-            entry.find('=', equal + 1) != std::string::npos) {
-            throw UsageError(
-                "malformed " + option + " entry '" + entry +
-                "' (expected key=value)");
-        }
-        assign(entry.substr(0, equal), entry.substr(equal + 1));
-        if (comma == std::string::npos) break;
-        begin = comma + 1;
-    }
-}
-
-void parse_tile_score(const std::string& value, AlignOptions& opt) {
-    parse_composite_entries(
-        value, "--tile-score",
-        [&](const std::string& key, const std::string& raw) {
-            const int parsed =
-                parse_composite_int(raw, "--tile-score", key);
-            if (key == "hit") {
-                if (parsed <= 0) {
-                    throw UsageError(
-                        "--tile-score key 'hit' must be within [1," +
-                        std::to_string(kMaxTileObjectiveTerm) + "]");
-                }
-                opt.tile_supported_reward = parsed;
-            } else if (key == "block") {
-                if (parsed < 0) {
-                    throw UsageError(
-                        "--tile-score key 'block' must be within [0," +
-                        std::to_string(kMaxTileObjectiveTerm) + "]");
-                }
-                opt.tile_block_open_cost = parsed;
-            } else if (key == "null") {
-                if (parsed < 0) {
-                    throw UsageError(
-                        "--tile-score key 'null' must be within [0," +
-                        std::to_string(kMaxTileObjectiveTerm) + "]");
-                }
-                opt.tile_null_cost = parsed;
-            } else if (key == "miss") {
-                if (parsed < 0) {
-                    throw UsageError(
-                        "--tile-score key 'miss' must be within [0," +
-                        std::to_string(kMaxTileObjectiveTerm) + "]");
-                }
-                opt.tile_unsupported_cost = parsed;
-            } else {
-                throw UsageError(
-                    "unknown --tile-score key '" + key +
-                    "'; accepted keys: hit, block, null, miss");
-            }
-        });
 }
 
 // Parse INT or INT,INT. Without a comma, return the value in both elements.
@@ -974,8 +860,9 @@ constexpr StageRefusal kStageRefusals[] = {
      "refused"},
     {LaneStage::Selection,
      "-x {preset} prints every chain; {options} are refused"},
-    {LaneStage::Partition,
-     "-x {preset} does not partition the query; {options} are refused"},
+    {LaneStage::CandidateChains,
+     "-x {preset} chains each contig and strand once; {options} {is} "
+     "refused"},
     {LaneStage::OverlapPairs,
      "{options} {is} valid only with ava-ont or ava-hifi"},
 };
@@ -1089,7 +976,6 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
         case OptionId::MaxChainOcc:
             opt.max_chain_occ = parse_int(val, arg);
             break;
-        case OptionId::TileScore: parse_tile_score(val, opt); break;
         case OptionId::MinSupport:    opt.min_support = parse_int(val, arg); break;
         case OptionId::VoteSeeds:
             opt.vote_seeds = parse_int(val, arg);
@@ -1104,11 +990,6 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
         // Its range depends on the lane (check_max_cands_range).
         case OptionId::MaxCands:
             opt.max_cands = parse_int(val, arg);
-            break;
-        case OptionId::Tiles:
-            opt.tiles = parse_int(val, arg);
-            if (*opt.tiles < 2 || *opt.tiles > 4096)
-                throw UsageError("--tiles must be within [2,4096]");
             break;
         case OptionId::MinChainScore:
             opt.min_chain_score = parse_int(val, arg);
@@ -1162,19 +1043,12 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
             opt.dp_max_gap = gap;
             break;
         }
-        // Sizes, as -r; a lone value sets both bands.
+        // A size, as -r.
         case OptionId::ChainBand: {
-            const auto comma = val.find(',');
-            const int dense = parse_int_size(
-                comma == std::string::npos ? val : val.substr(0, comma), arg);
-            const int screen =
-                comma == std::string::npos
-                    ? dense
-                    : parse_int_size(val.substr(comma + 1), arg);
-            if (dense < 1 || screen < 1)
+            const int band = parse_int_size(val, arg);
+            if (band < 1)
                 throw UsageError(arg + " must be at least 1");
-            opt.chain_band = dense;
-            opt.chain_band_screen = screen;
+            opt.chain_band = band;
             break;
         }
         case OptionId::Secondary:
@@ -1324,8 +1198,6 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
         throw UsageError("-m is valid only with a DNA preset");
     if (rna && opt.max_cands)
         throw UsageError("--max-cands is valid only with a DNA preset");
-    if (rna && opt.tiles)
-        throw UsageError("--tiles is valid only with a DNA preset");
     if (rna && opt.chain_band)
         throw UsageError("-b is valid only with a DNA preset");
     if (rna && opt.vote_seeds)
@@ -1335,11 +1207,6 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
     // refuses then.
     if (!rna && opt.vote_spacing && opt.preset_source != "builtin")
         throw UsageError("--vote-spacing is valid only with an RNA preset");
-    if (rna && (opt.tile_supported_reward || opt.tile_block_open_cost ||
-                opt.tile_null_cost || opt.tile_unsupported_cost)) {
-        throw UsageError(
-            "--tile-score is incompatible with RNA preset '" + opt.preset + "'");
-    }
     // Without -x the preset may come from the index: cli/align.cpp
     // asks again once it is settled.
     if (opt.preset_source != "builtin") {
