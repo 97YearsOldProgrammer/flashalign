@@ -953,7 +953,7 @@ void show_index_resolved(const fa::cpu::api::LongReadAligner& aligner,
     row("tile_rescue.window", "none");
   }
 
-  // W(L) and the chain passes' band/reach at each of kReadLengths.
+  // W(L) at each of kReadLengths; the chain's band/reach, one for every L.
   std::ostringstream rule;
   if (mapping.vote_diag_bin_width_adaptive && mapping.vote_diag_slope_den > 0)
     rule << "clamp(L / " << mapping.vote_diag_slope_den << ", "
@@ -962,16 +962,16 @@ void show_index_resolved(const fa::cpu::api::LongReadAligner& aligner,
   else
     rule << std::max(1, mapping.vote_diag_bin_width);
   row("vote_diag_width.rule", rule.str());
-  std::ostringstream width, dense;
+  std::ostringstream width;
   for (const int length : kReadLengths) {
     const fa::cpu::api::DnaReadGeometry g = aligner.dna_read_geometry(length);
     const char* sep = length == kReadLengths[0] ? "" : " ";
     width << sep << "L=" << length << ':' << g.vote_diag_bin_width;
-    dense << sep << "L=" << length << ':' << g.dense_band << '/'
-          << g.dense_reach;
   }
   row("vote_diag_width.at", width.str());
-  row("chain.band/reach", dense.str());
+  const fa::cpu::api::DnaChainGeometry chain = aligner.dna_chain_geometry();
+  row("chain.band/reach",
+      std::to_string(chain.band) + '/' + std::to_string(chain.reach));
   out << os.str();
 }
 

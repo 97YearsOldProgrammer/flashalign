@@ -74,9 +74,6 @@ DnaPlacementChainStatus contig_lane_refusal(
 namespace fa::cpu::lr {
 namespace {
 
-constexpr int kCandidateReachDivisor = 4;
-constexpr int kCandidateReachCap = 131072;
-
 struct DeferredSlice {
   RetainedSeedRef seed;
   KmerPostingIntervalView interval;
@@ -442,8 +439,7 @@ bool chain_candidate(
   internal::sort_unique_pool_anchors(anchors);
 
   const chaining::ColinearChainParams chain_params =
-      dna_candidate_chain_params(context, diagonal_band, seed_length,
-                                 family.read_length);
+      dna_candidate_chain_params(context, diagonal_band, seed_length);
   chaining::DenseChainStats dense_stats;
   chaining::DenseChainParams dense_params = dna_dense_chain_params(
       chain_params, seed_length, context.opts.dna_dense_diag_min_runs);
@@ -749,15 +745,11 @@ void chain_and_own_every_candidate(
 }  // namespace
 
 chaining::ColinearChainParams dna_candidate_chain_params(
-    const DnaContext& context, int band, int seed_length, int read_length) {
+    const DnaContext& context, int band, int seed_length) {
   chaining::ColinearChainParams params;
   params.bw = std::max(1, band);
-  const int preset_reach = std::max(
+  params.max_dist_x = params.max_dist_y = std::max(
       params.bw, context.opts.cigar_local_interval_anchor_chain_max_gap);
-  const int read_reach =
-      std::min(read_length / kCandidateReachDivisor, kCandidateReachCap);
-  params.max_dist_x = params.max_dist_y = std::max(preset_reach, read_reach);
-  params.bw = std::max(params.bw, read_reach);
   params.min_cnt = 1;
   params.min_sc = 1;
   params.chn_pen_gap = 0.008f * static_cast<float>(seed_length);

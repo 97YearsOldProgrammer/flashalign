@@ -164,6 +164,9 @@ int LongReadAligner::get_index_syncmer_s() const {
 DnaReadGeometry LongReadAligner::dna_read_geometry(int read_length) const {
   return impl_->read([&] { return impl_->a->dna_read_geometry(read_length); });
 }
+DnaChainGeometry LongReadAligner::dna_chain_geometry() const {
+  return impl_->read([&] { return impl_->a->dna_chain_geometry(); });
+}
 Alignment LongReadAligner::align(const std::string &read,
                                  std::uint32_t read_name_hash) const {
   return impl_->read([&] {

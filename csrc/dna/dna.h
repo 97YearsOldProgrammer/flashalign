@@ -699,7 +699,7 @@ struct DnaPlacementChainingResult {
 // Chain parameters for the candidate paths under diagonal band `band`.
 chaining::ColinearChainParams
 dna_candidate_chain_params(const DnaContext& context, int band,
-                           int seed_length, int read_length);
+                           int seed_length);
 
 // The same parameters for the dense run chain: the scoring is unchanged, and
 // max_iter and max_skip have no counterpart. The diagonal-keyed search runs

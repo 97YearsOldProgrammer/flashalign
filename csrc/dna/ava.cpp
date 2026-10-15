@@ -470,11 +470,9 @@ chaining::ChainResult chain_target_pool(const DnaContext& context,
                                         const DnaPlacementFamily& family,
                                         int diagonal_band,
                                         std::vector<chaining::Anchor> anchors) {
-  const int read_length = family.read_length;
   const int seed_length = family.seed_length;
   const chaining::ColinearChainParams chain_params =
-      dna_candidate_chain_params(context, diagonal_band, seed_length,
-                                 read_length);
+      dna_candidate_chain_params(context, diagonal_band, seed_length);
   return chaining::chain_dense_colinear(
       std::move(anchors),
       dna_dense_chain_params(chain_params, seed_length,

@@ -42,6 +42,7 @@ using ::fa::cpu::options::CommonOptions;
 using ::fa::cpu::options::IndexIdentity;
 using ::fa::cpu::options::ResolvedOptions;
 using ::fa::cpu::lr::DnaLongOptions;
+using ::fa::cpu::lr::DnaChainGeometry;
 using ::fa::cpu::lr::DnaReadGeometry;
 using RnaLongOptions = ::fa::cpu::lr::rna::RnaLongOptions;
 
@@ -133,8 +134,9 @@ public:
   void reconfigure(const ResolvedOptions& config);
 
   int get_index_syncmer_s() const;
-  // LongReadEngine::dna_read_geometry.
+  // LongReadEngine::dna_read_geometry, dna_chain_geometry.
   DnaReadGeometry dna_read_geometry(int read_length) const;
+  DnaChainGeometry dna_chain_geometry() const;
 
   // `read_name_hash` is tie_name_hash() of the read name, used to break exact ties; 0 for no
   // name.

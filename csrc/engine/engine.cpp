@@ -165,16 +165,17 @@ DnaReadGeometry LongReadEngine::dna_read_geometry(int read_length) const {
   DnaReadGeometry geometry;
   geometry.vote_diag_bin_width =
       effective_vote_diag_bin_width(make_seed_context(), read_length);
+  return geometry;
+}
+
+DnaChainGeometry LongReadEngine::dna_chain_geometry() const {
   const ::fa::cpu::lr::DnaContext dctx = make_dna_context();
-  const int seed_length = std::max(1, dctx.opts.k);
-  const auto pass = [&](int diagonal_band, int& band, int& reach) {
-    const auto params = ::fa::cpu::lr::dna_candidate_chain_params(
-        dctx, diagonal_band, seed_length, read_length);
-    band = params.bw;
-    reach = params.max_dist_x;
-  };
-  pass(::fa::cpu::lr::internal::pass_diagonal_band(dctx), geometry.dense_band,
-       geometry.dense_reach);
+  const auto params = ::fa::cpu::lr::dna_candidate_chain_params(
+      dctx, ::fa::cpu::lr::internal::pass_diagonal_band(dctx),
+      std::max(1, dctx.opts.k));
+  DnaChainGeometry geometry;
+  geometry.band = params.bw;
+  geometry.reach = params.max_dist_x;
   return geometry;
 }
 

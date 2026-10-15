@@ -223,11 +223,10 @@ Stop alignment elongation if there are no seeds within
 [5000]. It bounds how far base alignment extends toward a read end, and under a
 DNA preset two pieces of a read join into one record only across gaps of at most
 .IR NUM .
-Under a DNA preset it is also the maximum gap of chaining, whose reach is never
-below the chain's band
-.RB ( \-b )
-and grows with the read length, so values under the band leave that chain
-unchanged.
+Under a DNA preset it is also the maximum gap of chaining, whose reach is the
+larger of it and the chain's band
+.RB ( \-b ),
+so values under the band leave that chain unchanged.
 Under a splice preset it bounds base alignment and is also the maximum
 query gap of the fine chain; there
 .B \-G
@@ -274,8 +273,11 @@ sets both [200000,200000].
 .BI \-b \ NUM
 Chaining bandwidth [20000; 100000 on asm5, asm10, asm20]. It bands each
 candidate's dense chain over the whole read: a chain keeps only the anchors
-whose diagonal lies within the band of the candidate's, and long reads chain
-with a reach that grows with their length. It acts on placement, so also on
+whose diagonal lies within the band of the candidate's, and the chain links
+anchors across at most the band, or
+.BR \-g 's
+chaining gap where that is larger, whatever the read length. It acts on
+placement, so also on
 plain PAF output.
 .I NUM
 may end with k/K/m/M/g/G. The long form is
@@ -737,7 +739,7 @@ target it reads the header, except that with a DNA preset and a single-part
 index it loads the index without its bases and appends rows tagged
 .BR [resolved] :
 the seed occurrence cap and its parts, the rescue window, the vote's bin width
-and the chain passes' band and reach at four read lengths.
+at four read lengths and the chain's band and reach.
 .TP
 .B \-\-stats
 Print a summary of the run to stderr: reads and bases, mapped reads, records

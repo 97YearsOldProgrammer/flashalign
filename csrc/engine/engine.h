@@ -46,13 +46,16 @@ namespace lr {
 void lpt_read_order(const std::vector<std::string> &reads, int n_threads,
                     std::vector<int> &order);
 
-// What the DNA lane derives from the read length L under the current options:
-// the vote's diagonal bin width and, for the whole-query (dense) chain pass,
-// the chain's band and its reach (max_dist_x/y).
+// What the DNA lane derives from the read length L under the current options.
 struct DnaReadGeometry {
   int vote_diag_bin_width = 0;
-  int dense_band = 0;
-  int dense_reach = 0;
+};
+
+// The whole-query (dense) chain pass's band and reach (max_dist_x/y), the
+// same for every read.
+struct DnaChainGeometry {
+  int band = 0;
+  int reach = 0;
 };
 
 class LongReadEngine {
@@ -220,6 +223,7 @@ public:
   // The DNA lane's geometry for a read of `read_length` bp, as map_read
   // derives it (--show-config).
   DnaReadGeometry dna_read_geometry(int read_length) const;
+  DnaChainGeometry dna_chain_geometry() const;
 
 private:
   // Sets the DNA vote occurrence cap from the attached index under LongOccPolicy::Platform:
