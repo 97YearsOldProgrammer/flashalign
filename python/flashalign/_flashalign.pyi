@@ -437,11 +437,14 @@ class Hit:
         """
         Rival placement hypotheses, on the primary only.
 
-        These are what MAPQ was computed against, not records of their
-        own: the CLI writes secondary rows only under --secondary yes, and
-        map() never returns them. Each rival is flattened like the primary
-        (the rival, then its supplementary segments). Empty on a
-        supplementary Hit and on a rival.
+        Not records of their own: the CLI writes secondary rows only under
+        --secondary yes, and map() never returns them. With a CIGAR they
+        are the realized rivals the MAPQ was priced against; in DNA
+        map-only they are the secondaries -N keeps, projected from their
+        whole chains after the primaries are priced, which the MAPQ never
+        saw. Each rival is flattened like the primary (the rival, then its
+        supplementary segments). Empty on a supplementary Hit and on a
+        rival.
         """
 
     def __str__(self) -> str:

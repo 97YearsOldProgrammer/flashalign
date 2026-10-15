@@ -208,6 +208,49 @@ static void apply_dna_min_chain_score(
 namespace fa::cpu::lr {
 namespace dna {
 
+// minimap2's mm_seed_mz_flt (seed.c) on the read's forward seed stream, whose
+// keys are canonical, so both strands lose a key at once. A key held more than
+// `cap` times and more than `frac` of the stream's seeds is dropped; a cap or
+// frac of 0 drops nothing. Returns `seeds` when nothing is dropped, else
+// `kept`.
+static const std::vector<QuerySeed>* drop_query_repeats(
+    const std::vector<QuerySeed>& seeds, int cap, float frac,
+    std::vector<std::uint64_t>& keys, std::vector<QuerySeed>& kept,
+    std::size_t& dropped) {
+  dropped = 0;
+  const std::size_t n = seeds.size();
+  if (cap <= 0 || frac <= 0.0f || n <= static_cast<std::size_t>(cap))
+    return &seeds;
+  keys.clear();
+  keys.reserve(n);
+  for (const QuerySeed& seed : seeds)
+    keys.push_back(seed.key);
+  std::sort(keys.begin(), keys.end());
+  // minimap2's float test, cnt > n * q_occ_frac.
+  const float frac_floor = static_cast<float>(n) * frac;
+  // The repeated keys, compacted in order to the front of `keys`.
+  std::size_t repeated = 0;
+  for (std::size_t begin = 0, i = 1; i <= n; ++i) {
+    if (i < n && keys[i] == keys[begin])
+      continue;
+    const std::size_t count = i - begin;
+    if (count > static_cast<std::size_t>(cap) &&
+        static_cast<float>(count) > frac_floor)
+      keys[repeated++] = keys[begin];
+    begin = i;
+  }
+  if (repeated == 0)
+    return &seeds;
+  keys.resize(repeated);
+  kept.clear();
+  kept.reserve(n);
+  for (const QuerySeed& seed : seeds)
+    if (!std::binary_search(keys.begin(), keys.end(), seed.key))
+      kept.push_back(seed);
+  dropped = n - kept.size();
+  return &kept;
+}
+
 AlignResult map_read(const DnaContext& base_dctx,
                      const LongReadSeedContext& seed_ctx,
                      DnaWorkerScratch& worker_scratch, const std::string& read,
@@ -261,6 +304,16 @@ AlignResult map_read(const DnaContext& base_dctx,
           2u +
       8u + 64u;
   lookup_cache->reset(expected_keys);
+  // Every consumer below, the vote, the tile rescue and the placement
+  // harvest, reads the stream without the read's repeated keys, capped at the
+  // pool gate's N. The all-chains lane keeps every seed.
+  if (!dctx.opts.all_chains && shared_fwd_syncmer_seeds != nullptr) {
+    std::size_t dropped = 0;
+    shared_fwd_syncmer_seeds = drop_query_repeats(
+        *shared_fwd_syncmer_seeds, dctx.opts.dna_pool_gate_occ,
+        dctx.opts.dna_query_occ_frac, scratch.query_occ_keys,
+        scratch.query_occ_seeds, dropped);
+  }
   if (shared_fwd_syncmer_seeds == nullptr ||
       shared_fwd_syncmer_seeds->empty()) {
     return finish(std::move(out));
@@ -471,6 +524,8 @@ AlignResult map_read(const DnaContext& base_dctx,
       price_dna_blocks(dctx, placement_family, placement_chaining,
                        placement_chaining_ran, primary_candidate, read_len,
                        realized);
+      // The secondaries, after the MAPQ, which they do not enter.
+      dna_project_map_only_secondaries(dctx, placement_chaining, realized);
     }
   }
   // The emitted family is final here, MAPQ included; the -c lane's emission

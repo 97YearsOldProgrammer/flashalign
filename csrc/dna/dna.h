@@ -57,6 +57,8 @@ struct ResolvedDnaOptions {
   // Occurrence gate of the whole-query exact pass (--max-chain-occ, by
   // default the vote's resolved cap); 0 = off.
   int dna_pool_gate_occ = 0;
+  // The within-read repeat filter's fraction (--q-occ-frac); 0 = off.
+  float dna_query_occ_frac = 0.0f;
 
   // Realization (CIGAR output).
   int k = 21; // seed length
@@ -109,9 +111,9 @@ struct ResolvedDnaOptions {
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (dna.h).
   bool inversion_probe_local_gate = false;
-  // -N, minimap2's best_n: the -c lane's cap on secondary alignments
-  // (realization.cpp).
-  int secondary_max = 1;
+  // -N, minimap2's best_n: the cap on secondary alignments in both lanes
+  // (realization.cpp retain_regions).
+  int secondary_max = 5;
   // Chain MAPQ own-locus rules, both on: a chained shadow's vote counts for
   // the winner, and the chained shadow window grows with read length. No
   // option sets them.
@@ -974,6 +976,13 @@ void dna_join_map_only_family(
     const DnaContext& context, const DnaPlacementChainingResult& placement,
     std::vector<DnaJoinPiece> pieces, dna::Result& realized,
     ::fa::cpu::voting::CandidateId& primary_candidate);
+
+// Each attached chain dna_retained_secondary_items keeps, appended to
+// realized.secondary as one record projected from its whole path, MAPQ 0,
+// cm:i and s1:i its path's. A path that does not project is left out.
+void dna_project_map_only_secondaries(
+    const DnaContext& context, const DnaPlacementChainingResult& placement,
+    dna::Result& realized);
 
 }  // namespace fa::cpu::lr
 
@@ -1860,6 +1869,12 @@ struct DnaRegionOutcome {
 
 DnaRegionOutcome realize_dna_regions(const DnaContext& context,
                                      const DnaFamilyRealizationRequest& request);
+
+// The attached chains of placement.kept_selection that the -c lane's
+// selection keeps (realization.cpp retain_regions), as item indices in the
+// parent walk's order. Reads no reference base.
+std::vector<int> dna_retained_secondary_items(
+    const DnaContext& context, const DnaPlacementChainingResult& placement);
 
 }  // namespace fa::cpu::lr
 

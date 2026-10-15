@@ -788,6 +788,10 @@ std::string resolved_config_text(const AlignOptions& opt,
       row("pool_gate_occ", i2s(mapping.dna_pool_gate_occ),
           src(opt.max_chain_occ.has_value(), "builtin"));
     }
+    // The within-read repeat filter's fraction, where the filter runs.
+    if (!overlap)
+      row("query_occ_frac", f2s(mapping.dna_query_occ_frac),
+          src(opt.q_occ_frac.has_value(), "builtin"));
   }
 
   if (is_rna && rna != nullptr) {
@@ -837,7 +841,8 @@ std::string resolved_config_text(const AlignOptions& opt,
         "builtin");
     row("dna_rival.pri_ratio", f2s(mapping.pri_ratio),
         src(opt.pri_ratio.has_value(), "builtin"));
-    // The cap only where the -c lane runs.
+    // -N bounds both lanes; printed where the preset has a -c lane (not the
+    // overlap presets, which keep every chain).
     if (fa::cpu::api::lane_runs_stage(fa::cpu::api::LaneStage::BaseAlignment,
                                       opt.preset))
       row("dna_rival.secondary_max", i2s(mapping.secondary_max),
@@ -1145,6 +1150,8 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.dna_vote_admission_ratio = *opt.dna_vote_admission_ratio;
   if (opt.max_chain_occ)
     u.dna_pool_gate_occ = *opt.max_chain_occ;
+  if (opt.q_occ_frac)
+    u.dna_query_occ_frac = *opt.q_occ_frac;
   if (opt.min_support)
     u.min_support = *opt.min_support;
   if (opt.vote_seeds)

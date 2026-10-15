@@ -385,6 +385,60 @@ DnaFamilyProjectionResult project_map_only_placement_family(
   return result;
 }
 
+void dna_project_map_only_secondaries(
+    const DnaContext& context, const DnaPlacementChainingResult& placement,
+    dna::Result& realized) {
+  namespace voting = ::fa::cpu::voting;
+  const DnaPlacementFamily& family = placement.family;
+  for (const int index : dna_retained_secondary_items(context, placement)) {
+    const DnaSelectionItem& item =
+        placement.kept_selection.items[static_cast<std::size_t>(index)];
+    const DnaPlacementCandidateChain* chain =
+        placement.find(static_cast<voting::CandidateId>(item.candidate));
+    const std::vector<chaining::Anchor>* path =
+        placement.selection_anchors(item);
+    if (chain == nullptr || path == nullptr || path->empty()) continue;
+    const chaining::Anchor& first = path->front();
+    const chaining::Anchor& last = path->back();
+    DnaBlockPart part;
+    part.path = item.path;
+    part.anchor_end = static_cast<int>(path->size());
+    part.forward_begin =
+        item.reverse ? family.read_length - last.q_end() : first.q;
+    part.forward_end =
+        item.reverse ? family.read_length - first.q : last.q_end();
+    part.score = part.item_score = item.score;
+    part.anchors = part.item_anchors = part.anchor_end;
+    voting::QueryBlock block;
+    block.candidate = static_cast<voting::CandidateId>(item.candidate);
+    block.query_tile_begin = voting::query_tile_for_position(
+        part.forward_begin, family.read_length, family.seed_length,
+        family.tile_count);
+    block.query_tile_end =
+        voting::query_tile_for_position(part.forward_end - 1,
+                                        family.read_length, family.seed_length,
+                                        family.tile_count) +
+        1;
+    int supporting = 0;
+    int previous = -1;
+    for (const chaining::Anchor& anchor : *path) {
+      const int tile =
+          dna_forward_query_tile(anchor.q, item.reverse, family.read_length,
+                                 family.seed_length, family.tile_count);
+      if (tile != previous) ++supporting;
+      previous = tile;
+    }
+    block.supporting_tiles = std::max(1, supporting);
+    AlignResult record;
+    if (!project_chained_block_impl(context, family, *chain, block, record,
+                                    nullptr, &part))
+      continue;
+    record.chain_anchors = part.anchors;
+    record.chain_score = item.score;
+    realized.secondary.push_back(std::move(record));
+  }
+}
+
 dna::Result settle_map_only_projection(DnaFamilyProjectionResult result) {
   dna::Result output = std::move(result.output);
   if (!result.committed)

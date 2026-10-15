@@ -542,6 +542,8 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.chain_band = mapping.chain_band;
   dctx.opts.dna_dense_diag_min_runs = mapping.dna_dense_diag_min_runs;
   dctx.opts.dna_pool_gate_occ = chain_occ.pool_gate_occ;
+  dctx.opts.dna_query_occ_frac =
+      static_cast<float>(mapping.dna_query_occ_frac);
   dctx.opts.k = cfg_.index.k;
   dctx.opts.cigar_dp_ambi = mapping.cigar_dp_ambi;
   dctx.opts.cigar_dp_bw = mapping.cigar_dp_bw;

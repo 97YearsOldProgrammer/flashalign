@@ -90,11 +90,11 @@ const std::vector<OptionSpec>& specs_table() {
          "min secondary-to-primary score ratio [0.8]", "", kSelection},
         // As in minimap2: -N 5 keeps the best locus and at most five rivals,
         // and -N 0 is --secondary no. On a splice preset up to INT rivals are
-        // realized; on a DNA preset the -c lane retains at most INT
-        // secondary alignments.
+        // realized; on a DNA preset both lanes retain at most INT secondary
+        // alignments.
         {OptionId::SpliceMaxLoci, 'N', "", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "retain at most INT secondary alignments [1; splice 5]", "", kSelection},
+         "retain at most INT secondary alignments [5]", "", kSelection},
         {OptionId::MinSupport, '\0', "--min-support", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "minimal number of seeds on a vote peak [3]"},
@@ -117,6 +117,13 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::MaxChainOcc, '\0', "--max-chain-occ", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "max seed occurrences in chaining; 0 to disable, leaving repeats unbounded [200]"},
+        // minimap2's --q-occ-frac: a read drops every seed key it holds more
+        // times than the chain cap and in more than FLOAT of its seeds. A
+        // float, so parsed from a string like -p. lr, lr:hq and the asm
+        // presets only.
+        {OptionId::QOccFrac, '\0', "--q-occ-frac", kStr, kStable, A,
+         "FLOAT", SEC_PLACEMENT,
+         "drop a seed repeated in the read past the chain cap and FLOAT of its seeds; 0 to disable [0.01]"},
         // The vote bin width is W = clamp(L / den, dw, dw-max) for a read of
         // length L. --dw fixes W; --dw-slope-den and --dw-max are DNA only.
         {OptionId::VoteDiagBinWidth, '\0', "--dw", kInt, kStable, A,
@@ -603,7 +610,7 @@ int parse_int_size(const std::string& value, const std::string& name) {
     return static_cast<int>(size);
 }
 
-// A real ratio in [0,1], for -p and --vote-ratio.
+// A real ratio in [0,1], for -p, --vote-ratio and --q-occ-frac.
 double parse_ratio(const std::string& value, const std::string& name) {
     char* end = nullptr;
     const double parsed = std::strtod(value.c_str(), &end);
@@ -976,6 +983,9 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
         case OptionId::MaxChainOcc:
             opt.max_chain_occ = parse_int(val, arg);
             break;
+        case OptionId::QOccFrac:
+            opt.q_occ_frac = parse_ratio(val, arg);
+            break;
         case OptionId::MinSupport:    opt.min_support = parse_int(val, arg); break;
         case OptionId::VoteSeeds:
             opt.vote_seeds = parse_int(val, arg);
@@ -1188,7 +1198,8 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
     // --cs and --MD imply a CIGAR, as minimap2's --cs does.
     if (!opt.cs.empty() || opt.emit_md)
       opt.paf_cigar = true;
-    // The RNA-preset check for --max-chain-occ is in options/options.cpp.
+    // The preset checks for --max-chain-occ and --q-occ-frac are in
+    // options/options.cpp.
     if (opt.max_chain_occ && *opt.max_chain_occ < 0)
         throw UsageError("--max-chain-occ must be >= 0");
     if (rna && opt.dna_vote_admission_ratio) {

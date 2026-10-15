@@ -84,6 +84,11 @@ inline constexpr int kDnaMinKswLen = 200;
 // the pool, so at 0 nothing does.
 inline constexpr int kDnaPoolGateOcc = 0;
 
+// The within-read repeat filter (--q-occ-frac), minimap2's q_occ_frac: a
+// read drops every seed key it holds more than the pool gate's N times and
+// in more than this fraction of its seeds (dna/map.cpp). 0 is off.
+inline constexpr double kDnaQueryOccFrac = 0.01;
+
 // Every DNA occurrence threshold is one number, N: the vote's seed occurrence
 // cap as resolved against the index (seed/seed.h, engine/engine.cpp
 // resolve_index_occ_cap_into):
@@ -246,11 +251,15 @@ struct DnaLongOptions {
   // Pool occurrence gate (--max-chain-occ); 0 is ungated. DNA presets
   // install kDnaPoolGateVoteCap.
   int dna_pool_gate_occ = kDnaPoolGateOcc;
+  // The within-read repeat filter's fraction (--q-occ-frac); 0 is off.
+  // lr, lr:hq and the asm presets install kDnaQueryOccFrac.
+  double dna_query_occ_frac = 0.0;
   // The vote's empty-tile rescue M (kDnaTileRescueOcc); 0 is none. DNA
   // presets install it; not settable.
   int dna_tile_rescue_occ = 0;
-  // -N: the rivals the -c lane realizes and keeps; one prices the MAPQ.
-  int secondary_max = 1;
+  // -N: the secondaries both lanes keep, map-only projected and the -c lane
+  // realized; one prices the MAPQ.
+  int secondary_max = 5;
 };
 
 // The lane bound: the vote's peaks and the catalogue's candidates per strand.
@@ -477,8 +486,8 @@ struct UserOverrides {
   std::optional<int> rna_max_loci; // >= 1
   // --vote-spacing, >= 0. RNA presets only.
   std::optional<int> rna_vote_seed_spacing;
-  // -N on a DNA preset, minimap2's best_n: the -c lane's cap on secondary
-  // alignments, >= 1.
+  // -N on a DNA preset, minimap2's best_n: the cap on secondary alignments,
+  // >= 1.
   std::optional<int> dna_secondary_max;
   // --vote-ratio: admit vote peaks by ratio to the read's best vote, in
   // [0,1]; 0 admits by count. DNA presets only.
@@ -486,6 +495,9 @@ struct UserOverrides {
   // --max-chain-occ: the dense chain's pool occurrence gate, >= 0; 0 is no
   // gate. Unset, the vote's cap. DNA presets only.
   std::optional<int> dna_pool_gate_occ;
+  // --q-occ-frac: the within-read repeat filter's fraction, in [0,1]; 0 is
+  // off. lr, lr:hq and the asm presets only.
+  std::optional<double> dna_query_occ_frac;
   // --max-cands: the lane bound, the vote's peaks and the catalogue's
   // candidates per strand, 1..64, or 1..16383 in the all-chains lane. DNA
   // presets only.

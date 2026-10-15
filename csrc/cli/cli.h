@@ -69,8 +69,9 @@ enum class OptionId {
     IndexBatchBp,
     // align: runtime
     Threads, BatchBp, BatchWindow, IoStaging, Progress, Quiet,
-    // align: seed occurrence caps for the vote and the dense chain
-    MaxVoteOcc, MaxChainOcc,
+    // align: seed occurrence caps for the vote and the dense chain, and the
+    // read's own repeats
+    MaxVoteOcc, MaxChainOcc, QOccFrac,
     // align: minimal chain score (minimap2 -m)
     MinChainScore,
     // align: vote peak admission
@@ -246,7 +247,7 @@ struct AlignOptions {
     // depth (-N + 1), which also sets the realization budget.
     std::optional<int> rna_rival_min_diff;
     std::optional<int> rna_max_loci;
-    // DNA: -N, minimap2's best_n, the -c lane's cap on secondary alignments.
+    // DNA: -N, minimap2's best_n, the cap on secondary alignments.
     std::optional<int> dna_secondary_max;
     // --vote-ratio: admit vote peaks by their ratio to the read's best vote,
     // in [0,1]; 0 admits by count. DNA presets only.
@@ -254,6 +255,10 @@ struct AlignOptions {
     // --max-chain-occ N: global occurrence gate on the dense chain's anchor
     // pool; 0 is no gate. Unset, the vote's cap applies. DNA presets only.
     std::optional<int> max_chain_occ;
+    // --q-occ-frac F: minimap2's q_occ_frac, the within-read repeat
+    // filter's fraction of the read's seeds, in [0,1]; 0 turns the filter
+    // off. lr, lr:hq and the asm presets only.
+    std::optional<double> q_occ_frac;
     // --max-vote-occ INT: the vote's seed occurrence cap. Unset, the cap is
     // max(the preset's value, the index's mid-occurrence quantile); 0 turns
     // filtering off and >0 fixes the cap. On a DNA preset the chain's
