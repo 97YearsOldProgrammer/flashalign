@@ -207,11 +207,14 @@ void bind_alignment(nb::module_& module) {
           },
           "Rival placement hypotheses, on the primary only.\n"
           "\n"
-          "These are what MAPQ was computed against, not records of their\n"
-          "own: the CLI writes secondary rows only under --secondary yes, and\n"
-          "map() never returns them. Each rival is flattened like the primary\n"
-          "(the rival, then its supplementary segments). Empty on a\n"
-          "supplementary Hit and on a rival.")
+          "Not records of their own: the CLI writes secondary rows only under\n"
+          "--secondary yes, and map() never returns them. With a CIGAR they\n"
+          "are the realized rivals the MAPQ was priced against; in DNA\n"
+          "map-only they are the secondaries -N keeps, projected from their\n"
+          "whole chains after the primaries are priced, which the MAPQ never\n"
+          "saw. Each rival is flattened like the primary (the rival, then its\n"
+          "supplementary segments). Empty on a supplementary Hit and on a\n"
+          "rival.")
       .def(
           "__str__",
           [](const Hit& hit) {
