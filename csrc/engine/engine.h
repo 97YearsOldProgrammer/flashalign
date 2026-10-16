@@ -226,11 +226,11 @@ public:
   DnaChainGeometry dna_chain_geometry() const;
 
 private:
-  // Sets the DNA vote occurrence cap from the attached index under LongOccPolicy::Platform:
-  // max(preset floor, the index's kLongOccQuantileF occurrence quantile as minimap2's
+  // Sets the vote occurrence cap from the attached index under LongOccPolicy::Platform:
+  // max(preset floor, the index's occurrence quantile at the preset's f as minimap2's
   // mm_idx_cal_max_occ), then at most the preset ceiling. Records how it was derived in
-  // long_occ_index_resolution. Does nothing for RNA, for a fixed cap (--max-vote-occ) or
-  // without an index. Repeated calls start again from the recorded floor.
+  // long_occ_index_resolution. Does nothing for a fixed cap (--max-vote-occ) or without
+  // an index. Repeated calls start again from the recorded floor.
   void resolve_index_occ_cap_into(
       ::fa::cpu::options::ResolvedOptions& config);
 

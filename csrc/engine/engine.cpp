@@ -1,6 +1,8 @@
 // The engine's plain members: loading, reference encoding, the DNA context and the RNA runtime.
 #include "engine.h"
 
+#include <limits>
+
 /**** aligner ****/
 
 namespace fa {
@@ -181,7 +183,6 @@ DnaChainGeometry LongReadEngine::dna_chain_geometry() const {
 
 void LongReadEngine::resolve_index_occ_cap_into(
     ::fa::cpu::options::ResolvedOptions& config) {
-  if (config.is_rna()) return;
   auto& mapping = config.long_read();
   if (mapping.long_occ_policy != LongOccPolicy::Platform) return;
   if (!index_ || index_->empty()) return;
@@ -192,7 +193,7 @@ void LongReadEngine::resolve_index_occ_cap_into(
   }
   const auto& previous = mapping.long_occ_index_resolution;
   LongOccIndexResolution record;
-  record.quantile_f = ::fa::cpu::lr::kLongOccQuantileF;
+  record.quantile_f = mapping.long_occ_quantile_f;
   record.distinct_keys = occ_dist_->n_distinct;
   record.total_postings = occ_dist_->total_postings;
   record.floor_cap = std::max(
@@ -344,8 +345,11 @@ void LongReadEngine::compose_rna_runtime(
   rna::ResolvedOptions opts;
   opts.cfg = rc;
   opts.splice_controller = controller;
-  // RNA uses the preset value.
-  opts.cigar_local_global_occ = mapping.cigar_local_global_occ;
+  // The fine harvest's cap is the vote's N; none when the cap is off.
+  const int occ_cap =
+      effective_long_primary_occ_cap(long_occ_policy_config(mapping));
+  opts.cigar_local_global_occ =
+      occ_cap > 0 ? occ_cap : std::numeric_limits<int>::max();
   opts.cigar_local_interval_anchor_chain_max_gap =
       mapping.cigar_local_interval_anchor_chain_max_gap;
   opts.fine_chain_band = mapping.cigar_dp_bw;

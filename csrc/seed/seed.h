@@ -308,13 +308,15 @@ struct LongOccPolicyConfig {
     int platform_occ_cap = 12;
 };
 
-// The DNA vote occurrence cap. Under LongOccPolicy::Platform, the presets' policy, it is
-//     max(platform_occ_cap, mm_idx_cal_max_occ(attached index, kLongOccQuantileF))
-// limited by the preset's ceiling, if any. The quantile only raises the preset floor, so a
-// repeat-rich reference gets a higher cap; f is chosen so a human reference resolves to the
-// floor. --max-vote-occ selects LongOccPolicy::Fixed (or Off at 0), which skips the rule
-// and its index scan.
+// The vote occurrence cap. Under LongOccPolicy::Platform, the presets' policy, it is
+//     max(platform_occ_cap, mm_idx_cal_max_occ(attached index, f))
+// limited by the preset's ceiling, if any, with one f per seed shape: kLongOccQuantileF on
+// the DNA presets (k21), kRnaOccQuantileF on the splice presets (k15 s10). The quantile
+// only raises the preset floor, so a repeat-rich reference gets a higher cap; each f is
+// chosen so the human and mouse references resolve to the floor. --max-vote-occ selects
+// LongOccPolicy::Fixed (or Off at 0), which skips the rule and its index scan.
 inline constexpr double kLongOccQuantileF = 1.81e-4;
+inline constexpr double kRnaOccQuantileF = 1.62e-3;
 
 // How the cap was resolved, filled at index-attach time for reporting only. `resolved` is
 // false until an index is attached.

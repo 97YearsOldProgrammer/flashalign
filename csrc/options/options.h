@@ -99,15 +99,18 @@ inline constexpr double kQueryOccFrac = 0.01;
 // seeds. The splice presets install kOccDist; the DNA presets 0, which is off.
 inline constexpr int kOccDist = 500;
 
-// Every DNA occurrence threshold is one number, N: the vote's seed occurrence
-// cap as resolved against the index (seed/seed.h, engine/engine.cpp
+// Every occurrence threshold of a lane is one number, N: the vote's seed
+// occurrence cap as resolved against the index (seed/seed.h, engine/engine.cpp
 // resolve_index_occ_cap_into):
-//   lr     N = max(200, mm_idx_cal_max_occ(index, 1.81e-4))
-//   lr:hq  N = min(500, max(200, mm_idx_cal_max_occ(index, 1.81e-4)))
+//   lr                N = max(200, mm_idx_cal_max_occ(index, 1.81e-4))
+//   lr:hq             N = min(500, max(200, mm_idx_cal_max_occ(index, 1.81e-4)))
+//   splice, splice:hq N = max(200, mm_idx_cal_max_occ(index, 1.62e-3))
 // where 500 is minimap2's map-hifi max_mid_occ. dna_chain_occ_thresholds()
-// hands N to the pool gate.
-// --max-vote-occ INT sets N for the vote and the chain alike, and 0 removes
-// every cap; --max-chain-occ INT replaces N on the pool gate only.
+// hands N to the pool gate; on the splice presets N is also the second pass's,
+// the fine harvest's and the leftover step's cap (engine/engine.cpp
+// compose_rna_runtime).
+// --max-vote-occ INT sets N for every gate alike, and 0 removes every cap;
+// --max-chain-occ INT replaces N on the pool gate only.
 //
 // kDnaPoolGateVoteCap is the dna_pool_gate_occ value that means N. It is
 // outside --max-chain-occ's domain.
@@ -185,6 +188,9 @@ struct DnaLongOptions {
   // min(ceiling, max(floor, quantile)), and a ceiling below the floor does
   // not apply, as minimap2's mm_mapopt_update clamps mid_occ.
   int long_occ_ceiling = kDnaOccCeiling;
+  // The rule's quantile fraction f: kLongOccQuantileF, or kRnaOccQuantileF on
+  // the splice presets.
+  double long_occ_quantile_f = kLongOccQuantileF;
   LongOccPolicy long_occ_policy = LongOccPolicy::Platform;
   // How the engine resolved the cap against the index; reported only.
   LongOccIndexResolution long_occ_index_resolution;
@@ -243,10 +249,6 @@ struct DnaLongOptions {
   // The dense (whole-query) chain passes' diagonal band (-b).
   int chain_band = 20000;
   bool cigar_local_occ_mode_global = true;
-  // Global occurrence cap: seeds whose exact reference occurrence exceeds it
-  // are dropped. Only the RNA path reads this field (compose_rna_runtime); the
-  // DNA path uses N from dna_chain_occ_thresholds() instead.
-  int cigar_local_global_occ = 200;
   // Dense-chain search crossover (kDnaDenseDiagMinRuns); not settable.
   int dna_dense_diag_min_runs = kDnaDenseDiagMinRuns;
   // HiFi only (dna/dna.h): when the rival that owns dp2 has fewer

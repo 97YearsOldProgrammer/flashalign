@@ -346,12 +346,13 @@ Minimal number of seeds on a vote peak [3]. The splice presets use 2.
 .BI \-\-max\-vote\-occ \ INT
 Ignore a seed whose reference occurrence is above
 .I INT
-when voting, and under a DNA preset when chaining too; 0 turns occurrence
-filtering off [200]. Unset, the cap is the larger of 200 and the occurrence of the
-top 1.81e\-4 fraction of the most frequent seeds in the index, at most 500 under
+when voting, under a DNA preset when chaining too, and under a splice preset
+in every later step that reads seeds; 0 turns occurrence filtering off [200].
+Unset, the cap is the larger of 200 and the occurrence of the top 1.81e\-4
+fraction (1.62e\-3 under splice and splice:hq) of the most frequent seeds in the
+index, at most 500 under
 .BR lr:hq ,
-and the DNA chaining gates take the same cap. The splice presets keep the fixed
-200. Under a DNA preset a vote tile whose seeds are all above the cap still votes
+and the DNA chaining gates take the same cap. Under a DNA preset a vote tile whose seeds are all above the cap still votes
 with its rarest seed of at most 4095 occurrences
 .RB ( lr )
 or 1024
@@ -772,11 +773,13 @@ reference base and no read, so
 .B flashalign align \-x lr:hq \-\-show\-config
 is a complete invocation; of a
 .I .faix
-target it reads the header, except that with a DNA preset and a single-part
-index it loads the index without its bases and appends rows tagged
+target it reads the header, except that with a DNA or splice preset and a
+single-part index it loads the index without its bases (with them under
+.BR \-\-junc\-bed )
+and appends rows tagged
 .BR [resolved] :
-the seed occurrence cap and its parts, the rescue window, the vote's bin width
-at four read lengths and the chain's band and reach.
+the seed occurrence cap and its parts, and under a DNA preset the rescue window,
+the vote's bin width at four read lengths and the chain's band and reach.
 .TP
 .B \-\-stats
 Print a summary of the run to stderr: reads and bases, mapped reads, records

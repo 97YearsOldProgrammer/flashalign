@@ -210,8 +210,8 @@ static void set_dna_long_platform_fields(
     mapping.vote_diag_bin_width_adaptive = true;
     mapping.vote_diag_slope_den = profile.vote_diag_slope_den;
     mapping.vote_diag_width_max = profile.vote_diag_width_max;
-    // The floor of the vote occurrence cap. On a DNA run the engine raises
-    // it to the index's mid-occurrence quantile when larger
+    // The floor of the vote occurrence cap, on the splice presets too. The
+    // engine raises it to the index's mid-occurrence quantile when larger
     // (seed/seed.h), up to long_occ_ceiling.
     mapping.long_occ_cap = 200;
     mapping.query_tiles = profile.placement.query_tiles;
@@ -370,6 +370,9 @@ static void set_splice_fields(
     mapping.base.inversion_probe_local_gate = false;
     mapping.base.dna_pool_gate_occ = 0;
     mapping.base.dna_tile_rescue_occ = 0;
+    // The vote's cap rule with the RNA seed shape's f, the DNA floor and no
+    // ceiling; its N is every RNA occurrence gate's (options.h).
+    mapping.base.long_occ_quantile_f = lr::kRnaOccQuantileF;
     mapping.base.long_occ_ceiling = 0;
     // The within-read repeat filter and the seed selection, at the vote's cap.
     mapping.base.query_occ_frac = lr::kQueryOccFrac;

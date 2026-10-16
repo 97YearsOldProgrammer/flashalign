@@ -622,12 +622,12 @@ std::string resolved_config_text(const AlignOptions& opt,
   occ_cfg.primary_occ_cap = mapping.long_primary_occ_cap;
   occ_cfg.platform_occ_cap = mapping.long_occ_cap;
   const bool occ_explicit = opt.max_vote_occ.has_value();
-  // The default DNA rule is max(preset floor, index quantile), capped by an
+  // The default rule is max(preset floor, index quantile), capped by an
   // optional ceiling. Until an index has been scanned (e.g. --show-config),
   // the row prints the rule instead of a number.
   const auto& occ_index = mapping.long_occ_index_resolution;
   const bool occ_rule =
-      !is_rna && !occ_explicit &&
+      !occ_explicit &&
       mapping.long_occ_policy == fa::cpu::lr::LongOccPolicy::Platform;
   if (occ_rule && !occ_index.resolved) {
     // As resolve_index_occ_cap_into: a ceiling applies when set and not
@@ -638,7 +638,7 @@ std::string resolved_config_text(const AlignOptions& opt,
     if (ceiling)
       rule << "min(" << mapping.long_occ_ceiling << ", ";
     rule << "max(" << mapping.long_occ_cap << ", index quantile f="
-         << fa::cpu::lr::kLongOccQuantileF << ')';
+         << mapping.long_occ_quantile_f << ')';
     if (ceiling)
       rule << ')';
     row("max_seed_occ", rule.str(), "rule");
@@ -904,9 +904,9 @@ void show_config(const AlignOptions& opt,
   }
 }
 
-// --show-config on a DNA preset with a .faix: the numbers that need the loaded
-// index, or that the lane derives from the read length, each tagged
-// [resolved]; printed after show_config's rows.
+// --show-config on a DNA or splice preset with a .faix: the numbers that need
+// the loaded index, or that the lane derives from the read length, each tagged
+// [resolved]; printed after show_config's rows. A splice preset prints N only.
 void show_index_resolved(const fa::cpu::api::LongReadAligner& aligner,
                          std::ostream& out) {
   // The read lengths the length-dependent rows are printed at.
@@ -941,6 +941,10 @@ void show_index_resolved(const fa::cpu::api::LongReadAligner& aligner,
           << " floor=" << occ.floor_cap
           << " ceiling=" << cap_text(occ.ceiling_cap);
     row("occ_cap.parts", parts.str());
+  }
+  if (cfg.is_rna()) {
+    out << os.str();
+    return;
   }
   const fa::cpu::lr::DnaChainOccThresholds chain_occ =
       fa::cpu::lr::dna_chain_occ_thresholds(mapping);
@@ -1342,16 +1346,17 @@ void run_show_config(const AlignOptions& opt, const ResolvedInputs& in) {
       fa::cpu::api::resolve_options(req);
   show_config(opt, resolved.resolved(), resolved.mode(), reference_sequences,
               std::cout);
-  // A DNA preset's occurrence cap needs the index's postings, so the index
-  // is loaded, without its bases. A multi-part index resolves per part and
-  // prints nothing here.
+  // The occurrence cap needs the index's postings, so the index is loaded,
+  // without its bases unless a junction BED needs them. A multi-part index
+  // resolves per part and prints nothing here.
+  const bool rna = resolved.mode() == fa::cpu::api::BackendMode::RnaSplice;
   if (in.use_index && !in.multipart &&
-      resolved.mode() == fa::cpu::api::BackendMode::DnaLong) {
+      (rna || resolved.mode() == fa::cpu::api::BackendMode::DnaLong)) {
     fa::cpu::api::LongReadAligner aligner =
         fa::cpu::api::LongReadAligner::from_index(
             {}, in.index_path, opt.min_support.value_or(3),
             /*chain_syncmer_downsample=*/1, req.user.num_threads.value_or(0),
-            /*reference_bases_needed=*/false);
+            /*reference_bases_needed=*/rna && opt.rna_junction_bed.has_value());
     aligner.reconfigure(resolved.resolved());
     show_index_resolved(aligner, std::cout);
   }

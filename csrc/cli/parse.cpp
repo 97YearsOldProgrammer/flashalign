@@ -99,8 +99,8 @@ const std::vector<OptionSpec>& specs_table() {
          "INT", SEC_PLACEMENT,
          "minimal number of seeds on a vote peak [3]"},
         // Unset, the cap is max(the preset's cap, the index's mid-occurrence
-        // quantile); 0 disables it and a positive value fixes it. On a DNA
-        // preset the chain's occurrence thresholds follow it.
+        // quantile); 0 disables it and a positive value fixes it. Every
+        // occurrence gate of the lane follows it.
         {OptionId::MaxVoteOcc, '\0', "--max-vote-occ", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "max seed occurrences in voting [200]"},
