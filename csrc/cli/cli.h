@@ -257,7 +257,7 @@ struct AlignOptions {
     std::optional<int> max_chain_occ;
     // --q-occ-frac F: minimap2's q_occ_frac, the within-read repeat
     // filter's fraction of the read's seeds, in [0,1]; 0 turns the filter
-    // off. lr, lr:hq and the asm presets only.
+    // off. Every preset but the overlap ones.
     std::optional<double> q_occ_frac;
     // --max-vote-occ INT: the vote's seed occurrence cap. Unset, the cap is
     // max(the preset's value, the index's mid-occurrence quantile); 0 turns

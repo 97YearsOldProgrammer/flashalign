@@ -1153,6 +1153,18 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
   if (shared_fwd_syncmer_seeds == nullptr) {
     return finish(rs, std::move(out));
   }
+  // Every consumer below, the vote, the second pass, the harvests and the
+  // leftover step, reads the stream without the read's repeated keys, capped
+  // at the vote's N.
+  {
+    std::size_t dropped = 0;
+    shared_fwd_syncmer_seeds = drop_query_repeats(
+        *shared_fwd_syncmer_seeds,
+        effective_long_primary_occ_cap(seed_ctx.occ_policy),
+        rctx.opts.query_occ_frac, worker_scratch.query_occ_keys,
+        worker_scratch.query_occ_seeds, dropped);
+    facts.shared_fwd_syncmer_seeds = shared_fwd_syncmer_seeds;
+  }
   // The read's key: the immutable exact-anchor-path bundle identity.
   facts.read_key = rna::hash_rna_read_key(read);
 

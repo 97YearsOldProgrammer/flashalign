@@ -382,12 +382,14 @@ DNA presets only.
 .TP
 .BI \-\-q\-occ\-frac \ FLOAT
 Before voting, drop every seed whose k-mer occurs in the read more times than
-the chaining cap
-.RB ( \-\-max\-chain\-occ )
-and in more than
+the occurrence cap and in more than
 .I FLOAT
 of the read's seeds, as minimap2's option of the same name does [0.01]; 0
-turns this filter off. Only under lr, lr:hq, asm5, asm10 and asm20.
+turns this filter off. The cap is the chaining cap
+.RB ( \-\-max\-chain\-occ )
+under lr, lr:hq, asm5, asm10 and asm20, and the voting cap
+.RB ( \-\-max\-vote\-occ )
+under splice and splice:hq. Not under ava\-ont and ava\-hifi.
 .TP
 .BI \-\-dw \ INT
 Width in reference bases of the diagonal bin a seed votes into, greater than 0

@@ -788,11 +788,12 @@ std::string resolved_config_text(const AlignOptions& opt,
       row("pool_gate_occ", i2s(mapping.dna_pool_gate_occ),
           src(opt.max_chain_occ.has_value(), "builtin"));
     }
-    // The within-read repeat filter's fraction, where the filter runs.
-    if (!overlap)
-      row("query_occ_frac", f2s(mapping.dna_query_occ_frac),
-          src(opt.q_occ_frac.has_value(), "builtin"));
   }
+  // The within-read repeat filter's fraction, where the filter runs: both
+  // lanes, not the all-chains one.
+  if (!overlap)
+    row("query_occ_frac", f2s(mapping.query_occ_frac),
+        src(opt.q_occ_frac.has_value(), "builtin"));
 
   if (is_rna && rna != nullptr) {
     row("rna_min_intron", i2s(rna->min_intron),
@@ -1151,7 +1152,7 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
   if (opt.max_chain_occ)
     u.dna_pool_gate_occ = *opt.max_chain_occ;
   if (opt.q_occ_frac)
-    u.dna_query_occ_frac = *opt.q_occ_frac;
+    u.query_occ_frac = *opt.q_occ_frac;
   if (opt.min_support)
     u.min_support = *opt.min_support;
   if (opt.vote_seeds)

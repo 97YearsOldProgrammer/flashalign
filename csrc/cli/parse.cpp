@@ -118,12 +118,13 @@ const std::vector<OptionSpec>& specs_table() {
          "INT", SEC_PLACEMENT,
          "max seed occurrences in chaining; 0 to disable, leaving repeats unbounded [200]"},
         // minimap2's --q-occ-frac: a read drops every seed key it holds more
-        // times than the chain cap and in more than FLOAT of its seeds. A
-        // float, so parsed from a string like -p. lr, lr:hq and the asm
-        // presets only.
+        // times than the lane's occurrence cap (the chain cap on a DNA
+        // preset, the vote cap on a splice preset) and in more than FLOAT of
+        // its seeds. A float, so parsed from a string like -p. Every preset
+        // but the overlap ones.
         {OptionId::QOccFrac, '\0', "--q-occ-frac", kStr, kStable, A,
          "FLOAT", SEC_PLACEMENT,
-         "drop a seed repeated in the read past the chain cap and FLOAT of its seeds; 0 to disable [0.01]"},
+         "drop a seed repeated in the read past the occurrence cap and FLOAT of its seeds; 0 to disable [0.01]"},
         // The vote bin width is W = clamp(L / den, dw, dw-max) for a read of
         // length L. --dw fixes W; --dw-slope-den and --dw-max are DNA only.
         {OptionId::VoteDiagBinWidth, '\0', "--dw", kInt, kStable, A,

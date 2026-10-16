@@ -85,9 +85,11 @@ inline constexpr int kDnaMinKswLen = 200;
 inline constexpr int kDnaPoolGateOcc = 0;
 
 // The within-read repeat filter (--q-occ-frac), minimap2's q_occ_frac: a
-// read drops every seed key it holds more than the pool gate's N times and
-// in more than this fraction of its seeds (dna/map.cpp). 0 is off.
-inline constexpr double kDnaQueryOccFrac = 0.01;
+// read drops every seed key it holds more than N times and in more than this
+// fraction of its seeds (seed/seed.h drop_query_repeats). N is the lane's
+// cap: the pool gate's on a DNA preset, the vote's on a splice preset. 0 is
+// off.
+inline constexpr double kQueryOccFrac = 0.01;
 
 // Every DNA occurrence threshold is one number, N: the vote's seed occurrence
 // cap as resolved against the index (seed/seed.h, engine/engine.cpp
@@ -252,8 +254,8 @@ struct DnaLongOptions {
   // install kDnaPoolGateVoteCap.
   int dna_pool_gate_occ = kDnaPoolGateOcc;
   // The within-read repeat filter's fraction (--q-occ-frac); 0 is off.
-  // lr, lr:hq and the asm presets install kDnaQueryOccFrac.
-  double dna_query_occ_frac = 0.0;
+  // Every preset but the overlap ones installs kQueryOccFrac.
+  double query_occ_frac = 0.0;
   // The vote's empty-tile rescue M (kDnaTileRescueOcc); 0 is none. DNA
   // presets install it; not settable.
   int dna_tile_rescue_occ = 0;
@@ -496,8 +498,8 @@ struct UserOverrides {
   // gate. Unset, the vote's cap. DNA presets only.
   std::optional<int> dna_pool_gate_occ;
   // --q-occ-frac: the within-read repeat filter's fraction, in [0,1]; 0 is
-  // off. lr, lr:hq and the asm presets only.
-  std::optional<double> dna_query_occ_frac;
+  // off. Every preset but the overlap ones.
+  std::optional<double> query_occ_frac;
   // --max-cands: the lane bound, the vote's peaks and the catalogue's
   // candidates per strand, 1..64, or 1..16383 in the all-chains lane. DNA
   // presets only.

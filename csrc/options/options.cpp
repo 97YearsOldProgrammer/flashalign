@@ -238,8 +238,8 @@ static void set_dna_long_platform_fields(
         hifi_row ? lr::kDnaHiFiOccCeiling : lr::kDnaOccCeiling;
     mapping.dna_pool_gate_occ = lr::kDnaPoolGateVoteCap;
     // The within-read repeat filter; the all-chains lane keeps every seed.
-    mapping.dna_query_occ_frac =
-        profile.overlap.on ? 0.0 : lr::kDnaQueryOccFrac;
+    mapping.query_occ_frac =
+        profile.overlap.on ? 0.0 : lr::kQueryOccFrac;
     // The vote's empty-tile rescue past N, up to M (seed/seed.h).
     mapping.dna_tile_rescue_occ =
         hifi_row ? lr::kDnaHiFiTileRescueOcc : lr::kDnaTileRescueOcc;
@@ -369,9 +369,10 @@ static void set_splice_fields(
     mapping.base.chain_mapq_hifi_margin = false;
     mapping.base.inversion_probe_local_gate = false;
     mapping.base.dna_pool_gate_occ = 0;
-    mapping.base.dna_query_occ_frac = 0.0;
     mapping.base.dna_tile_rescue_occ = 0;
     mapping.base.long_occ_ceiling = 0;
+    // The within-read repeat filter, at the vote's cap.
+    mapping.base.query_occ_frac = lr::kQueryOccFrac;
     // RNA's own support floor.
     common.min_support = 2;
 
@@ -596,15 +597,16 @@ void apply_vote_overrides(bool rna_mode, bool overlap_mode,
           "--max-chain-occ must be >= 0");
     mapping.dna_pool_gate_occ = *user.dna_pool_gate_occ;
   }
-  // --q-occ-frac: read placement only; the all-chains lane keeps every
-  // seed. The CLI relies on this check.
-  if ((rna_mode || overlap_mode) && user.dna_query_occ_frac)
+  // --q-occ-frac: read placement, DNA and RNA; the all-chains lane keeps
+  // every seed. The CLI relies on this check.
+  if (overlap_mode && user.query_occ_frac)
     throw std::invalid_argument(
-        "--q-occ-frac is valid only with lr, lr:hq, asm5, asm10 or asm20");
-  if (user.dna_query_occ_frac) {
-    if (!(*user.dna_query_occ_frac >= 0.0) || *user.dna_query_occ_frac > 1.0)
+        "--q-occ-frac is valid only with lr, lr:hq, asm5, asm10, asm20, "
+        "splice or splice:hq");
+  if (user.query_occ_frac) {
+    if (!(*user.query_occ_frac >= 0.0) || *user.query_occ_frac > 1.0)
       throw std::invalid_argument("--q-occ-frac must be within [0,1]");
-    mapping.dna_query_occ_frac = *user.dna_query_occ_frac;
+    mapping.query_occ_frac = *user.query_occ_frac;
   }
   // --vote-ratio overrides the preset's ratio; an explicit 0 admits by count.
   if (rna_mode && user.dna_vote_admission_ratio)

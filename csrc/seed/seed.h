@@ -613,3 +613,20 @@ void limit_query_seeds_with_lookup_cache(
 );
 
 }}}  // namespace fa::cpu::lr
+
+/**** query_filter ****/
+// minimap2's within-read seed filter, on a lane's forward seed stream.
+
+namespace fa { namespace cpu { namespace lr {
+
+// minimap2's mm_seed_mz_flt (seed.c) on the read's forward seed stream, whose
+// keys are canonical, so both strands lose a key at once. A key held more than
+// `cap` times and more than `frac` of the stream's seeds is dropped; a cap or
+// frac of 0 drops nothing. Returns `seeds` when nothing is dropped, else
+// `kept`. `keys` is scratch.
+const std::vector<QuerySeed>* drop_query_repeats(
+    const std::vector<QuerySeed>& seeds, int cap, float frac,
+    std::vector<std::uint64_t>& keys, std::vector<QuerySeed>& kept,
+    std::size_t& dropped);
+
+}}}  // namespace fa::cpu::lr

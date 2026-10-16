@@ -1339,6 +1339,8 @@ struct ResolvedOptions {
   // The vote's seeds per strand on a read of length L: max(the seed context's,
   // ceil(L / vote_seed_spacing)); 0 keeps the seed context's.
   int vote_seed_spacing = 0;
+  // The within-read repeat filter's fraction (--q-occ-frac); 0 is off.
+  float query_occ_frac = 0.0f;
 
   // Rival realization lifecycle options; the lifecycle is the requested-CIGAR path's
   // only arbitration.
@@ -1710,6 +1712,10 @@ struct WorkerScratch {
   // Realization's DP arena and packet buffers, shared by rank 1, every rival and both
   // transcript hypotheses, which run one after another on this thread.
   SpliceRealizationScratch realization;
+  // seed/seed.h drop_query_repeats: the read's sorted seed keys, and its forward
+  // stream without the repeated ones. Each read that uses them refills them.
+  std::vector<std::uint64_t> query_occ_keys;
+  std::vector<QuerySeed> query_occ_seeds;
 };
 
 } // namespace rna
