@@ -572,7 +572,7 @@ std::vector<DnaPlacementCandidateChain> build_dna_target_chains(
   if (!seed_index.build(
           *context.ref.index, forward_seeds, reverse_seeds, fine_forward_seeds,
           fine_reverse_seeds, lookup_cache, fine_forward_slots,
-          fine_reverse_slots))
+          fine_reverse_slots, context.readmitted))
     return chains;
   chains.resize(family.candidates.size());
   for (std::size_t index = 0; index < family.candidates.size(); ++index)

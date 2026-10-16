@@ -59,6 +59,8 @@ struct ResolvedDnaOptions {
   int dna_pool_gate_occ = 0;
   // The within-read repeat filter's fraction (--q-occ-frac); 0 = off.
   float dna_query_occ_frac = 0.0f;
+  // minimap2's occ_dist (-e), the seed selection's streak spacing; 0 = off.
+  int occ_dist = 0;
 
   // Realization (CIGAR output).
   int k = 21; // seed length
@@ -158,6 +160,11 @@ struct DnaContext {
   // placement (DnaPlacementChainingResult::inversion_gate_seeds) and set by
   // map_read for every realization of the read; null when not kept.
   const RetainedSeedDensity* inversion_gate_seeds = nullptr;
+  // The read's seeds re-admitted past the pool gate's N (seed/seed.h
+  // mark_readmitted_seeds), one byte per forward read position, set by
+  // map_read when opts.occ_dist > 0, null otherwise. The vote and every pool
+  // gate admit them as rescued seeds (RetainedSeedRef::rescued).
+  const std::vector<std::uint8_t>* readmitted = nullptr;
 };
 
 } // namespace lr
@@ -235,7 +242,8 @@ class RetainedSeedDensity {
   // A rescued vote seed's fine twin is the fine seed of its strand with its
   // read_pos and key: both come from the strand's one seed stream. A fine seed
   // is tandem by its neighbours in its strand's whole fine stream, a vote seed
-  // as its fine twin.
+  // as its fine twin. A fine seed marked in `readmitted` (DnaContext::
+  // readmitted, at its forward read position) is rescued too.
   bool build(const SeedIndex& index,
              const std::vector<ChainWindowRetainedSeed>* forward,
              const std::vector<ChainWindowRetainedSeed>* reverse,
@@ -243,7 +251,8 @@ class RetainedSeedDensity {
              const std::vector<QuerySeed>* fine_reverse = nullptr,
              const ChainSeedLookupCache* lookup_cache = nullptr,
              const std::vector<std::uint32_t>* fine_forward_slots = nullptr,
-             const std::vector<std::uint32_t>* fine_reverse_slots = nullptr);
+             const std::vector<std::uint32_t>* fine_reverse_slots = nullptr,
+             const std::vector<std::uint8_t>* readmitted = nullptr);
 
   const std::vector<RetainedSeedRef>& fine_forward() const {
     return fine_forward_;

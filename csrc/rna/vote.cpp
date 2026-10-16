@@ -171,6 +171,8 @@ struct CaptureCall {
   int n_chr;
   int W;
   std::vector<KmerPostingView>& views;
+  // The seeds re-admitted past the cap, by forward read position, or null.
+  const std::uint8_t* readmitted;
 };
 
 // Vote per strand from the cached views; no further index lookups.
@@ -203,7 +205,8 @@ void vote_strand(const CaptureCall& call,
     const KmerPostingView& v = views[view_index];
     if (!v.found() || v.count == 0)
       continue;
-    if (!chain_window_seed_occ_allowed(ctx, v))
+    if (!chain_window_seed_occ_allowed(ctx, v) &&
+        !(call.readmitted != nullptr && call.readmitted[fwd_pos] != 0))
       continue;
     int chr_idx =
         chromosome_index_for_global_pos(chr_bounds, n_chr, v.positions[0]);
@@ -262,10 +265,13 @@ void vote_strand(const CaptureCall& call,
 FusedCaptureSummary capture_votes_fused(
     const LongReadSeedContext& ctx, const std::vector<QuerySeed>& fwd_seeds,
     const std::vector<QuerySeed>& rc_seeds, int read_len, int max_seeds,
-    FusedCaptureScratch& scratch) {
+    FusedCaptureScratch& scratch,
+    int occ_dist, std::vector<std::uint8_t>* readmitted) {
   FusedCaptureSummary summary;
   scratch.fwd_log.clear();
   scratch.rc_log.clear();
+  if (readmitted != nullptr)
+    readmitted->assign(static_cast<std::size_t>(std::max(read_len, 0)), 0);
   scratch.fwd_bins.reset(fwd_seeds.size());
   scratch.rc_bins.reset(rc_seeds.size());
   const int k = ctx.k;
@@ -288,6 +294,10 @@ FusedCaptureSummary capture_votes_fused(
   views.reserve(fwd_seeds.size());
   for (const QuerySeed& seed : fwd_seeds)
     views.push_back(ctx.index->lookup(seed.key));
+  if (readmitted != nullptr)
+    mark_readmitted_seeds(fwd_seeds, views, read_len, k,
+                          effective_long_primary_occ_cap(ctx.occ_policy),
+                          occ_dist, *readmitted);
 
   select_strand(scratch, read_len, max_seeds, fwd_seeds,
                 /*reversed_views=*/false, scratch.selected_fwd);
@@ -297,7 +307,8 @@ FusedCaptureSummary capture_votes_fused(
   summary.rc_voted_seeds = scratch.selected_rc.size();
 
   const CaptureCall call{ctx, fwd_seeds, read_len,
-                         summary, k, chr_bounds, n_chr, W, views};
+                         summary, k, chr_bounds, n_chr, W, views,
+                         readmitted != nullptr ? readmitted->data() : nullptr};
   vote_strand(call, scratch.selected_fwd, /*is_rc=*/false, scratch.fwd_log,
               scratch.fwd_bins);
   vote_strand(call, scratch.selected_rc, /*is_rc=*/true, scratch.rc_log,
@@ -1118,13 +1129,15 @@ namespace fa::cpu::lr::rna {
 // occurrence policy) and bin key, on both strand frames. `views` is the capture's
 // posting view per forward seed, so nothing probes the index. The posting budget is
 // checked before any posting is walked; over it the read is declined. Returns the peaks
-// drained at `min_support`; `capture` is cleared and used as scratch.
+// drained at `min_support`; `capture` is cleared and used as scratch. A seed marked in
+// `readmitted` (by forward read position, or null) passes the occurrence policy.
 static std::vector<placement::CoarseDiagonalPeak>
 rna_revote_intervals(const LongReadSeedContext& seed_ctx,
                      const std::vector<QuerySeed>& forward_seeds,
                      const std::vector<KmerPostingView>& views,
                      const std::vector<RnaQuerySpan>& intervals, int read_len,
                      int k, int min_support, int n_chr,
+                     const std::uint8_t* readmitted,
                      placement::FusedCaptureScratch& capture,
                      RnaRevoteStats& stats) {
   std::vector<placement::CoarseDiagonalPeak> peaks;
@@ -1135,13 +1148,17 @@ rna_revote_intervals(const LongReadSeedContext& seed_ctx,
         return true;
     return false;
   };
+  const auto occ_allowed = [&](std::size_t i) {
+    return chain_window_seed_occ_allowed(seed_ctx, views[i]) ||
+           (readmitted != nullptr &&
+            readmitted[forward_seeds[i].read_pos] != 0);
+  };
   const std::size_t seed_count = std::min(forward_seeds.size(), views.size());
   for (std::size_t i = 0; i < seed_count; ++i) {
     if (!inside(forward_seeds[i].read_pos))
       continue;
     const KmerPostingView& view = views[i];
-    if (!view.found() || view.count == 0 ||
-        !chain_window_seed_occ_allowed(seed_ctx, view))
+    if (!view.found() || view.count == 0 || !occ_allowed(i))
       continue;
     stats.postings += static_cast<std::int64_t>(view.count);
     ++stats.seeds_revoted;
@@ -1167,8 +1184,7 @@ rna_revote_intervals(const LongReadSeedContext& seed_ctx,
     if (!inside(forward_position))
       continue;
     const KmerPostingView& view = views[i];
-    if (!view.found() || view.count == 0 ||
-        !chain_window_seed_occ_allowed(seed_ctx, view))
+    if (!view.found() || view.count == 0 || !occ_allowed(i))
       continue;
     const int reverse_position = read_len - k - forward_position;
     const int seed_index = static_cast<int>(i);
@@ -1261,7 +1277,8 @@ bool build_second_pass_catalogue(const ReadFacts& facts, ReadState& rs) {
       rna::rna_revote_intervals(
           seed_ctx, *shared_fwd_syncmer_seeds, capture.views, whole_read,
           read_len, k, rna::kRnaCoprimaryMinAnchors, reference_count,
-          worker_scratch.explain.revote_capture, revote_stats);
+          facts.readmitted, worker_scratch.explain.revote_capture,
+          revote_stats);
   if (revote_stats.over_budget)
     return false;
   const rna::placement::CoarseLocusQueryCover pass_query_cover{

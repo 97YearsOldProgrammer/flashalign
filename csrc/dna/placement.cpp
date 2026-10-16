@@ -999,7 +999,7 @@ DnaPlacementChainingResult build_dna_placement_chains(
   if (!seed_index.build(
           *context.ref.index, forward_seeds, reverse_seeds, fine_forward_seeds,
           fine_reverse_seeds, lookup_cache, fine_forward_slots,
-          fine_reverse_slots)) {
+          fine_reverse_slots, context.readmitted)) {
     result.family = std::move(family);
     return result;
   }

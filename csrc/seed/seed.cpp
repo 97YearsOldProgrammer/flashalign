@@ -845,3 +845,72 @@ const std::vector<QuerySeed>* drop_query_repeats(
 }
 
 }}}  // namespace fa::cpu::lr
+
+namespace fa { namespace cpu { namespace lr {
+
+void seed_select(const std::vector<SeedSelectItem>& seeds, int query_length,
+                 std::uint32_t cap, int dist,
+                 std::vector<std::uint32_t>& kept) {
+  if (dist <= 0)
+    return;
+  std::vector<std::size_t> run;
+  const std::size_t n = seeds.size();
+  // [st, i) is the streak of seeds over the cap that seed i (or the query
+  // end) closes.
+  std::size_t st = 0;
+  for (std::size_t i = 0; i <= n; ++i) {
+    if (i < n && seeds[i].occurrence > cap)
+      continue;
+    if (i > st) {
+      const int ps = st == 0 ? 0 : seeds[st - 1].end;
+      const int pe = i == n ? query_length : seeds[i].end;
+      const int m = std::min(
+          kSeedSelectMaxKept,
+          static_cast<int>(static_cast<double>(pe - ps) / dist + .499));
+      if (m > 0) {
+        run.clear();
+        for (std::size_t j = st; j < i; ++j)
+          run.push_back(j);
+        const std::size_t take =
+            std::min(run.size(), static_cast<std::size_t>(m));
+        // minimap2's heap keeps the earlier of two equal occurrences.
+        std::partial_sort(run.begin(),
+                          run.begin() + static_cast<std::ptrdiff_t>(take),
+                          run.end(), [&](std::size_t a, std::size_t b) {
+                            return seeds[a].occurrence != seeds[b].occurrence
+                                       ? seeds[a].occurrence <
+                                             seeds[b].occurrence
+                                       : a < b;
+                          });
+        for (std::size_t j = 0; j < take; ++j)
+          if (seeds[run[j]].occurrence <= kSeedSelectMaxOcc)
+            kept.push_back(seeds[run[j]].id);
+      }
+    }
+    st = i + 1;
+  }
+}
+
+std::size_t mark_readmitted_seeds(const std::vector<QuerySeed>& seeds,
+                                  const std::vector<KmerPostingView>& views,
+                                  int read_len, int k, int cap, int dist,
+                                  std::vector<std::uint8_t>& readmitted) {
+  readmitted.assign(static_cast<std::size_t>(std::max(read_len, 0)), 0);
+  if (cap <= 0 || dist <= 0)
+    return 0;
+  // minimap2's seed list: the seeds the index holds, in read order.
+  std::vector<SeedSelectItem> items;
+  std::vector<std::uint32_t> kept;
+  const std::size_t n = std::min(seeds.size(), views.size());
+  for (std::size_t i = 0; i < n; ++i)
+    if (views[i].found() && views[i].count > 0)
+      items.push_back(SeedSelectItem{seeds[i].read_pos + k,
+                                     views[i].occurrence,
+                                     static_cast<std::uint32_t>(i)});
+  seed_select(items, read_len, static_cast<std::uint32_t>(cap), dist, kept);
+  for (const std::uint32_t i : kept)
+    readmitted[static_cast<std::size_t>(seeds[i].read_pos)] = 1;
+  return kept.size();
+}
+
+}}}  // namespace fa::cpu::lr

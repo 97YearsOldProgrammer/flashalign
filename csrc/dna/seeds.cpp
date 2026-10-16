@@ -76,7 +76,8 @@ bool RetainedSeedDensity::build(
     const std::vector<QuerySeed>* fine_reverse,
     const ChainSeedLookupCache* lookup_cache,
     const std::vector<std::uint32_t>* fine_forward_slots,
-    const std::vector<std::uint32_t>* fine_reverse_slots) {
+    const std::vector<std::uint32_t>* fine_reverse_slots,
+    const std::vector<std::uint8_t>* readmitted) {
   entries_.clear();
   forward_.clear();
   reverse_.clear();
@@ -273,9 +274,17 @@ bool RetainedSeedDensity::build(
           !twins.empty() &&
           std::binary_search(twins.begin(), twins.end(),
                              std::make_pair(seed.read_pos, seed.key));
+      // A reverse seed is marked at the forward position it projects to.
+      const bool marked =
+          readmitted != nullptr &&
+          (*readmitted)[static_cast<std::size_t>(
+              strand == 0 ? seed.read_pos
+                          : static_cast<int>(readmitted->size()) - index.k() -
+                                seed.read_pos)] != 0;
       const bool tandem = query_seed_has_tandem_neighbor(*input, position);
-      output.push_back(RetainedSeedRef{seed, entry_index, twin, tandem});
-      if (twin) entries_[entry_index].rescued = true;
+      output.push_back(
+          RetainedSeedRef{seed, entry_index, twin || marked, tandem});
+      if (twin || marked) entries_[entry_index].rescued = true;
       if (tandem) tandem_seeds[strand].emplace_back(seed.read_pos, seed.key);
     }
   };

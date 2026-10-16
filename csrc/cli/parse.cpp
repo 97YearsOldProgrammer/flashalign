@@ -125,6 +125,13 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::QOccFrac, '\0', "--q-occ-frac", kStr, kStable, A,
          "FLOAT", SEC_PLACEMENT,
          "drop a seed repeated in the read past the occurrence cap and FLOAT of its seeds; 0 to disable [0.01]"},
+        // minimap2's -e, occ_dist: each streak of the read's seeds over the
+        // occurrence cap re-admits its rarest, one per INT bases of the
+        // streak, through every occurrence gate (minimap2's mm_seed_select).
+        // Every preset; the splice presets install 500, the others 0.
+        {OptionId::OccDist, 'e', "", kInt, kStable, A,
+         "INT", SEC_PLACEMENT,
+         "sample a seed over the occurrence cap every INT bp; 0 to disable [0; splice, splice:hq 500]"},
         // The vote bin width is W = clamp(L / den, dw, dw-max) for a read of
         // length L. --dw fixes W; --dw-slope-den and --dw-max are DNA only.
         {OptionId::VoteDiagBinWidth, '\0', "--dw", kInt, kStable, A,
@@ -692,7 +699,6 @@ constexpr Minimap2Hint kAlignHints[] = {
     {"-P", kOverlapHint},
     {"--no-long-join", kOverlapHint},
     {"-H", "FlashAlign's seeds are not homopolymer-compressed"},
-    {"-e", "FlashAlign has no such option"},
     {"-n", "FlashAlign has no such option"},
 };
 
@@ -987,6 +993,9 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
         case OptionId::QOccFrac:
             opt.q_occ_frac = parse_ratio(val, arg);
             break;
+        case OptionId::OccDist:
+            opt.occ_dist = parse_int(val, arg);
+            break;
         case OptionId::MinSupport:    opt.min_support = parse_int(val, arg); break;
         case OptionId::VoteSeeds:
             opt.vote_seeds = parse_int(val, arg);
@@ -1203,6 +1212,8 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
     // options/options.cpp.
     if (opt.max_chain_occ && *opt.max_chain_occ < 0)
         throw UsageError("--max-chain-occ must be >= 0");
+    if (opt.occ_dist && *opt.occ_dist < 0)
+        throw UsageError("-e must be >= 0");
     if (rna && opt.dna_vote_admission_ratio) {
         throw UsageError("--vote-ratio is valid only with a DNA preset");
     }

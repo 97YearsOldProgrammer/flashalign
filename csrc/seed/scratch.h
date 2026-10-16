@@ -272,6 +272,9 @@ struct ChainAnchorScratch {
     // refills them.
     std::vector<uint64_t> query_occ_keys;
     std::vector<QuerySeed> query_occ_seeds;
+    // seed/seed.h mark_readmitted_seeds: the read's re-admitted seeds by
+    // forward read position (dna/dna.h DnaContext::readmitted).
+    std::vector<uint8_t> readmitted;
     std::vector<QuerySeed> shared_window_fwd_seeds;
     std::vector<QuerySeed> shared_window_rc_seeds;
     // The read's capture, by seed position (dna/dna.h).

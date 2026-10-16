@@ -736,6 +736,10 @@ struct SkeletonHarvestParams {
   // mirrored into the other lane's coordinates. `frame_reverse_lane` is the lane
   // `strand_seeds` belongs to: false forward, true reverse complement.
   bool frame_reverse_lane = false;
+  // The read's seeds re-admitted past the cap (seed/seed.h mark_readmitted_seeds),
+  // one byte per forward read position, or null. Such a seed passes the occurrence
+  // cap in both lanes.
+  const std::uint8_t* readmitted = nullptr;
 };
 
 // Strand-routing work counters. `postings_bulk_skipped` restates
@@ -1341,6 +1345,9 @@ struct ResolvedOptions {
   int vote_seed_spacing = 0;
   // The within-read repeat filter's fraction (--q-occ-frac); 0 is off.
   float query_occ_frac = 0.0f;
+  // minimap2's occ_dist (-e): an over-cap streak re-admits one seed per this many
+  // bases; 0 is off.
+  int occ_dist = 0;
 
   // Rival realization lifecycle options; the lifecycle is the requested-CIGAR path's
   // only arbitration.
@@ -1476,10 +1483,14 @@ struct FusedCaptureSummary {
 // one posting lookup per forward seed: each strand's tile-spread selection of
 // max_seeds (0: every seed) is replayed from the cached evidence, then both
 // strands vote under the per-seed gates (index hit, posting count, occurrence policy).
+// `readmitted`, when non-null, is refilled by mark_readmitted_seeds (seed/seed.h) over
+// the forward stream at the occurrence cap, one seed per `occ_dist` bases of an
+// over-cap streak; a seed it marks passes the occurrence gate.
 FusedCaptureSummary capture_votes_fused(
     const LongReadSeedContext& ctx, const std::vector<QuerySeed>& fwd_seeds,
     const std::vector<QuerySeed>& rc_seeds, int read_len, int max_seeds,
-    FusedCaptureScratch& scratch);
+    FusedCaptureScratch& scratch,
+    int occ_dist, std::vector<std::uint8_t>* readmitted);
 
 // Aggregates the captured logs into diagonal peaks: forward-strand bins in ascending key
 // order, then reverse-strand bins.
@@ -1678,12 +1689,14 @@ struct RnaLeftoverPool {
 // lane its orientation bit allows), each posting an anchor in its lane's frame instead of
 // a vote. The anchors are pooled per contig and lane in reference, then query order,
 // duplicates removed. Over kRnaExplainMaxPostings postings nothing is pooled and false is
-// returned.
+// returned. A seed marked in `readmitted` (by forward read position, or null) passes the
+// occurrence gate.
 bool rna_leftover_pools(const LongReadSeedContext& seed_ctx,
                         const std::vector<QuerySeed>& forward_seeds,
                         const std::vector<KmerPostingView>& views,
                         const std::vector<RnaQuerySpan>& intervals, int read_len,
-                        int k, int n_chr, std::vector<RnaLeftoverPool>& pools);
+                        int k, int n_chr, const std::uint8_t* readmitted,
+                        std::vector<RnaLeftoverPool>& pools);
 
 } // namespace rna
 } // namespace lr
@@ -1716,6 +1729,9 @@ struct WorkerScratch {
   // stream without the repeated ones. Each read that uses them refills them.
   std::vector<std::uint64_t> query_occ_keys;
   std::vector<QuerySeed> query_occ_seeds;
+  // The read's seeds re-admitted past the cap (ReadFacts::readmitted). Each read that
+  // uses it refills it.
+  std::vector<std::uint8_t> readmitted;
 };
 
 } // namespace rna
@@ -1861,6 +1877,8 @@ struct Rank1HarvestOptions {
   float chain_gap_penalty = 0.0f;
   // Also the reference pad the harvest adds on each side of the coarse envelope.
   int max_intron = 200000;
+  // SkeletonHarvestParams::readmitted.
+  const std::uint8_t* readmitted = nullptr;
 };
 
 struct Rank1HarvestResult {
@@ -2458,6 +2476,9 @@ struct ReadFacts {
   std::vector<QuerySeed> projected_shared_reverse;
   SeedPostingMemo& postings;
   placement::FusedCaptureScratch& capture;
+  // Stage 1's seeds re-admitted past the cap, by forward read position, or null; every
+  // later occurrence gate of the read reads them.
+  const std::uint8_t* readmitted = nullptr;
   placement::CoarseLocusOptions copt;
   const std::vector<QuerySeed>* fwd_seeds = nullptr;
   Rank1HarvestOptions harvest_options;

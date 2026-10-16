@@ -71,7 +71,7 @@ enum class OptionId {
     Threads, BatchBp, BatchWindow, IoStaging, Progress, Quiet,
     // align: seed occurrence caps for the vote and the dense chain, and the
     // read's own repeats
-    MaxVoteOcc, MaxChainOcc, QOccFrac,
+    MaxVoteOcc, MaxChainOcc, QOccFrac, OccDist,
     // align: minimal chain score (minimap2 -m)
     MinChainScore,
     // align: vote peak admission
@@ -259,6 +259,9 @@ struct AlignOptions {
     // filter's fraction of the read's seeds, in [0,1]; 0 turns the filter
     // off. Every preset but the overlap ones.
     std::optional<double> q_occ_frac;
+    // -e INT: minimap2's occ_dist, the seed selection's streak spacing, >= 0;
+    // 0 turns the selection off. Every preset.
+    std::optional<int> occ_dist;
     // --max-vote-occ INT: the vote's seed occurrence cap. Unset, the cap is
     // max(the preset's value, the index's mid-occurrence quantile); 0 turns
     // filtering off and >0 fixes the cap. On a DNA preset the chain's

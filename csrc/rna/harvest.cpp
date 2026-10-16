@@ -719,6 +719,12 @@ SkeletonCandidatePools harvest_skeleton_candidate_pools(
     work.regions_queried += applicable.size();
     merge_reference_intervals(applicable, interval_scratch, intervals);
     work.merged_intervals += intervals.size();
+    // A seed re-admitted past the cap, marked at its forward read position.
+    const bool readmitted =
+        params.readmitted != nullptr &&
+        params.readmitted[params.frame_reverse_lane
+                              ? query_length - span - query_begin
+                              : query_begin] != 0;
     bool key_present = false;
     bool key_over_occurrence = false;
     uint64_t seed_skipped = 0;
@@ -737,19 +743,19 @@ SkeletonCandidatePools harvest_skeleton_candidate_pools(
           full_view, chr, static_cast<uint32_t>(interval.first),
           static_cast<uint32_t>(interval.second));
       const uint32_t occurrence = postings.global_count;
+      const bool over_occurrence = occurrence > occurrence_cap && !readmitted;
       key_present = key_present || postings.found();
-      key_over_occurrence = key_over_occurrence ||
-                            (postings.found() && occurrence > occurrence_cap);
+      key_over_occurrence =
+          key_over_occurrence || (postings.found() && over_occurrence);
       if (postings.count == 0 || !postings.positions.valid()) {
         ++work.interval_queries_empty;
         continue;
       }
       work.postings_available += postings.count;
-      const bool over_occurrence = occurrence > occurrence_cap;
       if (over_occurrence)
         work.postings_over_occurrence += postings.count;
       // Every posting of an over-cap interval would fail survived_occurrence (the
-      // verdict belongs to the key), so skipping is exact as long as each posting would
+      // verdict belongs to the seed), so skipping is exact as long as each posting would
       // have made one record; keeping the interval's far end inside the checked
       // coordinate domain guarantees that.
       const bool interval_domain_safe =
@@ -822,7 +828,7 @@ SkeletonCandidatePools harvest_skeleton_candidate_pools(
         anchor.tandem_flag =
             query_seed_has_tandem_neighbor(strand_seeds, seed_id);
         anchor.raw_multiplicity = 1;
-        anchor.survived_occurrence = occurrence <= occurrence_cap;
+        anchor.survived_occurrence = !over_occurrence;
         for (const SearchRegion* region : applicable) {
           if (!search_region_overlaps_anchor(*region, query_begin,
                                              reference_begin, span)) {
@@ -979,6 +985,7 @@ Rank1HarvestResult harvest_rank1(
       harvest_params.global_budget, std::max<uint64_t>(1024, 8 * seed_count)));
   // The stream's frame lane is the locus's own orientation.
   harvest_params.frame_reverse_lane = rank1_locus.reverse;
+  harvest_params.readmitted = options.readmitted;
   SkeletonCandidatePools pools = harvest_skeleton_candidate_pools(
       index, strand_seeds, rank1_locus.reference_id, read_length, skeleton,
       region_result.regions, harvest_params, posting_memo);

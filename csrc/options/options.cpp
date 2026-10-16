@@ -371,8 +371,9 @@ static void set_splice_fields(
     mapping.base.dna_pool_gate_occ = 0;
     mapping.base.dna_tile_rescue_occ = 0;
     mapping.base.long_occ_ceiling = 0;
-    // The within-read repeat filter, at the vote's cap.
+    // The within-read repeat filter and the seed selection, at the vote's cap.
     mapping.base.query_occ_frac = lr::kQueryOccFrac;
+    mapping.base.occ_dist = lr::kOccDist;
     // RNA's own support floor.
     common.min_support = 2;
 
@@ -607,6 +608,12 @@ void apply_vote_overrides(bool rna_mode, bool overlap_mode,
     if (!(*user.query_occ_frac >= 0.0) || *user.query_occ_frac > 1.0)
       throw std::invalid_argument("--q-occ-frac must be within [0,1]");
     mapping.query_occ_frac = *user.query_occ_frac;
+  }
+  // -e: the seed selection's streak spacing, on every preset; 0 is off.
+  if (user.occ_dist) {
+    if (*user.occ_dist < 0)
+      throw std::invalid_argument("-e must be >= 0");
+    mapping.occ_dist = *user.occ_dist;
   }
   // --vote-ratio overrides the preset's ratio; an explicit 0 admits by count.
   if (rna_mode && user.dna_vote_admission_ratio)

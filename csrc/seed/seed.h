@@ -615,7 +615,9 @@ void limit_query_seeds_with_lookup_cache(
 }}}  // namespace fa::cpu::lr
 
 /**** query_filter ****/
-// minimap2's within-read seed filter, on a lane's forward seed stream.
+// minimap2's two within-read seed steps, on a lane's forward seed stream: the
+// repeat filter (mm_seed_mz_flt) and the over-cap streak selection
+// (mm_seed_select).
 
 namespace fa { namespace cpu { namespace lr {
 
@@ -628,5 +630,40 @@ const std::vector<QuerySeed>* drop_query_repeats(
     const std::vector<QuerySeed>& seeds, int cap, float frac,
     std::vector<std::uint64_t>& keys, std::vector<QuerySeed>& kept,
     std::size_t& dropped);
+
+// minimap2's MAX_MAX_HIGH_OCC and max_max_occ (seed.c, options.c): a streak of
+// over-cap seeds keeps at most kSeedSelectMaxKept of them, and a kept seed over
+// kSeedSelectMaxOcc is dropped.
+inline constexpr int kSeedSelectMaxKept = 128;
+inline constexpr std::uint32_t kSeedSelectMaxOcc = 4095;
+
+// A seed as seed_select reads it: the query end of its k-mer, its occurrence
+// and the caller's identifier.
+struct SeedSelectItem {
+  int end = 0;
+  std::uint32_t occurrence = 0;
+  std::uint32_t id = 0;
+};
+
+// minimap2's mm_seed_select over `seeds`, in query order: each maximal streak
+// of seeds over `cap`, between two seeds at most `cap` or a query end, keeps
+// its m rarest, m = (int)((pe - ps) / dist + .499) and at most
+// kSeedSelectMaxKept, where ps and pe are the flanking seeds' ends (0 and
+// query_length at the query's ends). An equal occurrence goes to the earlier
+// seed, and a kept seed over kSeedSelectMaxOcc is dropped. Appends the kept
+// seeds' ids to `kept`.
+void seed_select(const std::vector<SeedSelectItem>& seeds, int query_length,
+                 std::uint32_t cap, int dist,
+                 std::vector<std::uint32_t>& kept);
+
+// seed_select over a lane's forward seed stream: the seeds the index holds (a
+// found view with postings, `views` parallel to `seeds`) at their k-mer ends.
+// `readmitted` is refilled with one byte per forward read position, 1 where a
+// seed is re-admitted past `cap`; a cap or dist of 0 re-admits none. Returns
+// the number re-admitted.
+std::size_t mark_readmitted_seeds(const std::vector<QuerySeed>& seeds,
+                                  const std::vector<KmerPostingView>& views,
+                                  int read_len, int k, int cap, int dist,
+                                  std::vector<std::uint8_t>& readmitted);
 
 }}}  // namespace fa::cpu::lr

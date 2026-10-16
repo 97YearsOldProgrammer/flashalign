@@ -280,6 +280,15 @@ AlignResult map_read(const DnaContext& base_dctx,
   query_seed_pool.bind(DnaQuerySeedStrand::Forward, *shared_fwd_syncmer_seeds);
   if (!query_seed_pool.capture_posting_views(DnaQuerySeedStrand::Forward))
     return finish(std::move(out));
+  // minimap2's seed selection under -e, at the pool gate's N, over the stream
+  // the filter left: the vote and every pool gate admit the re-admitted seeds
+  // as rescued ones.
+  if (dctx.opts.occ_dist > 0) {
+    mark_readmitted_seeds(*shared_fwd_syncmer_seeds, scratch.captured_fwd_views,
+                          read_len, dctx.opts.k, dctx.opts.dna_pool_gate_occ,
+                          dctx.opts.occ_dist, scratch.readmitted);
+    dctx.readmitted = &scratch.readmitted;
+  }
   const std::vector<QuerySeed>* shared_rc_syncmer_seeds = nullptr;
   auto ensure_shared_rc_stream = [&]() -> const std::vector<QuerySeed>* {
     if (!scratch.full_syncmer_rc_seeds.empty()) {
@@ -310,6 +319,16 @@ AlignResult map_read(const DnaContext& base_dctx,
         scratch.shadow_rc);
     if (!selected)
       return nullptr;
+    // A re-admitted representative votes past the cap, as a rescued one.
+    if (dctx.readmitted != nullptr)
+      for (DnaLongSeedView& view : bundle.selected_views) {
+        const int forward_position =
+            strand == DnaQuerySeedStrand::Forward
+                ? view.seed.read_pos
+                : read_len - dctx.opts.k - view.seed.read_pos;
+        if ((*dctx.readmitted)[static_cast<std::size_t>(forward_position)])
+          view.rescued = true;
+      }
     exact_refine_views = bundle.exact_refine_views.empty()
                              ? nullptr
                              : &bundle.exact_refine_views;

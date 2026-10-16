@@ -342,9 +342,15 @@ static void capture_votes(ReadFacts& facts, ReadState& rs) {
     vote_seeds_per_strand =
         std::max(vote_seeds_per_strand,
                  (read_len + vote_spacing - 1) / vote_spacing);
+  // minimap2's seed selection: the capture marks the seeds each over-cap streak
+  // re-admits, which every later occurrence gate of the read admits too.
+  std::vector<std::uint8_t>* const readmitted =
+      rctx.opts.occ_dist > 0 ? &facts.worker_scratch.readmitted : nullptr;
   rna::placement::capture_votes_fused(seed_ctx, *shared_fwd_syncmer_seeds,
                                       projected_shared_reverse, read_len,
-                                      vote_seeds_per_strand, capture);
+                                      vote_seeds_per_strand, capture,
+                                      rctx.opts.occ_dist, readmitted);
+  facts.readmitted = readmitted != nullptr ? readmitted->data() : nullptr;
 }
 
 // Stages 2-3: the captured postings aggregated into exon-shaped peaks and the peaks
@@ -1212,6 +1218,7 @@ RnaBackend::map_read(const Context& rctx, const LongReadSeedContext& seed_ctx,
 
   auto& harvest_options = facts.harvest_options;
   harvest_options.global_occurrence_cap = rctx.opts.cigar_local_global_occ;
+  harvest_options.readmitted = facts.readmitted;
   harvest_options.chain_query_gap =
       std::max(1, rctx.opts.cigar_local_interval_anchor_chain_max_gap);
   harvest_options.chain_band = rctx.opts.fine_chain_band;

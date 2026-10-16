@@ -391,6 +391,16 @@ under lr, lr:hq, asm5, asm10 and asm20, and the voting cap
 .RB ( \-\-max\-vote\-occ )
 under splice and splice:hq. Not under ava\-ont and ava\-hifi.
 .TP
+.BI \-e \ INT
+In each run of the read's seeds whose occurrence is above the occurrence cap,
+between two seeds at or under it or a read end, keep the rarest seeds anyway,
+one per
+.I INT
+bases of the run and at most 128, except a seed that occurs more than 4095
+times, as minimap2's option of the same name does; 0 turns this off [0; 500
+under splice and splice:hq]. Every stage that applies the cap takes the kept
+seeds. Under the DNA presets it is off unless given, and unmeasured.
+.TP
 .BI \-\-dw \ INT
 Width in reference bases of the diagonal bin a seed votes into, greater than 0
 [64].

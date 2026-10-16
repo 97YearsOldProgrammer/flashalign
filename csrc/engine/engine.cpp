@@ -350,6 +350,7 @@ void LongReadEngine::compose_rna_runtime(
       mapping.cigar_local_interval_anchor_chain_max_gap;
   opts.fine_chain_band = mapping.cigar_dp_bw;
   opts.query_occ_frac = static_cast<float>(mapping.query_occ_frac);
+  opts.occ_dist = mapping.occ_dist;
   if (rna_mapping) {
     opts.rival_lifecycle.pri_ratio = rna_mapping->rival_pri_ratio;
     opts.rival_lifecycle.min_diff = rna_mapping->rival_min_diff;
@@ -544,6 +545,7 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.dna_dense_diag_min_runs = mapping.dna_dense_diag_min_runs;
   dctx.opts.dna_pool_gate_occ = chain_occ.pool_gate_occ;
   dctx.opts.dna_query_occ_frac = static_cast<float>(mapping.query_occ_frac);
+  dctx.opts.occ_dist = mapping.occ_dist;
   dctx.opts.k = cfg_.index.k;
   dctx.opts.cigar_dp_ambi = mapping.cigar_dp_ambi;
   dctx.opts.cigar_dp_bw = mapping.cigar_dp_bw;

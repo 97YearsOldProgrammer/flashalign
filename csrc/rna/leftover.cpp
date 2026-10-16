@@ -82,7 +82,8 @@ bool rna_leftover_pools(const LongReadSeedContext& seed_ctx,
                         const std::vector<QuerySeed>& forward_seeds,
                         const std::vector<KmerPostingView>& views,
                         const std::vector<RnaQuerySpan>& intervals, int read_len,
-                        int k, int n_chr, std::vector<RnaLeftoverPool>& pools) {
+                        int k, int n_chr, const std::uint8_t* readmitted,
+                        std::vector<RnaLeftoverPool>& pools) {
   pools.clear();
   const auto inside = [&](int forward_position) {
     for (const RnaQuerySpan& interval : intervals)
@@ -94,7 +95,9 @@ bool rna_leftover_pools(const LongReadSeedContext& seed_ctx,
   const auto admitted = [&](std::size_t i) {
     const KmerPostingView& view = views[i];
     return inside(forward_seeds[i].read_pos) && view.found() && view.count != 0 &&
-           chain_window_seed_occ_allowed(seed_ctx, view);
+           (chain_window_seed_occ_allowed(seed_ctx, view) ||
+            (readmitted != nullptr &&
+             readmitted[forward_seeds[i].read_pos] != 0));
   };
   const std::size_t seed_count = std::min(forward_seeds.size(), views.size());
   std::int64_t postings = 0;
@@ -292,7 +295,8 @@ void run_leftover(const ReadFacts& facts, ReadState& rs, Lifecycle& lc,
   std::vector<rna::RnaLeftoverPool> leftover_pools;
   if (!intervals.empty() && n_chr > 0 &&
       rna::rna_leftover_pools(seed_ctx, *fwd_seeds, capture.views, intervals,
-                              read_len, k, n_chr, leftover_pools)) {
+                              read_len, k, n_chr, facts.readmitted,
+                              leftover_pools)) {
     auto params =
         rna::rank1_anchor_path_params(rctx.ref.index->k(), harvest_options);
     params.min_cnt = rna::kRnaLeftoverChainMinCount;

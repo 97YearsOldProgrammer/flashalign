@@ -91,6 +91,14 @@ inline constexpr int kDnaPoolGateOcc = 0;
 // off.
 inline constexpr double kQueryOccFrac = 0.01;
 
+// minimap2's occ_dist (-e) and its seed selection, mm_seed_select: each streak
+// of the read's seeds over the lane's N, between two seeds at most N or a read
+// end, re-admits its rarest seeds past N, one per occ_dist bases of the streak
+// and at most 128, a re-admitted seed over 4,095 dropped (seed/seed.h
+// seed_select). Every occurrence gate of the read admits the re-admitted
+// seeds. The splice presets install kOccDist; the DNA presets 0, which is off.
+inline constexpr int kOccDist = 500;
+
 // Every DNA occurrence threshold is one number, N: the vote's seed occurrence
 // cap as resolved against the index (seed/seed.h, engine/engine.cpp
 // resolve_index_occ_cap_into):
@@ -256,6 +264,9 @@ struct DnaLongOptions {
   // The within-read repeat filter's fraction (--q-occ-frac); 0 is off.
   // Every preset but the overlap ones installs kQueryOccFrac.
   double query_occ_frac = 0.0;
+  // minimap2's occ_dist (-e, kOccDist); 0 is off. The splice presets install
+  // kOccDist, the DNA presets 0.
+  int occ_dist = 0;
   // The vote's empty-tile rescue M (kDnaTileRescueOcc); 0 is none. DNA
   // presets install it; not settable.
   int dna_tile_rescue_occ = 0;
@@ -500,6 +511,8 @@ struct UserOverrides {
   // --q-occ-frac: the within-read repeat filter's fraction, in [0,1]; 0 is
   // off. Every preset but the overlap ones.
   std::optional<double> query_occ_frac;
+  // -e: minimap2's occ_dist (lr::kOccDist), >= 0; 0 is off. Every preset.
+  std::optional<int> occ_dist;
   // --max-cands: the lane bound, the vote's peaks and the catalogue's
   // candidates per strand, 1..64, or 1..16383 in the all-chains lane. DNA
   // presets only.
