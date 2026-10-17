@@ -116,6 +116,9 @@ struct ResolvedDnaOptions {
   // -N, minimap2's best_n: the cap on secondary alignments in both lanes
   // (realization.cpp retain_regions).
   int secondary_max = 5;
+  // lr and lr:hq: a secondary-role region ends at its first split, with no
+  // continuation (realization.cpp plan_block_split).
+  bool rival_split_ends = false;
   // Chain MAPQ own-locus rules, both on: a chained shadow's vote counts for
   // the winner, and the chained shadow window grows with read length. No
   // option sets them.

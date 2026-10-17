@@ -586,6 +586,7 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
   dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
   dctx.opts.secondary_max = mapping.secondary_max;
+  dctx.opts.rival_split_ends = mapping.rival_split_ends;
   dctx.opts.chain_syncmer_s = cfg_.index.syncmer_s;
   dctx.opts.chain_syncmer_downsample = cfg_.index.syncmer_downsample;
   dctx.opts.vote_admission_ratio = mapping.vote_admission_ratio;

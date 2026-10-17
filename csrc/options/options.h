@@ -275,6 +275,10 @@ struct DnaLongOptions {
   // -N: the secondaries both lanes keep, map-only projected and the -c lane
   // realized; one prices the MAPQ.
   int secondary_max = 5;
+  // A secondary-role region that splits, on a confirmed Z-drop or a fill over
+  // the matrix cap, ends at the cut: no continuation. lr and lr:hq install it;
+  // not settable.
+  bool rival_split_ends = false;
 };
 
 // The lane bound: the vote's peaks and the catalogue's candidates per strand.

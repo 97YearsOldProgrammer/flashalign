@@ -329,6 +329,12 @@ Under a DNA preset both lanes keep up to
 per read whether or not they are printed; with a CIGAR they are aligned and the
 best of them prices the mapping quality, and without one each is written from
 its whole chain.
+Under
+.B lr
+and
+.BR lr:hq ,
+a secondary alignment ends where its alignment first splits, at a Z-drop or at
+a gap too large to align.
 No secondary alignment is kept past
 .IR INT .
 .B \-N0
