@@ -1793,15 +1793,18 @@ DnaRegionOutcome realize_dna_regions(
     return out;
   }
 
-  // 4. Re-select on the aligned spans, in dp_max order (mm_hit_sort). In an
-  // exact tie the read-seeded hash of the record's contig, strand and
-  // reference start decides (seed/seed.h), then contig and start.
+  // 4. Re-select on the aligned spans, in AS order, dp_max breaking its ties
+  // (mm_hit_sort orders by dp_max alone). In an exact tie the read-seeded hash
+  // of the record's contig, strand and reference start decides (seed/seed.h),
+  // then contig and start.
   for (Record& record : records)
     record.tie = tie_locus_hash(context.vote_tie_seed, record.contig,
                                 record.alignment.is_reverse,
                                 record.alignment.pos);
   std::stable_sort(records.begin(), records.end(),
                    [](const Record& left, const Record& right) {
+                     if (left.alignment.score != right.alignment.score)
+                       return left.alignment.score > right.alignment.score;
                      if (left.dp_max != right.dp_max)
                        return left.dp_max > right.dp_max;
                      return std::tie(left.tie, left.contig,
