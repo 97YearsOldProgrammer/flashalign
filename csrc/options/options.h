@@ -142,8 +142,8 @@ struct DnaLongOptions {
   // count. DNA presets install kDnaProductionVoteAdmissionRatio.
   double vote_admission_ratio = 0.0;
   // The query tiles per read, the grid of the catalogue's masks and of the
-  // read's blocks: the preset's, which no option sets. The splice presets
-  // partition into kQueryTileCount.
+  // read's blocks: the preset's, or -v's NUM2. The splice presets partition
+  // into kQueryTileCount.
   int query_tiles = ::fa::cpu::voting::kQueryTileCount;
   // A read that is itself in the index, found by its exact name, is left out
   // of its own vote: a seed's occurrence does not count the key's postings on
@@ -449,8 +449,10 @@ struct UserOverrides {
   std::optional<int> min_support;
   // -m, minimap2's min_chain_score, >= 1. DNA presets only.
   std::optional<int> min_chain_score;
-  // --vote-seeds, >= 0. DNA presets only.
+  // -v NUM1 and the Python Config.max_query_seeds, >= 0. DNA presets only.
   std::optional<int> max_query_seeds_per_strand;
+  // -v NUM2, 1..kMaxQueryTiles. DNA presets only.
+  std::optional<int> query_tiles;
   std::optional<int>
       num_threads; // the CLI passes the resolved count
   std::optional<bool> enable_full_read_cigar;

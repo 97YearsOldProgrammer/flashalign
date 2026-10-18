@@ -60,8 +60,8 @@ namespace options {
 // Asm marks the experimental assembly-to-reference rows.
 enum class DnaPresetKind { Ont, HiFi, Asm };
 
-// The placement values: the vote's seeds per strand, which --vote-seeds
-// replaces, and the query tiles per read, which no option sets.
+// The placement values: the vote's seeds per strand and the query tiles per
+// read, which -v sets.
 struct DnaPlacementDefaults {
   int vote_seeds;
   int query_tiles;
@@ -644,15 +644,16 @@ void apply_vote_overrides(bool rna_mode, bool overlap_mode,
           "--dual is valid only with ava-ont or ava-hifi");
     mapping.dual = *user.dual;
   }
-  // The splice presets' vote seeds follow --vote-spacing.
-  if (rna_mode && user.max_query_seeds_per_strand)
+  // -v. The splice presets' vote seeds follow --vote-spacing.
+  if (rna_mode && (user.max_query_seeds_per_strand || user.query_tiles))
     throw std::invalid_argument(
-        "--vote-seeds is valid only with a DNA preset; the splice presets "
-        "take --vote-spacing");
+        "-v is valid only with a DNA preset; the splice presets take "
+        "--vote-spacing");
   if (user.max_query_seeds_per_strand) {
     common.max_query_seeds_per_strand =
         std::max(0, *user.max_query_seeds_per_strand);
   }
+  if (user.query_tiles) mapping.query_tiles = *user.query_tiles;
   if (!rna_mode && user.rna_vote_seed_spacing)
     throw std::invalid_argument(
         "--vote-spacing is valid only with an RNA preset");

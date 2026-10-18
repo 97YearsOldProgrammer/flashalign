@@ -79,7 +79,8 @@ enum class OptionId {
     VoteDiagBinWidth,
     VoteDiagSlopeDen, VoteDiagWidthMax,
     MinSupport,
-    // align: the vote's seeds per strand and its candidates per strand
+    // align: the vote's seeds per strand and query tiles per read (-v), and
+    // its candidates per strand
     VoteSeeds, MaxCands,
     // align: DP scoring (minimap2 -A/-B/-O/-E/-z, --score-N, --end-bonus).
     // DpMinScore is minimap2's -s, spelled -S here.
@@ -210,9 +211,11 @@ struct AlignOptions {
     // hold ahead of the reader, as a ceiling; 0 scales it with -t.
     int io_staging_mib = 0;
     std::optional<int> min_support;
-    // --vote-seeds INT: the vote's seeds per strand, >= 0; 0 is every seed.
-    // DNA presets only.
+    // -v NUM1[,NUM2]: the vote's seeds per strand, >= 0 (0 is every seed),
+    // and the query tiles per read, 1..kMaxQueryTiles; a lone NUM1 keeps the
+    // preset's tiles. DNA presets only.
     std::optional<int> vote_seeds;
+    std::optional<int> query_tiles;
     // --vote-spacing INT: one vote seed per INT query bases above the seeds
     // per strand, >= 0; 0 keeps the seeds per strand. RNA presets only.
     std::optional<int> vote_spacing;

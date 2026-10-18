@@ -57,7 +57,7 @@ class Config:
     @property
     def max_query_seeds(self) -> int:
         """
-        Vote seeds per strand [--vote-seeds]; 0 = all. DNA presets only.
+        Vote seeds per strand [-v]; 0 = all. DNA presets only.
         -1 = preset-owned.
         """
 

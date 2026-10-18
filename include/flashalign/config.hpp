@@ -20,7 +20,7 @@ struct Config {
                                 ///< the CLI's 'ava-ont' and 'ava-hifi' are refused
   int k = -1;                   ///< seed k-mer length [-k]; fixed by a loaded index
   int min_support = -1;         ///< minimum anchor support [--min-support]
-  int max_query_seeds = -1;     ///< query seeds kept per strand [--vote-seeds]; DNA only
+  int max_query_seeds = -1;     ///< query seeds kept per strand [-v]; DNA only
   /// splice: one vote seed per this many query bases, at least 128 per strand; 0 = a fixed
   /// 128 [--vote-spacing]
   int vote_seed_spacing = -1;

@@ -625,6 +625,10 @@ std::string resolved_config_text(const AlignOptions& opt,
             ? "nested"
             : "original",
         "derived");
+  // -v NUM2; the splice presets keep kQueryTileCount.
+  if (!is_rna)
+    row("query_tiles", i2s(mapping.query_tiles),
+        src(opt.query_tiles.has_value(), "preset"));
   // max_seed_occ is the effective vote occurrence cap; 0 means no filtering.
   fa::cpu::lr::LongOccPolicyConfig occ_cfg;
   occ_cfg.policy = mapping.long_occ_policy;
@@ -1182,6 +1186,8 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.min_support = *opt.min_support;
   if (opt.vote_seeds)
     u.max_query_seeds_per_strand = *opt.vote_seeds;
+  if (opt.query_tiles)
+    u.query_tiles = *opt.query_tiles;
   if (opt.max_cands)
     u.max_cands = *opt.max_cands;
   if (opt.min_chain_score)
@@ -1342,9 +1348,9 @@ void refuse_sam_text_reads(const std::vector<std::string>& paths) {
   }
 }
 
-// --show-config resolves options only: no read is mapped and no reference base
-// is read; an index is known by its header, and on a DNA preset by its postings
-// too (below).
+// --show-config resolves options only: no read is mapped. An index is known by
+// its header; a single-part one under a DNA or splice preset is also loaded for
+// its postings (below), without its bases unless --junc-bed needs them.
 void run_show_config(const AlignOptions& opt, const ResolvedInputs& in) {
   fa::cpu::api::ResolveRequest req;
   req.preset = opt.preset;

@@ -132,6 +132,14 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::OccDist, 'e', "", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "sample a seed over the occurrence cap every INT bp; 0 to disable [0; splice, splice:hq 500]"},
+        // NUM1 is the Python Config.max_query_seeds; above 128 a DNA preset
+        // keeps the 128-seed selection and fills it from the larger one
+        // (seed/seed.h). NUM2 is the catalogue's tile grid; a lone NUM1 keeps
+        // the preset's. DNA presets only; the splice presets take
+        // --vote-spacing.
+        {OptionId::VoteSeeds, 'v', "", kPair, kStable, A,
+         "NUM[,NUM]", SEC_PLACEMENT,
+         "seeds per strand that vote, query tiles per read [128,128]"},
         // The vote bin width is W = clamp(L / den, dw, dw-max) for a read of
         // length L. --dw fixes W; --dw-slope-den and --dw-max are DNA only.
         {OptionId::VoteDiagBinWidth, '\0', "--dw", kInt, kStable, A,
@@ -143,13 +151,6 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::VoteDiagWidthMax, '\0', "--dw-max", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
          "max diagonal bin width in voting [2048]"},
-        // The Python Config.max_query_seeds. DNA presets only; the splice
-        // presets take --vote-spacing. Above 128 a DNA preset keeps the
-        // 128-seed selection and fills it from the larger one
-        // (seed/seed.h).
-        {OptionId::VoteSeeds, '\0', "--vote-seeds", kInt, kStable, A,
-         "INT", SEC_PLACEMENT,
-         "seeds per strand in voting; 0 for all [128]"},
         // The lane bound, DNA presets only, 1..64: the vote's peaks and the
         // catalogue's candidates per strand. Unset, 16 under ratio admission
         // and 4 under count admission (--vote-ratio 0).
@@ -998,11 +999,26 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
             opt.occ_dist = parse_int(val, arg);
             break;
         case OptionId::MinSupport:    opt.min_support = parse_int(val, arg); break;
-        case OptionId::VoteSeeds:
-            opt.vote_seeds = parse_int(val, arg);
-            if (*opt.vote_seeds < 0)
-                throw UsageError("--vote-seeds must be >= 0");
+        // A lone NUM1 leaves the tiles alone, as -r leaves its NUM2.
+        case OptionId::VoteSeeds: {
+            const auto comma = val.find(',');
+            const int seeds = parse_int(
+                comma == std::string::npos ? val : val.substr(0, comma), arg);
+            if (seeds < 0)
+                throw UsageError("-v: seeds per strand must be >= 0 (got " +
+                                 std::to_string(seeds) + ")");
+            opt.vote_seeds = seeds;
+            if (comma != std::string::npos) {
+                const int tiles = parse_int(val.substr(comma + 1), arg);
+                if (tiles < 1 || tiles > fa::cpu::voting::kMaxQueryTiles)
+                    throw UsageError(
+                        "-v: query tiles per read must be within 1.." +
+                        std::to_string(fa::cpu::voting::kMaxQueryTiles) +
+                        " (got " + std::to_string(tiles) + ")");
+                opt.query_tiles = tiles;
+            }
             break;
+        }
         case OptionId::VoteSpacing:
             opt.vote_spacing = parse_int(val, arg);
             if (*opt.vote_spacing < 0)
@@ -1225,8 +1241,8 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
     if (rna && opt.chain_band)
         throw UsageError("-b is valid only with a DNA preset");
     if (rna && opt.vote_seeds)
-        throw UsageError("--vote-seeds is valid only with a DNA preset; the "
-                         "splice presets take --vote-spacing");
+        throw UsageError("-v is valid only with a DNA preset; the splice "
+                         "presets take --vote-spacing");
     // Without -x an index may record a splice preset; options/options.cpp
     // refuses then.
     if (!rna && opt.vote_spacing && opt.preset_source != "builtin")

@@ -319,7 +319,9 @@ AlignResult map_read(const DnaContext& base_dctx,
         scratch.shadow_rc);
     if (!selected)
       return nullptr;
-    // A re-admitted representative votes past the cap, as a rescued one.
+    // A re-admitted representative is carried as a rescued one, which the
+    // pool gates admit. The vote drew it from the seeds its own cap admits,
+    // so the flag moves no vote.
     if (dctx.readmitted != nullptr)
       for (DnaLongSeedView& view : bundle.selected_views) {
         const int forward_position =

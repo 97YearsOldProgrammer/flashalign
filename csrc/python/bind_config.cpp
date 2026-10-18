@@ -72,7 +72,7 @@ void append(std::ostringstream& out, const char* name,
   X(k, "Seed k-mer length [-k]; mapping always uses the index's.")             \
   X(min_support, "Minimum anchor support [--min-support]. -1 = preset-owned.") \
   X(max_query_seeds,                                                           \
-    "Vote seeds per strand [--vote-seeds]; 0 = all. DNA presets only.\n"       \
+    "Vote seeds per strand [-v]; 0 = all. DNA presets only.\n"                 \
     "-1 = preset-owned.")                                                      \
   X(vote_seed_spacing,                                                         \
     "One vote seed per this many query bases, at least 128 per strand\n"       \
