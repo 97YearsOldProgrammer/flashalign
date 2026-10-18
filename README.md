@@ -197,7 +197,8 @@ the `cs` operations are listed under [OUTPUT FORMAT](https://97yearsoldprogramme
 #### The resolved configuration
 
 `--show-config` prints every resolved option with the source of its value, then exits without
-loading the reference or the reads; given an index, it reads only the index header:
+loading the reads or the reference bases; given a single-part index under a DNA or splice preset,
+it also loads the index, without its bases, to print the resolved seed occurrence cap:
 
 ```sh
 flashalign align -x lr:hq --show-config

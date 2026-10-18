@@ -347,7 +347,7 @@ Absolute chain-score band that retains a rival beside
 [30]. Splice presets only.
 .TP
 .BI \-\-min\-support \ INT
-Minimal number of seeds on a vote peak [3]. The splice presets use 2.
+Minimal number of seeds on a vote peak [3].
 .TP
 .BI \-\-max\-vote\-occ \ INT
 Ignore a seed whose reference occurrence is above
@@ -408,58 +408,67 @@ times, as minimap2's option of the same name does; 0 turns this off [0; 500
 under splice and splice:hq]. Every stage that applies the cap takes the kept
 seeds. Under the DNA presets it is off unless given, and unmeasured.
 .TP
-.BI \-\-dw \ INT
-Width in reference bases of the diagonal bin a seed votes into, greater than 0
-[64].
-.B lr:hq
-and
-.B splice:hq
-use 48. Under a DNA preset the width otherwise grows with the read length; a
-value given here fixes it and turns that growth off.
-.TP
-.BI \-\-dw\-slope\-den \ INT
-Denominator of the term that grows the vote bin with read length: the width is
-the read length divided by
-.IR INT ,
-held between the base width and the cap [128].
-.BR lr:hq ,
-.B ava\-ont
-and
-.B ava\-hifi
-use 64, and 0 drops the term. DNA presets only.
-.TP
-.BI \-\-dw\-max \ INT
-Largest width that growth may reach, greater than 0 [2048]. While the growth is
-on it may not be below the width
-.B \-\-dw
-sets. DNA presets only.
-.TP
-.BI \-\-vote\-seeds \ INT
-Seeds per strand that vote [128; 4096 on asm5, asm10, asm20; 256 on ava\-ont]: the read is cut
-into
-.I INT
+.B \-v \fINUM1\fR[,\fINUM2\fR]
+Seeds per strand that vote, and query tiles per read [128,128]. The read is
+cut into
+.I NUM1
 equal tiles and each tile votes with one of its seeds; 0 votes with every seed.
 Above 128, the preset keeps the seeds the
 128\-tile cut picks and adds seeds of the
-.IR INT \-tile
+.IR NUM1 \-tile
 cut, each the farthest from those kept, until it holds as many as that cut picks;
 a rescued seed that would exceed the strand's budget of rescued occurrences is
 skipped, so the count can stop short. The exact refinement of the vote peaks uses the seeds of both
-cuts. Neither
+cuts.
+.I NUM2
+is the number of equal query tiles on which a candidate's seed support over the
+read is counted for its admission to the catalogue, 1 to 4096, of which
+admission by
+.B \-\-vote\-ratio
+compares at most 2048; under
+.B lr:hq
+the blocks of a split read are also measured in these tiles when their
+mapping-quality rivals are chosen. A single value sets
+.I NUM1
+only. Neither
 .B \-\-min\-support
 nor
 .B \-\-max\-cands
 scales with
-.IR INT ;
+.IR NUM1 ;
 a vote peak needs
 .B \-\-min\-support
-votes (3 on the DNA presets), so an
-.I INT
-below that places few reads or none.
-The Python field is
+votes, so a
+.I NUM1
+below that places few reads or none. The Python field for
+.I NUM1
+is
 .BR Config.max_query_seeds .
 DNA presets only; the splice presets take
 .BR \-\-vote\-spacing .
+.TP
+.B \-W \fINUM1\fR[,\fINUM2\fR]
+Width in reference bases of the diagonal bin a seed votes into, and the
+divisor of the read\-length term that widens it [64,128]: a read of length
+.I L
+votes into bins of width max(\fINUM1\fR, \fIL\fR/\fINUM2\fR), at most
+.BR \-\-dw\-max .
+A single value sets
+.I NUM1
+only and keeps the preset's divisor; a
+.I NUM2
+of 0 drops the term and fixes the width at
+.IR NUM1 .
+The splice presets take
+.I NUM1
+alone: their width is fixed.
+.TP
+.BI \-\-dw\-max \ INT
+Largest width the read\-length term of
+.B \-W
+may reach, greater than 0 and, while that term is on, not below
+.I NUM1
+[2048]. DNA presets only.
 .TP
 .BI \-\-max\-cands \ INT
 Vote peaks and placement candidates kept per strand, 1 to 64 [16]; 1 to 16383
@@ -765,7 +774,10 @@ Number of threads [all\-2]: mapping runs on the machine's hardware threads less
 the reader and the writer. An explicit value is the whole mapping budget, and
 decompression of compressed input borrows from it rather than adding to it:
 \-t/8 threads, from 1 to 8, when every read input qualifies (BGZF or BAM of at
-least 16 MiB at any \-t of 2 or more; other gzip of at least 64 MiB from \-t 32).
+least 16 MiB at any \-t of 2 or more; other gzip of at least 64 MiB from \-t 32)
+and
+.B \-\-batch\-window
+is above 1.
 .TP
 .B \-K, \-\-batch\-bp \fINUM\fR
 Number of bases loaded into memory to process in a mini-batch [500M]. As with
@@ -839,7 +851,7 @@ Align accurate long reads (error rate <1%), such as PacBio HiFi reads, to a
 reference genome
 .RB ( \-k21
 .B \-s5 \-\-min\-support 3 \-A3 \-B12 \-O18,78 \-E6,1
-.B \-z1200,600 \-\-score\-N 3 \-r500,20000 \-g10000 \-m40 \-p0.8
+.B \-z1200,600 \-\-score\-N 3 \-r500,20000 \-g10000 \-m40 \-p0.8 \-W48,64
 .BR \-S200 ).
 Its alignments are scored with minimap2's map-hifi scoring
 .RB ( \-A1 " " \-B4 " " \-O6,26 " " \-E2,1 ,
@@ -864,8 +876,8 @@ and align with
 .B splice:hq
 Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq
 .RB ( \-xsplice
-.B \-B4
-.BR \-O6,24 ).
+.B \-B4 \-O6,24
+.BR \-W48 ).
 It differs from
 .B splice
 in scoring and also in the vote's diagonal bin (48 against 64), the vote
@@ -877,7 +889,7 @@ and the MAPQ coverage threshold (0.70 against 0.55).
 Experimental. Long assembly to reference mapping
 .RB ( \-k21
 .B \-s9 \-A1 \-B19 \-O39,81 \-E3,1 \-z200,200 \-\-score\-N 1 \-r1000,100000
-.BR "\-b100000 \-S200 \-\-vote\-seeds 4096" ).
+.BR "\-b100000 \-S200 \-v4096,2048" ).
 Use this preset if the average divergence is not much higher than 0.1%.
 .TP
 .B asm10
@@ -897,7 +909,7 @@ Use this if the average divergence is around several percent.
 .B ava\-ont
 Experimental. Oxford Nanopore all-vs-all overlap mapping
 .RB ( \-k17
-.B \-s9 \-\-min\-support 2 \-\-vote\-seeds 256 \-\-vote\-ratio 0 \-\-dw\-slope\-den 64
+.B \-s9 \-\-min\-support 2 \-v256 \-\-vote\-ratio 0 \-W64,64
 .B \-\-max\-cands 16383 \-m100
 .BR \-\-dual=no ).
 Output is PAF without CIGAR;
@@ -907,7 +919,7 @@ are refused. Read names must be unique.
 .B ava\-hifi
 Experimental. PacBio HiFi all-vs-all overlap mapping
 .RB ( \-k21
-.B \-s5 \-\-min\-support 3 \-\-vote\-ratio 0 \-\-dw\-slope\-den 64
+.B \-s5 \-\-min\-support 3 \-\-vote\-ratio 0 \-W48,64
 .B \-\-max\-cands 16383 \-m100
 .BR \-\-dual=no ).
 .RE
