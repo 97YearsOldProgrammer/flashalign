@@ -120,8 +120,6 @@ struct BlockPlan {
   bool truncated_right = false;
   // A segment of a secondary-role region.
   bool rival = false;
-  // A continuation's own anchors, taken from the parent segment's path.
-  std::vector<chaining::Anchor> continuation_anchors;
 };
 
 // One interior Z-drop. `truncated`: the segment ends at the Z-drop cell.
@@ -498,11 +496,10 @@ bool plan_block_split(const DnaContext& context, BlockPlan& plan,
   continuation.split_group = plan.split_group;
   continuation.split_continuation = true;
   continuation.split_inv = outcome.trace.zdrop_test.code == 2;
-  // Every anchor past the cut, the ones the bad-end trim left out included,
-  // as minimap2's mm_split_reg.
-  continuation.continuation_anchors.assign(
-      plan.path.selected.begin() + static_cast<std::ptrdiff_t>(start),
-      plan.path.selected.end());
+  // Every anchor past the cut, the ones the bad-end trim left out included:
+  // the window after the cut, as mm_split_reg's (as + n, cnt - n).
+  continuation.path.selected = {plan.path.selected.data + start,
+                                plan.path.selected.size() - start};
   split.has_continuation = true;
   return true;
 }
@@ -1663,31 +1660,31 @@ DnaRegionOutcome realize_dna_regions(
     current.reverse = item.reverse;
     current.split_group = static_cast<int>(r);
     current.rival = !region.owner;
+    // The region's one anchor array, flagged in place as minimap2 flags a[];
+    // each segment's path is a window of it.
     std::vector<chaining::Anchor> anchors = chain.anchors;
+    current.path.selected = {anchors.data(), anchors.size()};
     int score = item.score;
     int cnt = static_cast<int>(anchors.size());
     bool previous_committed = false;
     Unit previous_unit;
     for (;;) {
-      ordered::OrderedAnchorPath raw;
-      raw.reference_id = item.contig;
-      raw.reverse_complemented = item.reverse;
-      raw.query_length = read_length;
-      raw.target_length = static_cast<int>(reference.size());
-      raw.query_bound_begin = 0;
-      raw.query_bound_end = read_length;
-      raw.target_bound_begin = 0;
-      raw.target_bound_end = static_cast<int>(reference.size());
-      raw.minimizer_k = context.ref.index->k();
-      raw.selected = std::move(anchors);
-      raw.realization_end = raw.selected.size();
-      const ordered::NormalizedPath normalized =
-          ordered::normalize_for_realization(raw, normalization);
-      if (!normalized) {
+      ordered::OrderedAnchorPath& path = current.path;
+      path.reference_id = item.contig;
+      path.reverse_complemented = item.reverse;
+      path.query_length = read_length;
+      path.target_length = static_cast<int>(reference.size());
+      path.query_bound_begin = 0;
+      path.query_bound_end = read_length;
+      path.target_bound_begin = 0;
+      path.target_bound_end = static_cast<int>(reference.size());
+      path.minimizer_k = context.ref.index->k();
+      path.realization_begin = 0;
+      path.realization_end = path.selected.size();
+      if (!ordered::normalize_for_realization(path, normalization)) {
         refuse(DnaFamilyFailure::InvalidOrderedPath);
         break;
       }
-      current.path = normalized.path;
       BlockSplit split;
       DnaFamilyFailure failure = DnaFamilyFailure::None;
       if (!family_internal::plan_and_realize_packets(context, request, current,
@@ -1702,8 +1699,7 @@ DnaRegionOutcome realize_dna_regions(
       int next_score = 0;
       int next_cnt = 0;
       if (split.has_continuation) {
-        next_cnt =
-            static_cast<int>(split.continuation.continuation_anchors.size());
+        next_cnt = static_cast<int>(split.continuation.path.selected.size());
         next_score = static_cast<int>(
             static_cast<float>(score) *
                 (static_cast<float>(next_cnt) / static_cast<float>(cnt)) +
@@ -1763,8 +1759,6 @@ DnaRegionOutcome realize_dna_regions(
       if (!split.has_continuation) break;
       ++result.zdrop_splits;
       current = std::move(split.continuation);
-      anchors = std::move(current.continuation_anchors);
-      current.continuation_anchors.clear();
       score = next_score;
       cnt = next_cnt;
     }

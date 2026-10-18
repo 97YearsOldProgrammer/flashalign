@@ -448,12 +448,15 @@ dna::Result settle_map_only_projection(DnaFamilyProjectionResult result) {
 
 namespace {
 
-// A record's first and last anchors as the block path the seam test reads.
-ordered_anchor::OrderedAnchorPath corner_path(const DnaJoinPiece& piece,
-                                              int k) {
+// A record's first and last anchors, held in `corners`, as the block path the
+// seam test reads.
+ordered_anchor::OrderedAnchorPath corner_path(const DnaJoinPiece& piece, int k,
+                                              chaining::Anchor (&corners)[2]) {
+  corners[0] = piece.first;
+  corners[1] = piece.last;
   ordered_anchor::OrderedAnchorPath path;
   path.minimizer_k = k;
-  path.selected = {piece.first, piece.last};
+  path.selected = {corners, 2};
   path.realization_end = path.selected.size();
   return path;
 }
@@ -465,8 +468,12 @@ bool seam_joins(const DnaContext& context, const DnaJoinPiece& left,
   if (left.chromosome != right.chromosome || left.reverse != right.reverse)
     return false;
   const int k = context.ref.index->k();
-  const ordered_anchor::OrderedAnchorPath left_path = corner_path(left, k);
-  const ordered_anchor::OrderedAnchorPath right_path = corner_path(right, k);
+  chaining::Anchor left_corners[2];
+  chaining::Anchor right_corners[2];
+  const ordered_anchor::OrderedAnchorPath left_path =
+      corner_path(left, k, left_corners);
+  const ordered_anchor::OrderedAnchorPath right_path =
+      corner_path(right, k, right_corners);
   if (dna_family_seam_has_duplicate_anchor(left_path, right_path,
                                            left.reverse))
     return false;

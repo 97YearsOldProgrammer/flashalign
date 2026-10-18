@@ -992,6 +992,21 @@ enum class CoordinateConvention : std::uint8_t {
   ExactKmerStart,
 };
 
+// A window [data, data + count) of an anchor array the caller owns, as
+// minimap2's (r->as, r->cnt) into a[]. Indices are window-local.
+struct AnchorWindow {
+  ::fa::cpu::chaining::Anchor* data = nullptr;
+  std::size_t count = 0;
+
+  std::size_t size() const { return count; }
+  bool empty() const { return count == 0; }
+  ::fa::cpu::chaining::Anchor& operator[](std::size_t i) const {
+    return data[i];
+  }
+  ::fa::cpu::chaining::Anchor& front() const { return data[0]; }
+  ::fa::cpu::chaining::Anchor& back() const { return data[count - 1]; }
+};
+
 struct OrderedAnchorPath {
   int reference_id = -1;
   bool reverse_complemented = false;
@@ -1009,7 +1024,8 @@ struct OrderedAnchorPath {
   // Coordinates are in the oriented query and the forward reference.
   // [realization_begin, realization_end) is the subrange mm_fix_bad_ends
   // keeps; the anchors outside it still bound the terminal windows.
-  std::vector<::fa::cpu::chaining::Anchor> selected;
+  // Normalization flags the anchors in place.
+  AnchorWindow selected;
   std::size_t realization_begin = 0;
   std::size_t realization_end = 0;
 };
@@ -1064,9 +1080,8 @@ struct NormalizationStats {
   std::size_t long_join = 0;
 };
 
-struct NormalizedPath {
+struct NormalizationResult {
   ValidationResult validation;
-  OrderedAnchorPath path;
   NormalizationStats stats;
 
   explicit operator bool() const {
@@ -1075,10 +1090,11 @@ struct NormalizedPath {
 };
 
 // Pre-DP normalization as minimap2's mm_fix_bad_ends, mm_filter_bad_seeds and
-// mm_filter_bad_seeds_alt. End trimming is enabled per side; the bad-seed
-// filters always run and flag anchors ANCHOR_IGNORE / ANCHOR_LONG_JOIN.
-NormalizedPath normalize_for_realization(const OrderedAnchorPath& path,
-                                         const NormalizationControl& control);
+// mm_filter_bad_seeds_alt, in place: the trimmed range is written to `path`
+// and the bad-seed filters, which always run, flag anchors ANCHOR_IGNORE /
+// ANCHOR_LONG_JOIN in its window. End trimming is enabled per side.
+NormalizationResult normalize_for_realization(
+    OrderedAnchorPath& path, const NormalizationControl& control);
 
 // The verified realization geometry (see align.cpp). A block is laid
 // out left to right as steps of three kinds.

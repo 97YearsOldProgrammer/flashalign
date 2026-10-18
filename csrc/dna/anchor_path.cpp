@@ -40,9 +40,8 @@ bool anchor_in_path_bounds(const ::fa::cpu::chaining::Anchor& anchor,
              path.target_bound_end;
 }
 
-ValidationResult
-validate_anchor_vector(const std::vector<::fa::cpu::chaining::Anchor>& anchors,
-                       int query_length, int target_length) {
+ValidationResult validate_anchor_vector(const AnchorWindow& anchors,
+                                        int query_length, int target_length) {
   for (std::size_t i = 0; i < anchors.size(); ++i) {
     const auto& anchor = anchors[i];
     if (anchor.span <= 0)
@@ -269,10 +268,9 @@ AdjustedEndpoint adjusted_endpoint(const OrderedAnchorPath& path,
   return {anchor.q + shift, anchor.r + shift};
 }
 
-NormalizedPath normalize_for_realization(const OrderedAnchorPath& path,
-                                         const NormalizationControl& control) {
-  NormalizedPath normalized;
-  normalized.path = path;
+NormalizationResult normalize_for_realization(
+    OrderedAnchorPath& path, const NormalizationControl& control) {
+  NormalizationResult normalized;
   normalized.validation = validate(path);
   if (!normalized)
     return normalized;
@@ -333,32 +331,29 @@ NormalizedPath normalize_for_realization(const OrderedAnchorPath& path,
         break;
     }
     if (control.trim_left)
-      normalized.path.realization_begin = begin;
+      path.realization_begin = begin;
     if (control.trim_right)
-      normalized.path.realization_end = end;
+      path.realization_end = end;
   }
 
-  normalized.stats.trimmed_front =
-      normalized.path.realization_begin - original_begin;
-  normalized.stats.trimmed_back =
-      original_end - normalized.path.realization_end;
+  normalized.stats.trimmed_front = path.realization_begin - original_begin;
+  normalized.stats.trimmed_back = original_end - path.realization_end;
 
   // minimap2's constants for non-splice long reads.
-  filter_bad_seeds(normalized.path, /*minimum_gap=*/10,
+  filter_bad_seeds(path, /*minimum_gap=*/10,
                    /*difference_threshold=*/40,
                    /*maximum_extension_length=*/control.max_gap >> 1,
                    /*maximum_extension_count=*/10);
-  filter_bad_seeds_alt(normalized.path, /*minimum_gap=*/30,
+  filter_bad_seeds_alt(path, /*minimum_gap=*/30,
                        /*maximum_extension=*/control.max_gap >> 1);
-  for (std::size_t i = normalized.path.realization_begin;
-       i < normalized.path.realization_end; ++i) {
-    const std::uint32_t flags = normalized.path.selected[i].flags;
+  for (std::size_t i = path.realization_begin; i < path.realization_end; ++i) {
+    const std::uint32_t flags = path.selected[i].flags;
     if ((flags & ::fa::cpu::chaining::ANCHOR_IGNORE) != 0)
       ++normalized.stats.ignored;
     if ((flags & ::fa::cpu::chaining::ANCHOR_LONG_JOIN) != 0)
       ++normalized.stats.long_join;
   }
-  normalized.validation = validate(normalized.path);
+  normalized.validation = validate(path);
   return normalized;
 }
 
