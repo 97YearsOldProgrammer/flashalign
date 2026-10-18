@@ -335,6 +335,10 @@ PresetSeeding resolve_preset_seeding(std::string_view preset) {
     return PresetSeeding{15, 10};
 }
 
+int preset_batch_window(std::string_view preset) {
+    return is_assembly_preset(preset) ? 1 : 3;
+}
+
 std::string accepted_preset_names() {
   std::string names;
   const auto append = [&names](std::string_view name) {

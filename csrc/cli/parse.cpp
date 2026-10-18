@@ -281,8 +281,9 @@ const std::vector<OptionSpec>& specs_table() {
          "preset: lr, lr:hq, splice, splice:hq; experimental: asm5, asm10, asm20, ava-ont, ava-hifi (see 'flashalign index') [lr]"},
 
         // align, not on the help screen; the manual page lists these.
-        // --batch-window INT [3]: batches in flight in the compute stage.
-        // Output is identical for every value.
+        // --batch-window INT: batches in flight in the compute stage [the
+        // preset's: 1 on asm5, asm10 and asm20, 3 otherwise]. Output is
+        // identical for every value.
         {OptionId::BatchWindow, '\0', "--batch-window", kInt, kDev, A,
          "", HIDDEN, "", STUDY_CLI_MANUAL},
         // --io-staging MIB [0]: ceiling on the parallel gzip decoder's
@@ -1173,7 +1174,7 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
     if (opt.batch_bp <= 0) {
         throw UsageError("--batch-bp must be positive");
     }
-    if (opt.batch_window < 1) {
+    if (opt.batch_window && *opt.batch_window < 1) {
         throw UsageError("--batch-window must be at least 1");
     }
     if (opt.threads && *opt.threads < 1) {

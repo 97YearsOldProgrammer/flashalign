@@ -535,6 +535,8 @@ void write_run_footer(int argc, char** argv, double real_seconds) {
 
 namespace {
 
+int resolve_batch_window(const AlignOptions& opt, int num_threads);
+
 // The resolved configuration as text, each value tagged with its source
 // (builtin, preset, index, cli, ...). It needs no aligner, so no reference is
 // opened or indexed.
@@ -590,6 +592,13 @@ std::string resolved_config_text(const AlignOptions& opt,
   row("output_format", opt.format, "cli");
   row("threads", i2s(cfg.common.num_threads),
       src(opt.threads && *opt.threads > 0, "builtin"));
+  // --batch-window, else the preset's; derived where -t 1 forces 1.
+  const int batch_window = resolve_batch_window(opt, cfg.common.num_threads);
+  row("batch_window", i2s(batch_window),
+      batch_window != opt.batch_window.value_or(
+                          fa::cpu::api::preset_batch_window(opt.preset))
+          ? "derived"
+          : src(opt.batch_window.has_value(), "preset"));
 
   row("min_support", i2s(cfg.common.min_support),
       src(opt.min_support.has_value(), "preset"));
@@ -1077,10 +1086,15 @@ int resolve_num_threads(const AlignOptions& opt) {
              : std::max(1, ::fa::cpu::threading::default_thread_count() - 2);
 }
 
-// Batches in flight in the compute stage. Forced to 1 at -t 1, so that run
-// uses a single OS thread (run_pipeline_serial).
+// Batches in flight in the compute stage: --batch-window, else the preset's.
+// Forced to 1 at -t 1, so that run uses a single OS thread
+// (run_pipeline_serial).
 int resolve_batch_window(const AlignOptions& opt, int num_threads) {
-  int window = opt.batch_window < 1 ? 1 : opt.batch_window;
+  int window = opt.batch_window
+                   ? *opt.batch_window
+                   : fa::cpu::api::preset_batch_window(opt.preset);
+  if (window < 1)
+    window = 1;
   if (num_threads == 1)
     window = 1;
   return window;

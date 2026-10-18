@@ -54,6 +54,7 @@ struct PresetSeeding {
 PresetSeeding resolve_preset_seeding(std::string_view preset);
 bool is_assembly_preset(std::string_view preset);
 bool is_overlap_preset(std::string_view preset);
+int preset_batch_window(std::string_view preset);
 bool lane_runs_stage(LaneStage stage, std::string_view preset);
 bool is_rna_preset(std::string_view preset);
 bool preset_is_valid(std::string_view preset);

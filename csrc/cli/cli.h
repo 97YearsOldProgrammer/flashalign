@@ -201,10 +201,11 @@ struct AlignOptions {
     // The reader closes a batch after the cumulative input length reaches this
     // budget. A single over-budget read forms a singleton batch.
     int64_t batch_bp = 500'000'000;   // -K: bp per alignment batch [default 500M]
-    // --batch-window: batches in flight in the compute stage. With two or
-    // more, a worker that finishes batch k starts on k+1 instead of waiting.
-    // Output is identical for every value.
-    int batch_window = 3;
+    // --batch-window: batches in flight in the compute stage; unset, the
+    // preset's (options/options.h preset_batch_window). With two or more, a
+    // worker that finishes batch k starts on k+1 instead of waiting. Output is
+    // identical for every value.
+    std::optional<int> batch_window;
     // --io-staging: MiB of decompressed input the parallel gzip decoder may
     // hold ahead of the reader, as a ceiling; 0 scales it with -t.
     int io_staging_mib = 0;

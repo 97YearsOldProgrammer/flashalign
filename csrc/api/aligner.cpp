@@ -73,6 +73,9 @@ bool is_assembly_preset(std::string_view preset) {
 bool is_overlap_preset(std::string_view preset) {
   return ::fa::cpu::options::is_overlap_preset(preset);
 }
+int preset_batch_window(std::string_view preset) {
+  return ::fa::cpu::options::preset_batch_window(preset);
+}
 bool lane_runs_stage(LaneStage stage, std::string_view preset) {
   return ::fa::cpu::options::lane_runs_stage(stage, preset);
 }

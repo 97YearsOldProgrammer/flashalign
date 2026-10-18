@@ -803,9 +803,9 @@ Generate CIGAR and output alignments in the SAM format. FlashAlign outputs in
 PAF by default.
 .TP
 .BI \-\-batch\-window \ INT
-Number of batches in flight in the compute stage [3]. With 1, all threads finish
-a batch before the next one starts. Output bytes and order are identical for
-every value.
+Number of batches in flight in the compute stage [the preset's: 1 on asm5,
+asm10 and asm20, 3 otherwise]. With 1, all threads finish a batch before the
+next one starts. Output bytes and order are identical for every value.
 .TP
 .BI \-\-io\-staging \ MIB
 Ceiling, in MiB, on the decompressed gzip input staged ahead of the reader; 0
