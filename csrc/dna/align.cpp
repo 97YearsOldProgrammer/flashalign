@@ -17,7 +17,7 @@
 
 /**** kernel_packets ****/
 // The DNA realization geometry between a block's first and last anchors. No
-// code here: the planner is plan_verified_geometry() (dna.h),
+// code here: the planner is GeometryPlanner (dna.h),
 // the executors are in align.cpp and the gap fill is
 // dp_fill_gap().
 //

@@ -1073,28 +1073,14 @@ struct NormalizationControl {
   bool trim_right = true;
 };
 
-struct NormalizationStats {
-  std::size_t trimmed_front = 0;
-  std::size_t trimmed_back = 0;
-  std::size_t ignored = 0;
-  std::size_t long_join = 0;
-};
-
-struct NormalizationResult {
-  ValidationResult validation;
-  NormalizationStats stats;
-
-  explicit operator bool() const {
-    return validation.code == ValidationCode::Valid;
-  }
-};
-
 // Pre-DP normalization as minimap2's mm_fix_bad_ends, mm_filter_bad_seeds and
 // mm_filter_bad_seeds_alt, in place: the trimmed range is written to `path`
 // and the bad-seed filters, which always run, flag anchors ANCHOR_IGNORE /
-// ANCHOR_LONG_JOIN in its window. End trimming is enabled per side.
-NormalizationResult normalize_for_realization(
-    OrderedAnchorPath& path, const NormalizationControl& control);
+// ANCHOR_LONG_JOIN in its window. End trimming is enabled per side. `path`
+// must pass validate(); a window after a cut of a valid one does, since the
+// filters add only known flags. Only the control is checked here.
+ValidationResult normalize_for_realization(OrderedAnchorPath& path,
+                                           const NormalizationControl& control);
 
 // The verified realization geometry (see align.cpp). A block is laid
 // out left to right as steps of three kinds.
@@ -1169,7 +1155,6 @@ struct GeometryPlan {
   int initial_target_cursor = 0;
   int final_query_cursor = 0; // center(last retained anchor)
   int final_target_cursor = 0;
-  std::vector<GeometryRegion> regions;
   std::vector<GeometryStep> steps;
   std::vector<GeometryStretch> stretches;
   // The gaps of every verified region.
@@ -1197,7 +1182,7 @@ struct GapCertificate {
   int one_base_gap = 0; // g(1) = min(q + e, q2 + e2)
 };
 
-// Plans the verified geometry of one normalized block:
+// Plans the verified geometry of one normalized block, left to right:
 //   1. interior anchors flagged ANCHOR_IGNORE or ANCHOR_TANDEM are skipped, as
 //      in minimap2; the first and last anchors never are;
 //   2. the retained anchors are cut into regions, and each region of two or
@@ -1207,11 +1192,42 @@ struct GapCertificate {
 //   3. a verified region becomes a Verified step, neighbouring verified
 //      regions are joined by a Seam, and everything else is a stretch cut into
 //      Pieces by minimap2's loop.
-// `path` must be valid normalize_for_realization output; nothing is
-// re-checked.
-GeometryPlan plan_verified_geometry(const OrderedAnchorPath& path,
-                                    const GeometryControl& control,
-                                    const GapCertificate& certificate);
+// Regions are laid out one at a time, only as far as the steps asked for, so
+// a caller that stops at a Z-drop, as minimap2's mm_align1 loop breaks there,
+// plans nothing past it. `path` must be valid normalize_for_realization
+// output; nothing is re-checked.
+class GeometryPlanner {
+public:
+  GeometryPlanner(const OrderedAnchorPath& path, const GeometryControl& control,
+                  const GapCertificate& certificate, GeometryPlan& plan);
+  // True once plan.steps holds step `s`; false when the block ends before it.
+  bool reach(std::size_t s);
+
+private:
+  bool skipped(std::size_t i) const;
+  GeometryStep fill(GeometryStepKind kind, std::size_t left,
+                    std::size_t right) const;
+  void emit_stretch(std::size_t start, std::size_t end,
+                    GeometryStretch stretch);
+  // Lays out the next region; false once the block is laid out.
+  bool advance();
+
+  const OrderedAnchorPath& path_;
+  const GeometryControl control_;
+  const GapCertificate& certificate_;
+  GeometryPlan& plan_;
+  std::size_t begin_ = 0;
+  std::size_t last_ = 0;
+  std::size_t next_ = 0;  // the next anchor the region scan reads
+  GeometryRegion open_;   // the region the scan is growing
+  bool done_ = false;
+  // The block's first anchor or the last anchor of the verified region laid
+  // out last; `pending` collects the unverified regions since then, which
+  // belong to the next stretch.
+  std::size_t corner_ = 0;
+  bool previous_verified_ = false;
+  GeometryStretch pending_;
+};
 
 struct TerminalWindowControl {
   int max_gap = 0;
@@ -1252,6 +1268,8 @@ struct TerminalWindowPlan {
   }
 };
 
+// `path` must be valid normalize_for_realization output; only the control is
+// checked.
 TerminalWindowPlan plan_terminal_windows(const OrderedAnchorPath& path,
                                          const TerminalWindowControl& control);
 

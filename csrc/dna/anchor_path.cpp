@@ -268,17 +268,11 @@ AdjustedEndpoint adjusted_endpoint(const OrderedAnchorPath& path,
   return {anchor.q + shift, anchor.r + shift};
 }
 
-NormalizationResult normalize_for_realization(
-    OrderedAnchorPath& path, const NormalizationControl& control) {
-  NormalizationResult normalized;
-  normalized.validation = validate(path);
-  if (!normalized)
-    return normalized;
+ValidationResult normalize_for_realization(OrderedAnchorPath& path,
+                                           const NormalizationControl& control) {
   if (control.bandwidth <= 0 || control.min_chain_score <= 0 ||
-      control.max_gap <= 0) {
-    normalized.validation = {ValidationCode::InvalidControl, 0};
-    return normalized;
-  }
+      control.max_gap <= 0)
+    return {ValidationCode::InvalidControl, 0};
 
   const std::size_t original_begin = path.realization_begin;
   const std::size_t original_end = path.realization_end;
@@ -336,9 +330,6 @@ NormalizationResult normalize_for_realization(
       path.realization_end = end;
   }
 
-  normalized.stats.trimmed_front = path.realization_begin - original_begin;
-  normalized.stats.trimmed_back = original_end - path.realization_end;
-
   // minimap2's constants for non-splice long reads.
   filter_bad_seeds(path, /*minimum_gap=*/10,
                    /*difference_threshold=*/40,
@@ -346,15 +337,7 @@ NormalizationResult normalize_for_realization(
                    /*maximum_extension_count=*/10);
   filter_bad_seeds_alt(path, /*minimum_gap=*/30,
                        /*maximum_extension=*/control.max_gap >> 1);
-  for (std::size_t i = path.realization_begin; i < path.realization_end; ++i) {
-    const std::uint32_t flags = path.selected[i].flags;
-    if ((flags & ::fa::cpu::chaining::ANCHOR_IGNORE) != 0)
-      ++normalized.stats.ignored;
-    if ((flags & ::fa::cpu::chaining::ANCHOR_LONG_JOIN) != 0)
-      ++normalized.stats.long_join;
-  }
-  normalized.validation = validate(path);
-  return normalized;
+  return {};
 }
 
 namespace {
@@ -384,177 +367,183 @@ bool certified_gap(const std::uint8_t* query, const std::uint8_t* target,
 
 } // namespace
 
-GeometryPlan plan_verified_geometry(const OrderedAnchorPath& path,
-                                    const GeometryControl& control,
-                                    const GapCertificate& certificate) {
-  using ::fa::cpu::chaining::Anchor;
-  GeometryPlan plan;
-  const std::size_t begin = path.realization_begin;
-  const std::size_t last = path.realization_end - 1;
+GeometryPlanner::GeometryPlanner(const OrderedAnchorPath& path,
+                                 const GeometryControl& control,
+                                 const GapCertificate& certificate,
+                                 GeometryPlan& plan)
+    : path_(path), control_(control), certificate_(certificate), plan_(plan),
+      begin_(path.realization_begin), last_(path.realization_end - 1),
+      next_(begin_ + 1), open_{begin_, begin_, 1, false, 0}, corner_(begin_) {
+  plan_ = GeometryPlan{};
   const AdjustedEndpoint opening =
-      adjusted_endpoint(path, path.selected[begin]);
-  const AdjustedEndpoint closing = adjusted_endpoint(path, path.selected[last]);
-  plan.initial_query_cursor = opening.query;
-  plan.initial_target_cursor = opening.target;
-  plan.final_query_cursor = closing.query;
-  plan.final_target_cursor = closing.target;
+      adjusted_endpoint(path_, path_.selected[begin_]);
+  const AdjustedEndpoint closing =
+      adjusted_endpoint(path_, path_.selected[last_]);
+  plan_.initial_query_cursor = opening.query;
+  plan_.initial_target_cursor = opening.target;
+  plan_.final_query_cursor = closing.query;
+  plan_.final_target_cursor = closing.target;
+}
 
-  // 1. Skipped anchors, as in minimap2; never the first or the last.
-  std::vector<char> skipped(path.selected.size(), 0);
-  for (std::size_t i = begin + 1; i < last; ++i)
-    skipped[i] =
-        (path.selected[i].flags & (::fa::cpu::chaining::ANCHOR_IGNORE |
-                                   ::fa::cpu::chaining::ANCHOR_TANDEM)) != 0;
+bool GeometryPlanner::reach(std::size_t s) {
+  while (plan_.steps.size() <= s)
+    if (!advance())
+      return false;
+  return true;
+}
 
-  // 2. Regions: a retained anchor opens one at the first anchor, at a
-  // diagonal change from the previous retained anchor, and at a long join.
-  plan.regions.push_back({begin, begin, 1, false, 0});
-  for (std::size_t i = begin + 1; i <= last; ++i) {
-    if (skipped[i])
+// Skipped anchors, as in minimap2; never the first or the last.
+bool GeometryPlanner::skipped(std::size_t i) const {
+  return i != begin_ && i != last_ &&
+         (path_.selected[i].flags & (::fa::cpu::chaining::ANCHOR_IGNORE |
+                                     ::fa::cpu::chaining::ANCHOR_TANDEM)) != 0;
+}
+
+// One fill step [center(left), center(right)): a seam or a piece.
+GeometryStep GeometryPlanner::fill(GeometryStepKind kind, std::size_t left,
+                                   std::size_t right) const {
+  const ::fa::cpu::chaining::Anchor& prev = path_.selected[left];
+  const ::fa::cpu::chaining::Anchor& next = path_.selected[right];
+  const AdjustedEndpoint lo = adjusted_endpoint(path_, prev);
+  const AdjustedEndpoint hi = adjusted_endpoint(path_, next);
+  GeometryStep step;
+  step.kind = kind;
+  step.selected_index = right;
+  step.query_begin = lo.query;
+  step.query_end = hi.query;
+  step.target_begin = lo.target;
+  step.target_end = hi.target;
+  step.long_join = (next.flags & ::fa::cpu::chaining::ANCHOR_LONG_JOIN) != 0;
+  const int query_span = hi.query - lo.query;
+  const int target_span = hi.target - lo.target;
+  step.selected_band = step.long_join ? std::max(query_span, target_span)
+                                      : control_.normal_long_band;
+  step.anchor_free = std::max(next.q - prev.q_end(), next.r - prev.r_end());
+  return step;
+}
+
+// A stretch from corner `start` to corner `end`, cut as minimap2's loop
+// does: a piece ends at the stretch end, at a long join, or once both spans
+// since the previous corner reach min_ksw_len.
+void GeometryPlanner::emit_stretch(std::size_t start, std::size_t end,
+                                   GeometryStretch stretch) {
+  stretch.first_step = plan_.steps.size();
+  stretch.query_bases = adjusted_endpoint(path_, path_.selected[end]).query -
+                        adjusted_endpoint(path_, path_.selected[start]).query;
+  const int index = static_cast<int>(plan_.stretches.size());
+  std::size_t corner = start;
+  AdjustedEndpoint corner_center =
+      adjusted_endpoint(path_, path_.selected[start]);
+  int crossed = 0;
+  for (std::size_t i = start + 1; i <= end; ++i) {
+    if (skipped(i))
       continue;
-    const Anchor& anchor = path.selected[i];
-    GeometryRegion& region = plan.regions.back();
+    const ::fa::cpu::chaining::Anchor& anchor = path_.selected[i];
+    const AdjustedEndpoint center = adjusted_endpoint(path_, anchor);
+    const bool long_join =
+        (anchor.flags & ::fa::cpu::chaining::ANCHOR_LONG_JOIN) != 0;
+    if (i == end || long_join ||
+        (center.query - corner_center.query >= control_.min_ksw_len &&
+         center.target - corner_center.target >= control_.min_ksw_len)) {
+      GeometryStep step = fill(GeometryStepKind::Piece, corner, i);
+      step.stretch = index;
+      step.piece = stretch.pieces++;
+      step.anchor_count = crossed;
+      plan_.steps.push_back(step);
+      corner = i;
+      corner_center = center;
+      crossed = 0;
+      continue;
+    }
+    ++crossed;
+  }
+  plan_.stretches.push_back(stretch);
+}
+
+bool GeometryPlanner::advance() {
+  using ::fa::cpu::chaining::Anchor;
+  if (done_)
+    return false;
+
+  // 1. The open region grows over the retained anchors on its diagonal; one
+  // off it, or a long join, opens the next region.
+  GeometryRegion region = open_;
+  bool more = false;
+  for (; next_ <= last_; ++next_) {
+    if (skipped(next_))
+      continue;
+    const Anchor& anchor = path_.selected[next_];
     const bool long_join =
         (anchor.flags & ::fa::cpu::chaining::ANCHOR_LONG_JOIN) != 0;
     if (!long_join && anchor_diagonal(anchor) ==
-                          anchor_diagonal(path.selected[region.last])) {
-      region.last = i;
+                          anchor_diagonal(path_.selected[region.last])) {
+      region.last = next_;
       ++region.anchors;
       continue;
     }
-    plan.regions.push_back({i, i, 1, false, 0});
+    open_ = {next_, next_, 1, false, 0};
+    ++next_;
+    more = true;
+    break;
   }
 
-  // 3. Verification, gap by gap. Offsets are relative to the region's first
+  // 2. Verification, gap by gap. Offsets are relative to the region's first
   // center, where its Verified step begins; a failed region keeps no gaps.
   // Bases under a skipped anchor are tested too: that anchor may lie on
   // another diagonal.
-  std::vector<std::size_t> region_gap_begin(plan.regions.size(), 0);
-  std::vector<std::size_t> region_gap_count(plan.regions.size(), 0);
-  for (std::size_t g = 0; g < plan.regions.size(); ++g) {
-    GeometryRegion& region = plan.regions[g];
-    region_gap_begin[g] = plan.gaps.size();
-    if (region.anchors < 2)
-      continue;
+  const std::size_t gap_begin = plan_.gaps.size();
+  if (region.anchors >= 2) {
     const int origin =
-        adjusted_endpoint(path, path.selected[region.first]).query;
+        adjusted_endpoint(path_, path_.selected[region.first]).query;
     std::size_t p = region.first;
     for (std::size_t n = region.first + 1; n <= region.last; ++n) {
-      if (skipped[n])
+      if (skipped(n))
         continue;
-      const Anchor& left = path.selected[p];
-      const Anchor& right = path.selected[n];
+      const Anchor& left = path_.selected[p];
+      const Anchor& right = path_.selected[n];
       p = n;
       const int length = right.q - left.q_end();
       if (length <= 0)
         continue;
-      plan.gaps.push_back({left.q_end() - origin, right.q - origin});
-      if (!certified_gap(certificate.query + left.q_end(),
-                         certificate.target + left.r_end(), length,
-                         certificate))
+      plan_.gaps.push_back({left.q_end() - origin, right.q - origin});
+      if (!certified_gap(certificate_.query + left.q_end(),
+                         certificate_.target + left.r_end(), length,
+                         certificate_))
         ++region.failing_gaps;
     }
     region.verified = region.failing_gaps == 0;
     if (!region.verified)
-      plan.gaps.resize(region_gap_begin[g]);
-    region_gap_count[g] = plan.gaps.size() - region_gap_begin[g];
+      plan_.gaps.resize(gap_begin);
   }
+  const std::size_t gap_count = plan_.gaps.size() - gap_begin;
 
-  // One fill step [center(left), center(right)): a seam or a piece.
-  const auto emit_fill = [&](GeometryStepKind kind, std::size_t left,
-                             std::size_t right) -> GeometryStep& {
-    const Anchor& prev = path.selected[left];
-    const Anchor& next = path.selected[right];
-    const AdjustedEndpoint lo = adjusted_endpoint(path, prev);
-    const AdjustedEndpoint hi = adjusted_endpoint(path, next);
-    GeometryStep step;
-    step.kind = kind;
-    step.selected_index = right;
-    step.query_begin = lo.query;
-    step.query_end = hi.query;
-    step.target_begin = lo.target;
-    step.target_end = hi.target;
-    step.long_join = (next.flags & ::fa::cpu::chaining::ANCHOR_LONG_JOIN) != 0;
-    const int query_span = hi.query - lo.query;
-    const int target_span = hi.target - lo.target;
-    step.selected_band = step.long_join ? std::max(query_span, target_span)
-                                        : control.normal_long_band;
-    step.anchor_free = std::max(next.q - prev.q_end(), next.r - prev.r_end());
-    plan.steps.push_back(step);
-    return plan.steps.back();
-  };
-
-  // A stretch from corner `start` to corner `end`, cut as minimap2's loop
-  // does: a piece ends at the stretch end, at a long join, or once both spans
-  // since the previous corner reach min_ksw_len.
-  const auto emit_stretch = [&](std::size_t start, std::size_t end,
-                                GeometryStretch stretch) {
-    stretch.first_step = plan.steps.size();
-    stretch.query_bases = adjusted_endpoint(path, path.selected[end]).query -
-                          adjusted_endpoint(path, path.selected[start]).query;
-    const int index = static_cast<int>(plan.stretches.size());
-    std::size_t corner = start;
-    AdjustedEndpoint corner_center =
-        adjusted_endpoint(path, path.selected[start]);
-    int crossed = 0;
-    for (std::size_t i = start + 1; i <= end; ++i) {
-      if (skipped[i])
-        continue;
-      const Anchor& anchor = path.selected[i];
-      const AdjustedEndpoint center = adjusted_endpoint(path, anchor);
-      const bool long_join =
-          (anchor.flags & ::fa::cpu::chaining::ANCHOR_LONG_JOIN) != 0;
-      if (i == end || long_join ||
-          (center.query - corner_center.query >= control.min_ksw_len &&
-           center.target - corner_center.target >= control.min_ksw_len)) {
-        GeometryStep& step = emit_fill(GeometryStepKind::Piece, corner, i);
-        step.stretch = index;
-        step.piece = stretch.pieces++;
-        step.anchor_count = crossed;
-        corner = i;
-        corner_center = center;
-        crossed = 0;
-        continue;
-      }
-      ++crossed;
+  // 3. The layout.
+  if (!region.verified) {
+    previous_verified_ = false;
+    if (region.anchors < 2) {
+      ++pending_.lone_anchors;
+    } else {
+      ++pending_.failed_regions;
+      pending_.failed_anchors += region.anchors;
+      pending_.failed_bases +=
+          adjusted_endpoint(path_, path_.selected[region.last]).query -
+          adjusted_endpoint(path_, path_.selected[region.first]).query;
+      pending_.failing_gaps += region.failing_gaps;
     }
-    plan.stretches.push_back(stretch);
-  };
-
-  // 4. The layout, left to right. `corner` is the block's first anchor or the
-  // last anchor of the verified region laid out last; `pending` collects the
-  // unverified regions since then, which belong to the next stretch.
-  std::size_t corner = begin;
-  bool previous_verified = false;
-  GeometryStretch pending;
-  for (std::size_t g = 0; g < plan.regions.size(); ++g) {
-    const GeometryRegion& region = plan.regions[g];
-    if (!region.verified) {
-      previous_verified = false;
-      if (region.anchors < 2) {
-        ++pending.lone_anchors;
-      } else {
-        ++pending.failed_regions;
-        pending.failed_anchors += region.anchors;
-        pending.failed_bases +=
-            adjusted_endpoint(path, path.selected[region.last]).query -
-            adjusted_endpoint(path, path.selected[region.first]).query;
-        pending.failing_gaps += region.failing_gaps;
-      }
-      continue;
-    }
-    if (region.first != corner) {
+  } else {
+    if (region.first != corner_) {
       // A neighbour has no retained anchor between the two regions.
-      if (previous_verified)
-        emit_fill(GeometryStepKind::Seam, corner, region.first);
+      if (previous_verified_)
+        plan_.steps.push_back(
+            fill(GeometryStepKind::Seam, corner_, region.first));
       else
-        emit_stretch(corner, region.first, pending);
-      pending = GeometryStretch{};
+        emit_stretch(corner_, region.first, pending_);
+      pending_ = GeometryStretch{};
     }
     const AdjustedEndpoint lo =
-        adjusted_endpoint(path, path.selected[region.first]);
+        adjusted_endpoint(path_, path_.selected[region.first]);
     const AdjustedEndpoint hi =
-        adjusted_endpoint(path, path.selected[region.last]);
+        adjusted_endpoint(path_, path_.selected[region.last]);
     GeometryStep step;
     step.kind = GeometryStepKind::Verified;
     step.selected_index = region.last;
@@ -562,26 +551,25 @@ GeometryPlan plan_verified_geometry(const OrderedAnchorPath& path,
     step.query_end = hi.query;
     step.target_begin = lo.target;
     step.target_end = hi.target;
-    step.selected_band = control.normal_long_band;
-    step.gap_begin = region_gap_begin[g];
-    step.gap_count = region_gap_count[g];
+    step.selected_band = control_.normal_long_band;
+    step.gap_begin = gap_begin;
+    step.gap_count = gap_count;
     step.anchor_count = region.anchors;
-    plan.steps.push_back(step);
-    corner = region.last;
-    previous_verified = true;
+    plan_.steps.push_back(step);
+    corner_ = region.last;
+    previous_verified_ = true;
   }
-  if (corner != last)
-    emit_stretch(corner, last, pending);
-
-  return plan;
+  if (!more) {
+    if (corner_ != last_)
+      emit_stretch(corner_, last_, pending_);
+    done_ = true;
+  }
+  return true;
 }
 
 TerminalWindowPlan plan_terminal_windows(const OrderedAnchorPath& path,
                                          const TerminalWindowControl& control) {
   TerminalWindowPlan plan;
-  plan.validation = validate(path);
-  if (!plan)
-    return plan;
   if (control.max_gap <= 0 || control.match <= 0 || control.gap_open < 0 ||
       control.gap_extend <= 0) {
     plan.validation = {ValidationCode::InvalidControl, 0};

@@ -69,7 +69,7 @@ inline constexpr int kDnaDenseDiagMinRuns = 2048;
 
 // minimap2's min_ksw_len, in bases: the piece length of its gap-filling loop
 // over unverified material, which dna/dna.h
-// plan_verified_geometry reproduces. A piece ends at the first retained anchor
+// GeometryPlanner reproduces. A piece ends at the first retained anchor
 // where both the query and the reference span since the previous corner reach
 // it.
 inline constexpr int kDnaMinKswLen = 200;

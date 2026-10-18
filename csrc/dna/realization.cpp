@@ -498,8 +498,11 @@ bool plan_block_split(const DnaContext& context, BlockPlan& plan,
   continuation.split_inv = outcome.trace.zdrop_test.code == 2;
   // Every anchor past the cut, the ones the bad-end trim left out included:
   // the window after the cut, as mm_split_reg's (as + n, cnt - n).
+  continuation.path = plan.path;
   continuation.path.selected = {plan.path.selected.data + start,
                                 plan.path.selected.size() - start};
+  continuation.path.realization_begin = 0;
+  continuation.path.realization_end = continuation.path.selected.size();
   split.has_continuation = true;
   return true;
 }
@@ -548,8 +551,8 @@ bool plan_and_realize_packets(const DnaContext& context,
   certificate.match = scoring.match;
   certificate.one_base_gap = std::min(scoring.gap_open1 + scoring.gap_extend1,
                                       scoring.gap_open2 + scoring.gap_extend2);
-  plan.geometry =
-      ordered::plan_verified_geometry(plan.path, control, certificate);
+  ordered::GeometryPlanner planner(plan.path, control, certificate,
+                                   plan.geometry);
   plan.query_begin_cut = plan.geometry.initial_query_cursor;
   plan.query_end_cut = plan.geometry.final_query_cursor;
   plan.target_begin_cut = plan.geometry.initial_target_cursor;
@@ -586,7 +589,9 @@ bool plan_and_realize_packets(const DnaContext& context,
     probe_gate.source = &local_source;
     probe_gate.min_count = kDnaInvLocalMinAnchors;
   }
-  for (const ordered::GeometryStep& step : plan.geometry.steps) {
+  // Each step runs once laid out; a Z-drop leaves the rest unplanned.
+  for (std::size_t s = 0; planner.reach(s); ++s) {
+    const ordered::GeometryStep& step = plan.geometry.steps[s];
     const int q_span = step.query_end - step.query_begin;
     const int r_span = step.target_end - step.target_begin;
     // A pure-axis step is materialized by the controller without an executor.
@@ -1663,25 +1668,29 @@ DnaRegionOutcome realize_dna_regions(
     // The region's one anchor array, flagged in place as minimap2 flags a[];
     // each segment's path is a window of it.
     std::vector<chaining::Anchor> anchors = chain.anchors;
-    current.path.selected = {anchors.data(), anchors.size()};
+    ordered::OrderedAnchorPath& path = current.path;
+    path.reference_id = item.contig;
+    path.reverse_complemented = item.reverse;
+    path.query_length = read_length;
+    path.target_length = static_cast<int>(reference.size());
+    path.query_bound_begin = 0;
+    path.query_bound_end = read_length;
+    path.target_bound_begin = 0;
+    path.target_bound_end = static_cast<int>(reference.size());
+    path.minimizer_k = context.ref.index->k();
+    path.selected = {anchors.data(), anchors.size()};
+    path.realization_end = path.selected.size();
+    // Validated once: every continuation's window is a suffix of this one.
+    if (!ordered::validate(path)) {
+      refuse(DnaFamilyFailure::InvalidOrderedPath);
+      continue;
+    }
     int score = item.score;
     int cnt = static_cast<int>(anchors.size());
     bool previous_committed = false;
     Unit previous_unit;
     for (;;) {
-      ordered::OrderedAnchorPath& path = current.path;
-      path.reference_id = item.contig;
-      path.reverse_complemented = item.reverse;
-      path.query_length = read_length;
-      path.target_length = static_cast<int>(reference.size());
-      path.query_bound_begin = 0;
-      path.query_bound_end = read_length;
-      path.target_bound_begin = 0;
-      path.target_bound_end = static_cast<int>(reference.size());
-      path.minimizer_k = context.ref.index->k();
-      path.realization_begin = 0;
-      path.realization_end = path.selected.size();
-      if (!ordered::normalize_for_realization(path, normalization)) {
+      if (!ordered::normalize_for_realization(current.path, normalization)) {
         refuse(DnaFamilyFailure::InvalidOrderedPath);
         break;
       }
