@@ -406,7 +406,7 @@ struct LongReadSeedContext {
     // Adaptive width (DNA presets), in integer arithmetic:
     //   W(L) = clamp(L / vote_diag_slope_den, vote_diag_bin_width, vote_diag_width_max)
     // a length term for indel drift, floored at the base width. A denominator <= 0 drops the
-    // length term. False for RNA and for a fixed --dw override.
+    // length term. False for RNA.
     bool vote_diag_bin_width_adaptive = false;
     int vote_diag_slope_den = 128;
     int vote_diag_width_max = 2048;

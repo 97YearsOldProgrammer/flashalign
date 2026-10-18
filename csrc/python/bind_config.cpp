@@ -81,7 +81,9 @@ void append(std::ostringstream& out, const char* name,
     "Realize base-level CIGARs; False maps only (the CLI's plain PAF).")       \
   X(syncmer_s, "Closed-syncmer s [-s]; mapping always uses the index's.")      \
   X(syncmer_downsample, "Query seed downsampling stride; 1 = none.")           \
-  X(vote_diag_bin_width, "Vote diagonal bin width [--dw]. -1 = preset-owned.") \
+  X(vote_diag_bin_width,                                                       \
+    "Base vote diagonal bin width [-W]; DNA presets still widen it with\n"     \
+    "read length. -1 = preset-owned.")                                         \
   X(long_occ_cap,                                                              \
     "Seed occurrence cap floor; the index may raise it. -1 = preset-owned.")   \
   X(long_primary_occ_cap,                                                      \

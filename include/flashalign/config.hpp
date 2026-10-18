@@ -27,7 +27,8 @@ struct Config {
   bool full_read_cigar = true;  ///< realize base-level CIGARs; false maps only (plain PAF)
   int syncmer_s = -1;           ///< closed-syncmer s [-s]; fixed by a loaded index
   int syncmer_downsample = 1;   ///< query seed downsampling stride; 1 = none
-  int vote_diag_bin_width = -1; ///< vote diagonal bin width [--dw]
+  int vote_diag_bin_width = -1; ///< base vote diagonal bin width [-W]; DNA presets
+                                ///< still widen it with read length
   int long_occ_cap = -1;        ///< seed occurrence cap [--max-vote-occ]
   int long_primary_occ_cap = -1;  ///< primary-pass occurrence cap
   int threads = 0;              ///< worker threads [-t]; 0 = one per available core

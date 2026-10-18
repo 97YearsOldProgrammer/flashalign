@@ -140,17 +140,16 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::VoteSeeds, 'v', "", kPair, kStable, A,
          "NUM[,NUM]", SEC_PLACEMENT,
          "seeds per strand that vote, query tiles per read [128,128]"},
-        // The vote bin width is W = clamp(L / den, dw, dw-max) for a read of
-        // length L. --dw fixes W; --dw-slope-den and --dw-max are DNA only.
-        {OptionId::VoteDiagBinWidth, '\0', "--dw", kInt, kStable, A,
-         "INT", SEC_PLACEMENT,
-         "min diagonal bin width in voting; set to fix the width [64]"},
-        {OptionId::VoteDiagSlopeDen, '\0', "--dw-slope-den", kInt, kStable, A,
-         "INT", SEC_PLACEMENT,
-         "bin width grows as read length / INT; 0 to disable [128]"},
+        // A read of length L votes into bins of clamp(L / NUM2, NUM1,
+        // --dw-max) reference bases. NUM1 alone keeps the preset's NUM2, and
+        // NUM2 0 fixes the width at NUM1. The splice presets take NUM1 alone;
+        // --dw-max is DNA only.
+        {OptionId::VoteDiagBinWidth, 'W', "", kPair, kStable, A,
+         "NUM[,NUM]", SEC_PLACEMENT,
+         "vote bin width in reference bases, read-length divisor that widens it [64,128]"},
         {OptionId::VoteDiagWidthMax, '\0', "--dw-max", kInt, kStable, A,
          "INT", SEC_PLACEMENT,
-         "max diagonal bin width in voting [2048]"},
+         "cap on the vote bin width [2048]"},
         // The lane bound, DNA presets only, 1..64: the vote's peaks and the
         // catalogue's candidates per strand. Unset, 16 under ratio admission
         // and 4 under count admission (--vote-ratio 0).
@@ -1093,24 +1092,23 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
             // Taken by parse_align_args before the dispatch.
             break;
         case OptionId::MaxVoteOcc:    opt.max_vote_occ = parse_int(val, arg); break;
+        // A lone NUM1 leaves the divisor alone, as -r leaves its NUM2.
         case OptionId::VoteDiagBinWidth: {
-            const int width = parse_int(val, arg);
-            if (width <= 0) {
-                throw UsageError(
-                    arg + " must be > 0 (got " +
-                    std::to_string(width) + ")");
-            }
+            const auto comma = val.find(',');
+            const int width = parse_int(
+                comma == std::string::npos ? val : val.substr(0, comma), arg);
+            if (width <= 0)
+                throw UsageError("-W: the bin width must be > 0 (got " +
+                                 std::to_string(width) + ")");
             opt.vote_diag_bin_width = width;
-            break;
-        }
-        case OptionId::VoteDiagSlopeDen: {
-            const int den = parse_int(val, arg);
-            if (den < 0) {
-                throw UsageError(
-                    arg + " must be >= 0 (got " +
-                    std::to_string(den) + ")");
+            if (comma != std::string::npos) {
+                const int den = parse_int(val.substr(comma + 1), arg);
+                if (den < 0)
+                    throw UsageError(
+                        "-W: the read-length divisor must be >= 0 (got " +
+                        std::to_string(den) + ")");
+                opt.vote_diag_slope_den = den;
             }
-            opt.vote_diag_slope_den = den;
             break;
         }
         case OptionId::VoteDiagWidthMax: {
@@ -1214,11 +1212,11 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
     // argument order does not matter. options/options.cpp repeats most of
     // them for the API.
     const bool rna = opt.preset == "splice" || opt.preset == "splice:hq";
-    // RNA presets have no adaptive vote-width model; --dw still sets their
+    // RNA presets have no adaptive vote-width model; -W NUM1 still sets their
     // fixed width.
     if (rna && (opt.vote_diag_slope_den || opt.vote_diag_width_max)) {
-        throw UsageError(
-            "--dw-slope-den and --dw-max are valid only with a DNA preset");
+        throw UsageError("-W's read-length divisor and --dw-max are valid "
+                         "only with a DNA preset");
     }
     if (secondary_off_by_n)
         opt.output_secondary = false;

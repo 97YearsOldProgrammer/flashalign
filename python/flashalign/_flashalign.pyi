@@ -97,7 +97,10 @@ class Config:
 
     @property
     def vote_diag_bin_width(self) -> int:
-        """Vote diagonal bin width [--dw]. -1 = preset-owned."""
+        """
+        Base vote diagonal bin width [-W]; DNA presets still widen it with
+        read length. -1 = preset-owned.
+        """
 
     @vote_diag_bin_width.setter
     def vote_diag_bin_width(self, arg: int, /) -> None: ...

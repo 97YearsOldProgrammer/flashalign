@@ -171,7 +171,7 @@ struct DnaLongOptions {
   // admission rule (dna_chain_max_candidates).
   int max_cands = 0;
   int vote_diag_bin_width = 64;
-  // DNA presets widen the vote with read length; --dw turns this off.
+  // DNA presets widen the vote with read length; -W NUM1,0 drops the term.
   bool vote_diag_bin_width_adaptive = false;
   //   W(L) = clamp(L / vote_diag_slope_den, vote_diag_bin_width,
   //                vote_diag_width_max)
@@ -460,10 +460,11 @@ struct UserOverrides {
   std::optional<CsMode> cs;
   std::optional<bool> emit_md;
   std::optional<bool> emit_eqx;
+  // -W NUM1 and the Python Config.vote_diag_bin_width, > 0: the base width,
+  // which leaves the preset's adaptive model on.
   std::optional<int> vote_diag_bin_width;
-  // Adaptive vote-width coefficients (--dw-slope-den / --dw-max). Unlike
-  // vote_diag_bin_width they keep the model on; den == 0 drops the length
-  // term. DNA presets only.
+  // -W NUM2 and --dw-max, the adaptive model's divisor and cap; den == 0
+  // drops the length term. DNA presets only.
   std::optional<int> vote_diag_slope_den;
   std::optional<int> vote_diag_width_max;
   std::optional<int> primary_occ_cap;

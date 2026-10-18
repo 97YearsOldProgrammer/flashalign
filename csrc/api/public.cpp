@@ -180,10 +180,8 @@ Config to_public_config(const fa::cpu::options::ResolvedOptions& source,
   config.full_read_cigar = source.common.enable_full_read_cigar;
   config.syncmer_s = source.index.syncmer_s;
   config.syncmer_downsample = source.index.syncmer_downsample;
-  // An explicit width turns the adaptive width off, so an adaptive one reports -1.
-  config.vote_diag_bin_width = mapping.vote_diag_bin_width_adaptive
-                                   ? -1
-                                   : mapping.vote_diag_bin_width;
+  // The base width; setting it keeps the preset's read-length term.
+  config.vote_diag_bin_width = mapping.vote_diag_bin_width;
   config.long_occ_cap = mapping.long_occ_cap;
   config.long_primary_occ_cap = mapping.long_primary_occ_cap;
   config.threads = source.common.num_threads;

@@ -76,8 +76,8 @@ enum class OptionId {
     MinChainScore,
     // align: vote peak admission
     VoteRatio,
-    VoteDiagBinWidth,
-    VoteDiagSlopeDen, VoteDiagWidthMax,
+    // align: the vote's bin width (-W) and its cap (--dw-max)
+    VoteDiagBinWidth, VoteDiagWidthMax,
     MinSupport,
     // align: the vote's seeds per strand and query tiles per read (-v), and
     // its candidates per strand
@@ -229,9 +229,10 @@ struct AlignOptions {
     // reads or, with no, only from its shorter read, ties broken by name.
     // Unset, the preset's value. Overlap presets only.
     std::optional<bool> dual;
+    // -W NUM1[,NUM2] and --dw-max: a read of length L votes into bins of
+    // clamp(L / NUM2, NUM1, --dw-max). NUM1 alone keeps the preset's NUM2,
+    // and NUM2 0 drops the length term. NUM2 and --dw-max: DNA presets only.
     std::optional<int> vote_diag_bin_width;
-    // --dw-slope-den / --dw-max: coefficients of the adaptive vote-width model.
-    // Unlike --dw they do not switch it off. DNA presets only.
     std::optional<int> vote_diag_slope_den;
     std::optional<int> vote_diag_width_max;
     // RNA intron bounds; -G takes a k/m/g suffix and drops a -r typed before

@@ -693,9 +693,8 @@ std::string resolved_config_text(const AlignOptions& opt,
         src(opt.dna_vote_admission_ratio.has_value(), "preset"));
   row("vote_diag_bin_width", i2s(mapping.vote_diag_bin_width),
       src(opt.vote_diag_bin_width.has_value(), "preset"));
-  // --dw turns the adaptive model off.
   row("vote_diag_adaptive", b2s(mapping.vote_diag_bin_width_adaptive),
-      src(opt.vote_diag_bin_width.has_value(), "preset"));
+      "preset");
   row("vote_diag_slope_den", i2s(mapping.vote_diag_slope_den),
       src(opt.vote_diag_slope_den.has_value(), "preset"));
   row("vote_diag_width_max", i2s(mapping.vote_diag_width_max),

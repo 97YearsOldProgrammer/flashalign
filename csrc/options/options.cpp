@@ -700,7 +700,8 @@ void apply_vote_overrides(bool rna_mode, bool overlap_mode,
   }
 }
 
-// The vote's diagonal width: a typed width turns the adaptive model off.
+// The vote's diagonal width (-W, --dw-max). A typed width leaves the preset's
+// adaptive model on; a divisor of 0 drops its length term.
 void apply_vote_width_overrides(bool rna_mode,
     ::fa::cpu::lr::DnaLongOptions& mapping, const UserOverrides& user) {
   if (user.vote_diag_bin_width) {
@@ -710,14 +711,12 @@ void apply_vote_width_overrides(bool rna_mode,
           std::to_string(*user.vote_diag_bin_width) + ")");
     }
     mapping.vote_diag_bin_width = *user.vote_diag_bin_width;
-    mapping.vote_diag_bin_width_adaptive = false;
   }
-  // The adaptive model's coefficients leave the model on. RNA presets have
-  // no adaptive model.
+  // RNA presets have no adaptive model.
   if (rna_mode && (user.vote_diag_slope_den || user.vote_diag_width_max))
     throw std::invalid_argument(
-        "--dw-slope-den and --dw-max are valid only with "
-        "a DNA preset");
+        "-W's read-length divisor and --dw-max are valid only with a DNA "
+        "preset");
   if (user.vote_diag_slope_den) {
     if (*user.vote_diag_slope_den < 0) {
       throw std::invalid_argument(
@@ -859,14 +858,14 @@ void apply_splice_overrides(::fa::cpu::lr::DnaLongOptions& mapping,
   }
 }
 
-// While the adaptive vote-width model is on, a cap below the base width would
-// silently reduce it to the fixed base width, so it is refused.
+// While the adaptive vote-width model has its length term, a cap below the
+// base width would silently drop the term, so it is refused.
 void check_vote_diag_model(const ::fa::cpu::lr::DnaLongOptions& mapping) {
-  if (mapping.vote_diag_bin_width_adaptive &&
+  if (mapping.vote_diag_bin_width_adaptive && mapping.vote_diag_slope_den > 0 &&
       mapping.vote_diag_width_max < std::max(1, mapping.vote_diag_bin_width)) {
     throw std::invalid_argument(
-        "vote diagonal-width cap must be >= the base bin "
-        "width (got cap " +
+        "vote diagonal-width cap (--dw-max) must be >= the base bin width "
+        "(-W) while the read-length term is on (got cap " +
         std::to_string(mapping.vote_diag_width_max) + " < width " +
         std::to_string(mapping.vote_diag_bin_width) + ")");
   }
