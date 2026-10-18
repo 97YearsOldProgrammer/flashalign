@@ -92,8 +92,9 @@ int selected_tiles(
   return scratch;
 }
 
-// Per-thread slices of one harvest (harvest_window_anchors), by density entry:
-// an entry's interval is this harvest's while its stamp equals `pass`.
+// Per-thread slices of one merged interval of a group's harvest
+// (harvest_group_anchors), by density entry: an entry's interval is this
+// interval's while its stamp equals `pass`.
 struct PassSlices {
   std::vector<std::uint32_t> stamp;
   std::vector<KmerPostingIntervalView> interval;
@@ -140,84 +141,6 @@ void sort_pool_anchors(std::vector<chaining::Anchor>& anchors) {
   ::fa::cpu::radix::stable_sort_u32(
       anchors, scratch, [](const chaining::Anchor& anchor) { return anchor.r; });
 }
-
-}  // namespace
-
-namespace internal {
-
-void append_interval_anchors(
-    const KmerPostingIntervalView& interval,
-    const RetainedSeedRef& seed,
-    std::uint64_t chromosome_base,
-    int chromosome_length,
-    int main_diagonal,
-    const VotePeak* line_peak,
-    int seed_length,
-    int diagonal_band,
-    bool reverse_lane,
-    bool skip_own_diagonal,
-    int query_length,
-    std::vector<chaining::Anchor>& anchors,
-    DnaPlacementCandidateChain& record) {
-  // The winner's band follows its line at this seed.
-  const std::int64_t line_diagonal =
-      line_peak != nullptr
-          ? line_peak->line_a +
-                vote_slope_stretch(seed.seed.read_pos, line_peak->line_b_q20)
-          : 0;
-  record.interval_hits += interval.count;
-  for (std::uint32_t posting = 0; posting < interval.count; ++posting) {
-    const std::uint64_t global = interval.positions[posting];
-    if (global < chromosome_base) {
-      ++record.filtered_hits;
-      continue;
-    }
-    const std::uint64_t local64 = global - chromosome_base;
-    if (local64 > static_cast<std::uint64_t>(
-                      std::numeric_limits<std::int32_t>::max())) {
-      ++record.filtered_hits;
-      continue;
-    }
-    const int reference_position = static_cast<int>(local64);
-    const int query_position = seed.seed.read_pos;
-    if (skip_own_diagonal && reference_position == query_position) {
-      ++record.filtered_hits;
-      continue;
-    }
-    const bool geometry_ok =
-        query_position >= 0 &&
-        query_position + seed_length <= query_length &&
-        reference_position >= 0 &&
-        reference_position + seed_length <= chromosome_length &&
-        (line_peak != nullptr
-             ? within_band<std::int64_t>(
-                   static_cast<std::int64_t>(reference_position) -
-                       query_position,
-                   line_diagonal, diagonal_band)
-             : within_band(reference_position - query_position, main_diagonal,
-                           diagonal_band));
-    // The posting was found under this seed's canonical key, so the k-mers
-    // match exactly when the orientation bits agree with the lane.
-    const bool verified =
-        geometry_ok && packed_ref_orientation_compatible(
-                           seed.seed.z,
-                           interval.positions.packed_at(posting), reverse_lane);
-    if (!verified) {
-      ++record.filtered_hits;
-      continue;
-    }
-    const bool tandem = seed.tandem;
-    const chaining::Anchor anchor{
-        reference_position, query_position, seed_length,
-        static_cast<std::int32_t>(anchors.size()),
-        tandem ? static_cast<std::uint32_t>(chaining::ANCHOR_TANDEM) : 0u};
-    anchors.push_back(anchor);
-  }
-}
-
-}  // namespace internal
-
-namespace {
 
 void set_spans(DnaPlacementCandidateChain& record, bool reverse,
                int read_length) {
@@ -332,102 +255,229 @@ internal::HarvestWindow pass_window(const DnaContext& context,
   return window;
 }
 
-// Appends to `anchors` the candidate's anchors over `window` from `seeds`, its
-// lane's fine seeds, and counts the harvest into `record`. Every
-// admissible slice is deferred and its anchors are built after the scan.
-void harvest_window_anchors(const DnaContext& context,
-                            const DnaPlacementFamily& family,
-                            const DnaPlacementCandidate& candidate,
-                            RetainedSeedDensity& seed_index,
-                            const std::vector<RetainedSeedRef>& seeds,
-                            internal::HarvestWindow window,
-                            DnaPlacementCandidateChain& record,
-                            std::vector<chaining::Anchor>& anchors) {
-  const bool reverse = candidate.peak.is_rc;
+// A member of a group's pass: its candidate's index in the family and its
+// pass window.
+struct PassMember {
+  std::size_t index = 0;
+  internal::HarvestWindow window;
+};
+
+// Appends to `anchors` the harvest of a (contig, strand) group's `members`
+// from `seeds`, its lane's fine seeds. The members' windows are merged into
+// disjoint intervals, overlapping or touching ones joined, and each distinct
+// seed entry is sliced once per interval through the pool gate; every
+// admissible slice is deferred and its anchors are built after the scan. A
+// member admits a posting inside its window that lies on the contig and the
+// query, off the read's own diagonal, within the band of the member's centre
+// and whose orientation bit agrees with the lane, so mapping reads no base.
+// The centre is the member's line at the seed when its line passed its gate,
+// else its vote diagonal. A posting that some member admits gives one anchor,
+// flagged ANCHOR_TANDEM when its seed is (RetainedSeedRef::tandem). The band
+// is tested member by member: a union band would admit diagonals no member
+// admits. Each member's interval_hits, filtered_hits, deferred_anchors and
+// rescued_anchors are those of a harvest over its window alone.
+void harvest_group_anchors(
+    const DnaContext& context, const DnaPlacementFamily& family,
+    const std::vector<PassMember>& members,
+    RetainedSeedDensity& seed_index, const std::vector<RetainedSeedRef>& seeds,
+    DnaPlacementChainingResult& result,
+    std::vector<chaining::Anchor>& anchors) {
+  const VotePeak& lead = family.candidates[members.front().index].peak;
+  const bool reverse = lead.is_rc;
+  const int contig = lead.chr;
   const int seed_length = family.seed_length;
+  const int query_length = family.read_length;
   const int chromosome_length =
-      static_cast<int>(context.ref.contig_length(candidate.peak.chr));
-  const std::int64_t expected = candidate.peak.raw_ref_start;
-  const std::uint64_t* offsets = context.ref.index->chrom_offsets_data();
+      static_cast<int>(context.ref.contig_length(contig));
   const std::uint64_t chromosome_base =
-      offsets[static_cast<std::size_t>(candidate.peak.chr)];
+      context.ref.index
+          ->chrom_offsets_data()[static_cast<std::size_t>(contig)];
   const internal::PoolGate gate = internal::pool_gate(context);
   const int diagonal_band = internal::pass_diagonal_band(context);
-  const VotePeak* line_peak =
-      candidate.peak.line_gate ? &candidate.peak : nullptr;
-  const bool skip_own_diagonal = internal::skips_own_diagonal(
-      context, candidate.peak.chr, reverse);
+  const bool skip_own_diagonal =
+      internal::skips_own_diagonal(context, contig, reverse);
 
-  // No anchor is built in the loop below; every admissible slice is deferred.
-  std::vector<DeferredSlice> deferred;
-  deferred.reserve(seeds.size());
-  // Every seed resolves against the same (chr, low, high) window, so each
-  // distinct entry is sliced once, in batches through slice_batch; seeds are
-  // still processed in order.
-  constexpr std::size_t kSliceBlock = RetainedSeedDensity::kSliceBatch;
-  PassSlices& slices = pass_slices(seed_index.entry_count());
-  std::uint32_t block_entries[kSliceBlock];
-  KmerPostingIntervalView block_intervals[kSliceBlock];
-  for (std::size_t next = 0; next < seeds.size();) {
-    // Take seeds until kSliceBlock entries new to this pass are collected. A
-    // skipped entry gets an interval that is not found, which the loop below
-    // drops as it dropped the gated slice.
-    const std::size_t first = next;
-    std::size_t block_size = 0;
-    for (; next < seeds.size(); ++next) {
-      const std::uint32_t entry = seeds[next].entry;
-      std::uint32_t& stamp = slices.stamp[entry];
-      if (stamp == slices.pass) continue;
-      if (gate.skips(seed_index, entry)) {
-        stamp = slices.pass;
-        slices.interval[entry] = {};
-        continue;
-      }
-      if (block_size == kSliceBlock) break;
-      stamp = slices.pass;
-      block_entries[block_size++] = entry;
-    }
-    seed_index.slice_batch(
-        *context.ref.index, block_entries, block_size, candidate.peak.chr,
-        static_cast<std::uint32_t>(window.low),
-        static_cast<std::uint32_t>(window.high), block_intervals);
-    for (std::size_t lane = 0; lane < block_size; ++lane)
-      slices.interval[block_entries[lane]] = block_intervals[lane];
-    for (std::size_t at = first; at < next; ++at) {
-      const RetainedSeedRef& seed = seeds[at];
-      const KmerPostingIntervalView& interval = slices.interval[seed.entry];
-      // A rescued seed's fine twin passes the gate (RetainedSeedRef::rescued).
-      // Its key's interval is shared with the seeds that do not.
-      const bool over_pool_gate =
-          gate.drops(interval.global_count, seed.rescued);
-      if (!interval.found() || interval.count == 0 || over_pool_gate) {
-        if (interval.found() && over_pool_gate)
-          record.filtered_hits += static_cast<int>(interval.count);
-        continue;
-      }
-      deferred.push_back({seed, interval});
-      record.deferred_anchors += interval.count;
+  // The members by window low, each window as contig offsets; `centre` is the
+  // band's centre at the seed being restored.
+  struct Admitter {
+    std::uint64_t low = 0;
+    std::uint64_t high = 0;
+    const VotePeak* line_peak = nullptr;
+    std::int64_t centre = 0;
+    DnaPlacementCandidateChain* record = nullptr;
+  };
+  std::vector<Admitter> admitters;
+  admitters.reserve(members.size());
+  for (const PassMember& member : members) {
+    const VotePeak& peak = family.candidates[member.index].peak;
+    admitters.push_back({static_cast<std::uint64_t>(member.window.low),
+                         static_cast<std::uint64_t>(member.window.high),
+                         peak.line_gate ? &peak : nullptr, peak.raw_ref_start,
+                         &result.candidates[member.index]});
+  }
+  std::stable_sort(admitters.begin(), admitters.end(),
+                   [](const Admitter& left, const Admitter& right) {
+                     return left.low < right.low;
+                   });
+  // The merged intervals, each over admitters [first, last).
+  struct Interval {
+    std::uint64_t low = 0;
+    std::uint64_t high = 0;
+    std::size_t first = 0;
+    std::size_t last = 0;
+  };
+  std::vector<Interval> intervals;
+  for (std::size_t at = 0; at < admitters.size(); ++at) {
+    if (intervals.empty() || admitters[at].low > intervals.back().high) {
+      intervals.push_back(
+          {admitters[at].low, admitters[at].high, at, at + 1});
+    } else {
+      intervals.back().high =
+          std::max(intervals.back().high, admitters[at].high);
+      intervals.back().last = at + 1;
     }
   }
 
-  // Restore every deferred slice, in order.
-  for (std::size_t slot = 0; slot < deferred.size(); ++slot) {
-    // Prefetch the next slice's first postings, which the binary search that
-    // bounded it never touched.
-    if (slot + 1 < deferred.size()) {
-      const KmerPostingIntervalView& next = deferred[slot + 1].interval;
-      __builtin_prefetch(next.positions.data(), 0, 1);
-      if (next.count > 8)
-        __builtin_prefetch(next.positions.data() + 8, 0, 1);
+  // No anchor is built in the scan; every admissible slice is deferred.
+  std::vector<DeferredSlice> deferred;
+  deferred.reserve(seeds.size());
+  constexpr std::size_t kSliceBlock = RetainedSeedDensity::kSliceBatch;
+  std::uint32_t block_entries[kSliceBlock];
+  KmerPostingIntervalView block_intervals[kSliceBlock];
+  for (const Interval& bounds : intervals) {
+    Admitter* const first_admitter = admitters.data() + bounds.first;
+    Admitter* const last_admitter = admitters.data() + bounds.last;
+    // Every seed resolves against the same (chr, low, high) interval, so each
+    // distinct entry is sliced once, in batches through slice_batch; seeds are
+    // still processed in order.
+    PassSlices& slices = pass_slices(seed_index.entry_count());
+    deferred.clear();
+    for (std::size_t next = 0; next < seeds.size();) {
+      // Take seeds until kSliceBlock entries new to this interval are
+      // collected. A skipped entry gets an interval that is not found, which
+      // the loop below drops as it drops the gated slice.
+      const std::size_t first = next;
+      std::size_t block_size = 0;
+      for (; next < seeds.size(); ++next) {
+        const std::uint32_t entry = seeds[next].entry;
+        std::uint32_t& stamp = slices.stamp[entry];
+        if (stamp == slices.pass) continue;
+        if (gate.skips(seed_index, entry)) {
+          stamp = slices.pass;
+          slices.interval[entry] = {};
+          continue;
+        }
+        if (block_size == kSliceBlock) break;
+        stamp = slices.pass;
+        block_entries[block_size++] = entry;
+      }
+      seed_index.slice_batch(*context.ref.index, block_entries, block_size,
+                             contig, static_cast<std::uint32_t>(bounds.low),
+                             static_cast<std::uint32_t>(bounds.high),
+                             block_intervals);
+      for (std::size_t lane = 0; lane < block_size; ++lane)
+        slices.interval[block_entries[lane]] = block_intervals[lane];
+      for (std::size_t at = first; at < next; ++at) {
+        const RetainedSeedRef& seed = seeds[at];
+        const KmerPostingIntervalView& interval = slices.interval[seed.entry];
+        // A rescued seed's fine twin passes the gate
+        // (RetainedSeedRef::rescued). Its key's interval is shared with the
+        // seeds that do not.
+        const bool over_pool_gate =
+            gate.drops(interval.global_count, seed.rescued);
+        if (!interval.found() || interval.count == 0) continue;
+        if (over_pool_gate) {
+          // Each member counts the gated postings inside its window.
+          for (Admitter* admitter = first_admitter;
+               admitter != last_admitter; ++admitter)
+            admitter->record->filtered_hits += static_cast<int>(
+                interval.positions.lower_bound(chromosome_base +
+                                               admitter->high) -
+                interval.positions.lower_bound(chromosome_base +
+                                               admitter->low));
+          continue;
+        }
+        deferred.push_back({seed, interval});
+      }
     }
-    const DeferredSlice& item = deferred[slot];
-    const std::size_t before = anchors.size();
-    internal::append_interval_anchors(
-        item.interval, item.seed, chromosome_base, chromosome_length,
-        static_cast<int>(expected), line_peak, seed_length, diagonal_band,
-        reverse, skip_own_diagonal,
-        family.read_length, anchors, record);
-    record.rescued_anchors += anchors.size() - before;
+
+    // Restore every deferred slice, in order.
+    for (std::size_t slot = 0; slot < deferred.size(); ++slot) {
+      // Prefetch the next slice's first postings, which the binary search
+      // that bounded it never touched.
+      if (slot + 1 < deferred.size()) {
+        const KmerPostingIntervalView& next = deferred[slot + 1].interval;
+        __builtin_prefetch(next.positions.data(), 0, 1);
+        if (next.count > 8)
+          __builtin_prefetch(next.positions.data() + 8, 0, 1);
+      }
+      const KmerPostingIntervalView& interval = deferred[slot].interval;
+      const RetainedSeedRef& seed = deferred[slot].seed;
+      const int query_position = seed.seed.read_pos;
+      const bool query_ok = query_position >= 0 &&
+                            query_position + seed_length <= query_length;
+      // A gated winner's band follows its line at this seed.
+      for (Admitter* admitter = first_admitter; admitter != last_admitter;
+           ++admitter)
+        if (admitter->line_peak != nullptr)
+          admitter->centre =
+              admitter->line_peak->line_a +
+              vote_slope_stretch(query_position,
+                                 admitter->line_peak->line_b_q20);
+      for (std::uint32_t posting = 0; posting < interval.count; ++posting) {
+        // Inside the interval, so inside some member's window and the contig.
+        const std::uint64_t local =
+            interval.positions[posting] - chromosome_base;
+        const int reference_position = static_cast<int>(local);
+        const std::int64_t diagonal =
+            static_cast<std::int64_t>(reference_position) - query_position;
+        // The orientation test, run once per posting: -1 until then.
+        int verified = -1;
+        bool admitted = false;
+        for (Admitter* admitter = first_admitter; admitter != last_admitter;
+             ++admitter) {
+          // The windows ascend by low: no later one holds the posting.
+          if (local < admitter->low) break;
+          if (local >= admitter->high) continue;
+          DnaPlacementCandidateChain& record = *admitter->record;
+          ++record.interval_hits;
+          ++record.deferred_anchors;
+          const bool geometry_ok =
+              query_ok &&
+              !(skip_own_diagonal && reference_position == query_position) &&
+              reference_position + seed_length <= chromosome_length &&
+              internal::within_band<std::int64_t>(diagonal, admitter->centre,
+                                                  diagonal_band);
+          if (!geometry_ok) {
+            ++record.filtered_hits;
+            continue;
+          }
+          if (verified < 0) {
+            // The posting was found under this seed's canonical key, so the
+            // k-mers match exactly when the orientation bits agree with the
+            // lane.
+            verified = packed_ref_orientation_compatible(
+                           seed.seed.z, interval.positions.packed_at(posting),
+                           reverse)
+                           ? 1
+                           : 0;
+          }
+          if (verified == 0) {
+            ++record.filtered_hits;
+            continue;
+          }
+          ++record.rescued_anchors;
+          admitted = true;
+        }
+        if (!admitted) continue;
+        const bool tandem = seed.tandem;
+        anchors.push_back(
+            {reference_position, query_position, seed_length,
+             static_cast<std::int32_t>(anchors.size()),
+             tandem ? static_cast<std::uint32_t>(chaining::ANCHOR_TANDEM)
+                    : 0u});
+      }
+    }
   }
 }
 
@@ -464,18 +514,19 @@ void chain_pool(const DnaContext& context, const DnaPlacementFamily& family,
 }
 
 // The catalogue's whole-query passes, one per (contig, strand) group of its
-// candidates, groups in catalogue order of their first member. Each member's
-// harvest over its own window is appended to the group's pool, which is
-// deduplicated, chained and partitioned once. The partition's primary and
-// every other chain of at least two anchors go to one member: among the
-// members whose window holds the chain's median anchor (else among all), the
-// one whose expected diagonal is nearest that anchor's, ties to catalogue
-// order. Each member's chains are written with its best as primary. The member
-// holding the partition's primary keeps its f2 and n_sub; another takes its
-// best other chain's score as f2 and n_sub 0. A member left without a chain has
-// the status its own empty pass would have. Every record is exact. Each member
-// keeps its harvest counters; the group's run count goes to its first member
-// with a window. A one-member group is that candidate's own pass.
+// candidates, groups in catalogue order of their first member. The group is
+// harvested once over its members' windows (harvest_group_anchors) into one
+// pool, which is deduplicated, chained and partitioned once. The partition's
+// primary and every other chain of at least two anchors go to one member:
+// among the members whose window holds the chain's median anchor (else among
+// all), the one whose expected diagonal is nearest that anchor's, ties to
+// catalogue order. Each member's chains are written with its best as primary.
+// The member holding the partition's primary keeps its f2 and n_sub; another
+// takes its best other chain's score as f2 and n_sub 0. A member left without
+// a chain has the status its own empty pass would have. Every record is
+// exact. Each member keeps its harvest counters; the group's run count goes to
+// its first member with a window. A one-member group is that candidate's own
+// pass.
 void chain_pooled_groups(const DnaContext& context,
                          const DnaPlacementFamily& family,
                          DnaPlacementChainingResult& result,
@@ -496,11 +547,7 @@ void chain_pooled_groups(const DnaContext& context,
       groups[static_cast<std::size_t>(found - keys.begin())].push_back(index);
     }
   }
-  struct Member {
-    std::size_t index = 0;
-    internal::HarvestWindow window;
-  };
-  std::vector<Member> windowed;
+  std::vector<PassMember> windowed;
   std::vector<std::vector<std::size_t>> owned;
   for (const std::vector<std::size_t>& group : groups) {
     const VotePeak& lead = family.candidates[group.front()].peak;
@@ -525,20 +572,20 @@ void chain_pooled_groups(const DnaContext& context,
     const int chromosome_length =
         static_cast<int>(context.ref.contig_length(lead.chr));
     windowed.clear();
-    std::vector<chaining::Anchor> anchors;
     for (const std::size_t index : group) {
       const internal::HarvestWindow member_window = pass_window(
           context, family, family.candidates[index], chromosome_length);
-      DnaPlacementCandidateChain& record = result.candidates[index];
       if (member_window.high <= member_window.low) {
-        record.status = DnaPlacementChainStatus::InvalidReference;
+        result.candidates[index].status =
+            DnaPlacementChainStatus::InvalidReference;
         continue;
       }
       windowed.push_back({index, member_window});
-      harvest_window_anchors(context, family, family.candidates[index],
-                             seed_index, seeds, member_window, record,
-                             anchors);
     }
+    std::vector<chaining::Anchor> anchors;
+    if (!windowed.empty())
+      harvest_group_anchors(context, family, windowed, seed_index, seeds,
+                            result, anchors);
     // A member's own pass with no chain: no interval hit, or no chain.
     const auto chainless = [&result](std::size_t index) {
       DnaPlacementCandidateChain& record = result.candidates[index];
@@ -547,7 +594,7 @@ void chain_pooled_groups(const DnaContext& context,
                           : DnaPlacementChainStatus::NoChain;
     };
     if (anchors.empty()) {
-      for (const Member& member : windowed) chainless(member.index);
+      for (const PassMember& member : windowed) chainless(member.index);
       continue;
     }
     DnaPlacementCandidateChain& first_record =

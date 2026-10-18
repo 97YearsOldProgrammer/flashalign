@@ -632,8 +632,8 @@ struct DnaPlacementCandidateChain {
   int final_selected_tiles = 0;
   bool exact = false;
   // Harvest counters. deferred_anchors: postings of the slices deferred as
-  // metadata, within this candidate's window. rescued_anchors: anchors built
-  // by the deferred restore, the pool.
+  // metadata, within this candidate's window. rescued_anchors: those it
+  // admits, the anchors a harvest of its window alone would build.
   std::uint64_t deferred_anchors = 0;
   std::uint64_t rescued_anchors = 0;
   // Runs produced by the whole-query pass's collapse; on the
@@ -758,8 +758,8 @@ int pass_diagonal_band(const DnaContext& context);
 // cigar_local_interval_anchor_interval_pad, widened by harvest_below /
 // harvest_above and clamped to the contig. The widening reaches the whole-read
 // winner's per-read line (vote_slope_widen_winner), which also centres that
-// winner's band (append_interval_anchors), and is 0 on every other peak. Empty
-// when high <= low.
+// winner's band (harvest_group_anchors, placement.cpp), and is 0 on every
+// other peak. Empty when high <= low.
 struct HarvestWindow {
   std::int64_t low = 0;
   std::int64_t high = 0;
@@ -815,31 +815,6 @@ DnaPlacementChainStatus contig_lane_refusal(
     const DnaContext& context, int contig,
     const std::vector<RetainedSeedRef>& seeds,
     const std::vector<std::uint8_t>& query, int read_length);
-
-// Appends one anchor per posting in `interval` that passes the geometry tests
-// and the orientation test for `reverse_lane`; no base is read.
-// `chromosome_base` is the contig's offset in the flattened reference and
-// `chromosome_length` its length, so postings off the contig are dropped. An
-// anchor is flagged ANCHOR_TANDEM when its seed is (RetainedSeedRef::tandem).
-// `skip_own_diagonal` is skips_own_diagonal's for the contig and lane.
-// `query_length` bounds the query span.
-// `line_peak`, when not null, is a peak whose line passed its gate: the band is
-// then centred on that line at the seed's query position, not on
-// `main_diagonal`.
-void append_interval_anchors(
-    const KmerPostingIntervalView& interval,
-    const RetainedSeedRef& seed,
-    std::uint64_t chromosome_base,
-    int chromosome_length,
-    int main_diagonal,
-    const VotePeak* line_peak,
-    int seed_length,
-    int diagonal_band,
-    bool reverse_lane,
-    bool skip_own_diagonal,
-    int query_length,
-    std::vector<chaining::Anchor>& anchors,
-    DnaPlacementCandidateChain& record);
 
 // Sorts a pool by (r, q, span), flags descending, and keeps the first anchor of
 // each (r, q, span), so the tandem flag survives.
