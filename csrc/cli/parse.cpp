@@ -249,13 +249,19 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::Secondary, '\0', "--secondary", kStr, kStable, A,
          "=yes|no", SEC_IO,
          "whether to output secondary alignments [no]", "", kSelection},
+        // Also --dual yes|no. The overlap presets only; no prints a pair once,
+        // from its shorter read, ties broken by name (options/options.h dual).
+        {OptionId::Dual, '\0', "--dual", kStr, kStable, A,
+         "=yes|no", SEC_IO,
+         "print an overlap from both of its reads, or once from the shorter [no]", "",
+         LaneStage::OverlapPairs},
         {OptionId::NoHeader, '\0', "--no-header", kNone, kStable, A,
          "", SEC_IO,
          "don't output the SAM header", "", kSamOutput},
         // PAF and SAM copy the comment verbatim, as minimap2 does.
         {OptionId::CopyComment, 'y', "", kNone, kStable, A,
          "", SEC_IO,
-         "copy FASTA/Q comments to output SAM"},
+         "copy FASTA/Q comments to output SAM and PAF"},
         {OptionId::Threads, 't', "", kInt, kStable, A,
          // Unset, two cores are left for the reader and writer. Parallel
          // decoding shares the -t budget.
@@ -264,6 +270,11 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::BatchBp, 'K', "--batch-bp", kSize, kStable, A,
          "NUM", SEC_IO,
          "minibatch size for mapping [500M]"},
+        // The preset's value (options/options.h preset_batch_window); -t 1
+        // forces 1. Output is identical for every value.
+        {OptionId::BatchWindow, '\0', "--batch-window", kInt, kStable, A,
+         "INT", SEC_IO,
+         "batches in flight in the compute stage [preset: 1 on asm, 3 otherwise]"},
         {OptionId::ShowConfig, '\0', "--show-config", kNone, kStable, A,
          "", SEC_IO,
          "print the resolved configuration and exit"},
@@ -281,11 +292,6 @@ const std::vector<OptionSpec>& specs_table() {
          "preset: lr, lr:hq, splice, splice:hq; experimental: asm5, asm10, asm20, ava-ont, ava-hifi (see 'flashalign index') [lr]"},
 
         // align, not on the help screen; the manual page lists these.
-        // --batch-window INT: batches in flight in the compute stage [the
-        // preset's: 1 on asm5, asm10 and asm20, 3 otherwise]. Output is
-        // identical for every value.
-        {OptionId::BatchWindow, '\0', "--batch-window", kInt, kDev, A,
-         "", HIDDEN, "", STUDY_CLI_MANUAL},
         // --io-staging MIB [0]: ceiling on the parallel gzip decoder's
         // read-ahead; 0 scales it with -t.
         {OptionId::IoStaging, '\0', "--io-staging", kInt, kDev, A,
@@ -301,12 +307,6 @@ const std::vector<OptionSpec>& specs_table() {
         // band beside -p.
         {OptionId::SpliceRivalMinDiff, '\0', "--rival-min-diff", kInt, kDev,
          A, "", HIDDEN, "", STUDY_CLI_MANUAL},
-
-        // --dual yes|no, also --dual=yes|no: the overlap presets only. no
-        // prints a pair once, from its shorter read, ties broken by name
-        // (options/options.h dual).
-        {OptionId::Dual, '\0', "--dual", kStr, kDev, A, "", HIDDEN, "",
-         STUDY_CLI_MANUAL, LaneStage::OverlapPairs},
 
         // index, shown by --help
         {OptionId::Preset, 'x', "--preset", kStr, kStable, I,
