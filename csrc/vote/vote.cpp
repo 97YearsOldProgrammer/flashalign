@@ -783,9 +783,9 @@ static VotePeak* vote_slope_best_peak(std::vector<VotePeak>& fwd,
 // Widens the winner's harvest window to its per-read line (vote/vote.h),
 // fitted on the seeds its lane's exact refine walked. When the fit passes its
 // gate, every chain pass harvests the winner over
-// [min(raw, a) - pad, max(raw + L, a + L + stretch(L, b)) + pad] and bands it
-// on the line (VotePeak::line_a, line_b_q20). Nothing else about the winner
-// changes, and every other peak keeps the plain window and band.
+// [min(raw, a) - pad, max(raw + L, a + L + stretch(L, b)) + pad] and keeps the
+// line (VotePeak::line_a, line_b_q20). Nothing else about the winner changes,
+// and every other peak keeps the plain window.
 void vote_slope_widen_winner(const LongReadSeedContext& seed_ctx,
                              std::uint32_t tie_seed, int span,
                              const ChainAnchorScratch& scratch,

@@ -268,14 +268,12 @@ struct PassMember {
 // seed entry is sliced once per interval through the pool gate; every
 // admissible slice is deferred and its anchors are built after the scan. A
 // member admits a posting inside its window that lies on the contig and the
-// query, off the read's own diagonal, within the band of the member's centre
-// and whose orientation bit agrees with the lane, so mapping reads no base.
-// The centre is the member's line at the seed when its line passed its gate,
-// else its vote diagonal. A posting that some member admits gives one anchor,
-// flagged ANCHOR_TANDEM when its seed is (RetainedSeedRef::tandem). The band
-// is tested member by member: a union band would admit diagonals no member
-// admits. Each member's interval_hits, filtered_hits, deferred_anchors and
-// rescued_anchors are those of a harvest over its window alone.
+// query, off the read's own diagonal, and whose orientation bit agrees with
+// the lane, so mapping reads no base; no diagonal band is tested. A posting
+// that some member admits gives one anchor, flagged ANCHOR_TANDEM when its
+// seed is (RetainedSeedRef::tandem). Each member's interval_hits,
+// filtered_hits, deferred_anchors and rescued_anchors are those of a harvest
+// over its window alone.
 void harvest_group_anchors(
     const DnaContext& context, const DnaPlacementFamily& family,
     const std::vector<PassMember>& members,
@@ -293,28 +291,21 @@ void harvest_group_anchors(
       context.ref.index
           ->chrom_offsets_data()[static_cast<std::size_t>(contig)];
   const internal::PoolGate gate = internal::pool_gate(context);
-  const int diagonal_band = internal::pass_diagonal_band(context);
   const bool skip_own_diagonal =
       internal::skips_own_diagonal(context, contig, reverse);
 
-  // The members by window low, each window as contig offsets; `centre` is the
-  // band's centre at the seed being restored.
+  // The members by window low, each window as contig offsets.
   struct Admitter {
     std::uint64_t low = 0;
     std::uint64_t high = 0;
-    const VotePeak* line_peak = nullptr;
-    std::int64_t centre = 0;
     DnaPlacementCandidateChain* record = nullptr;
   };
   std::vector<Admitter> admitters;
   admitters.reserve(members.size());
-  for (const PassMember& member : members) {
-    const VotePeak& peak = family.candidates[member.index].peak;
+  for (const PassMember& member : members)
     admitters.push_back({static_cast<std::uint64_t>(member.window.low),
                          static_cast<std::uint64_t>(member.window.high),
-                         peak.line_gate ? &peak : nullptr, peak.raw_ref_start,
                          &result.candidates[member.index]});
-  }
   std::stable_sort(admitters.begin(), admitters.end(),
                    [](const Admitter& left, const Admitter& right) {
                      return left.low < right.low;
@@ -416,21 +407,15 @@ void harvest_group_anchors(
       const int query_position = seed.seed.read_pos;
       const bool query_ok = query_position >= 0 &&
                             query_position + seed_length <= query_length;
-      // A gated winner's band follows its line at this seed.
-      for (Admitter* admitter = first_admitter; admitter != last_admitter;
-           ++admitter)
-        if (admitter->line_peak != nullptr)
-          admitter->centre =
-              admitter->line_peak->line_a +
-              vote_slope_stretch(query_position,
-                                 admitter->line_peak->line_b_q20);
       for (std::uint32_t posting = 0; posting < interval.count; ++posting) {
         // Inside the interval, so inside some member's window and the contig.
         const std::uint64_t local =
             interval.positions[posting] - chromosome_base;
         const int reference_position = static_cast<int>(local);
-        const std::int64_t diagonal =
-            static_cast<std::int64_t>(reference_position) - query_position;
+        const bool geometry_ok =
+            query_ok &&
+            !(skip_own_diagonal && reference_position == query_position) &&
+            reference_position + seed_length <= chromosome_length;
         // The orientation test, run once per posting: -1 until then.
         int verified = -1;
         bool admitted = false;
@@ -442,12 +427,6 @@ void harvest_group_anchors(
           DnaPlacementCandidateChain& record = *admitter->record;
           ++record.interval_hits;
           ++record.deferred_anchors;
-          const bool geometry_ok =
-              query_ok &&
-              !(skip_own_diagonal && reference_position == query_position) &&
-              reference_position + seed_length <= chromosome_length &&
-              internal::within_band<std::int64_t>(diagonal, admitter->centre,
-                                                  diagonal_band);
           if (!geometry_ok) {
             ++record.filtered_hits;
             continue;

@@ -757,9 +757,8 @@ int pass_diagonal_band(const DnaContext& context);
 // its peak's expected start, padded on both sides by
 // cigar_local_interval_anchor_interval_pad, widened by harvest_below /
 // harvest_above and clamped to the contig. The widening reaches the whole-read
-// winner's per-read line (vote_slope_widen_winner), which also centres that
-// winner's band (harvest_group_anchors, placement.cpp), and is 0 on every
-// other peak. Empty when high <= low.
+// winner's per-read line (vote_slope_widen_winner) and is 0 on every other
+// peak. Empty when high <= low.
 struct HarvestWindow {
   std::int64_t low = 0;
   std::int64_t high = 0;

@@ -146,8 +146,8 @@ struct VotePeak {
   // The whole-read winner's per-read line d(q) = line_a + stretch(q, line_b_q20)
   // (vote/vote.h), set only on that winner, when its line passes the gate (line_gate).
   // Its chain harvest window then reaches harvest_below further below raw_ref_start - pad
-  // and harvest_above further above raw_ref_start + L + pad, and its chain band follows
-  // the line.
+  // and harvest_above further above raw_ref_start + L + pad, and the line stands for its
+  // diagonal when a pass assigns its chains to members (dna/placement.cpp).
   std::int32_t harvest_below = 0;
   std::int32_t harvest_above = 0;
   std::int64_t line_a = 0;

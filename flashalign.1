@@ -273,8 +273,8 @@ sets both [200000,200000].
 .BI \-b \ NUM
 Chaining bandwidth [20000; 100000 on asm5, asm10, asm20]. It bands the
 dense chain over the whole read, one for each contig and strand of the read's
-candidates: each candidate contributes only the anchors whose diagonal lies
-within the band of its own, and the chain links
+candidates: each candidate contributes every anchor of its window, which
+widens by at most the band, and the chain links
 anchors across at most the band, or
 .BR \-g 's
 chaining gap where that is larger, whatever the read length. It acts on

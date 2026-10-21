@@ -93,11 +93,9 @@ inline bool vote_seed_occ_allowed(const VoteWindowState& st,
 // The whole-read winner's per-read line d(q) = a + b q, with d = local - q. A read whose
 // anchors drift by b per query base covers L + b L bases of reference, not L, so the
 // harvest window [raw_ref_start - pad, raw_ref_start + L + pad] can leave its ends
-// outside, and the chain band |d - raw_ref_start| <= band drops its anchors once they
-// drift further than the band. The line is fitted on the winner's own seeds, and
-// vote_slope_widen_winner widens the winner's window to its union with the line's span
-// [a, a + L + stretch(L, b)] (VotePeak::harvest_below / harvest_above) and centres its
-// band on the line at each seed's q (VotePeak::line_a, line_b_q20).
+// outside. The line is fitted on the winner's own seeds, and vote_slope_widen_winner
+// widens the winner's window to its union with the line's span [a, a + L + stretch(L, b)]
+// (VotePeak::harvest_below / harvest_above; VotePeak::line_a, line_b_q20).
 // The vote itself is unchanged.
 //
 // The fit is integer only (int64, __int128), so no target's float contraction can move a
