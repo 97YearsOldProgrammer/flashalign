@@ -280,9 +280,9 @@ class Config:
     @property
     def dp_bw_long(self) -> int:
         """
-        The second -r value: the gap-fill bandwidth on a DNA preset, only a
-        bound on dp_bw on a splice preset. -1 = preset-owned, or on a splice
-        preset rna_max_intron, as -G sets -r.
+        The second -r value: the chain band and the gap-fill bandwidth on a
+        DNA preset, only a bound on dp_bw on a splice preset. -1 =
+        preset-owned, or on a splice preset rna_max_intron, as -G sets -r.
         """
 
     @dp_bw_long.setter

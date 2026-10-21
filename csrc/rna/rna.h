@@ -1335,10 +1335,10 @@ struct ResolvedOptions {
   SpliceControllerOptions splice_controller =
       ordinary_long_read_splice_options();
 
-  // Rank-1 harvest and exact-anchor-path chain options: the fine chain's query gap, which
-  // -g sets, and its band, -r's first value.
+  // Rank-1 harvest and exact-anchor-path chain options: the fine chain's query gap, -g,
+  // and its band, -r's first value.
   int cigar_local_global_occ = 200;
-  int cigar_local_interval_anchor_chain_max_gap = 5000;
+  int fine_chain_query_gap = 5000;
   int fine_chain_band = 200000;
   // The vote's seeds per strand on a read of length L: max(the seed context's,
   // ceil(L / vote_seed_spacing)); 0 keeps the seed context's.

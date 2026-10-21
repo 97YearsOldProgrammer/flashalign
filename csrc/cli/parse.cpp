@@ -40,7 +40,6 @@ constexpr LaneStage kBaseOutput = LaneStage::BaseLevelOutput;
 constexpr LaneStage kBaseAlign = LaneStage::BaseAlignment;
 constexpr LaneStage kSamOutput = LaneStage::SamOutput;
 constexpr LaneStage kSelection = LaneStage::Selection;
-constexpr LaneStage kCandidateChains = LaneStage::CandidateChains;
 
 // Section headers of the align screen, in screen order. The index screen is
 // one list under "Options:".
@@ -60,26 +59,19 @@ const std::vector<OptionSpec>& specs_table() {
   // clang-format off: preserve the hand-aligned option table.
     static const std::vector<OptionSpec> kSpecs = {
         // align, shown by --help
-        // minimap2's -g. On a DNA preset it also bounds the chains' reach,
-        // which never falls below a chain's band (-b); on a splice preset it
-        // also sets the fine chain's query gap, which the band does not
-        // raise.
+        // minimap2's -g. On a DNA preset the chains' reach is max(-r's NUM2,
+        // NUM), as minimap2's long join; on a splice preset it also sets the
+        // fine chain's query gap, which the band does not raise.
         {OptionId::DpMaxGap, 'g', "", kSize, kStable, A,
          "NUM", SEC_PLACEMENT,
          "stop alignment elongation if there are no seeds in NUM-bp [5000]"},
-        // minimap2's -r. On a DNA preset NUM1 bands the read-end extensions
-        // and NUM2 the gap fills; neither bands a chain. On a splice preset
-        // NUM1 bands the fine chain and NUM2 only bounds NUM1.
+        // minimap2's -r. On a DNA preset NUM1 bands the read-end extensions,
+        // and NUM2 the gap fills and the dense (whole-query) chains. On a
+        // splice preset NUM1 bands the fine chain and NUM2 only bounds NUM1.
         {OptionId::DpBw, 'r', "", kPair, kStable, A,
          "NUM[,NUM]", SEC_PLACEMENT,
-         "alignment bandwidth and gap-fill bandwidth [500,20000]", "", kBaseAlign},
-        // NUM bands each catalogue candidate's dense (whole-query) chain
-        // pass. A size, as -r's. DNA presets but the overlap ones; the asm
-        // presets' NUM is 100000.
-        {OptionId::ChainBand, 'b', "--chain-band", kSize, kStable, A,
-         "NUM", SEC_PLACEMENT,
-         "chaining bandwidth of the dense chains [20000]", "",
-         kCandidateChains},
+         "alignment bandwidth, and gap-fill and chaining bandwidth [500,20000]",
+         "", kBaseAlign},
         // minimap2's -m. DNA presets only; the splice presets keep their own
         // chain floors.
         {OptionId::MinChainScore, 'm', "", kInt, kStable, A,
@@ -609,7 +601,7 @@ int64_t parse_size(const std::string& value, const std::string& name) {
     return static_cast<int64_t>(scaled);
 }
 
-// A size that must fit an int (-r, -b, -g, -G).
+// A size that must fit an int (-r, -g, -G).
 int parse_int_size(const std::string& value, const std::string& name) {
     const int64_t size = parse_size(value, name);
     if (size > std::numeric_limits<int>::max()) {
@@ -875,9 +867,6 @@ constexpr StageRefusal kStageRefusals[] = {
      "refused"},
     {LaneStage::Selection,
      "-x {preset} prints every chain; {options} are refused"},
-    {LaneStage::CandidateChains,
-     "-x {preset} chains each contig and strand once; {options} {is} "
-     "refused"},
     {LaneStage::OverlapPairs,
      "{options} {is} valid only with ava-ont or ava-hifi"},
 };
@@ -1079,14 +1068,6 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
             opt.dp_max_gap = gap;
             break;
         }
-        // A size, as -r.
-        case OptionId::ChainBand: {
-            const int band = parse_int_size(val, arg);
-            if (band < 1)
-                throw UsageError(arg + " must be at least 1");
-            opt.chain_band = band;
-            break;
-        }
         case OptionId::Secondary:
         case OptionId::Dual:
             // Taken by parse_align_args before the dispatch.
@@ -1236,8 +1217,7 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
         throw UsageError("-m is valid only with a DNA preset");
     if (rna && opt.max_cands)
         throw UsageError("--max-cands is valid only with a DNA preset");
-    if (rna && opt.chain_band)
-        throw UsageError("-b is valid only with a DNA preset");
+
     if (rna && opt.vote_seeds)
         throw UsageError("-v is valid only with a DNA preset; the splice "
                          "presets take --vote-spacing");

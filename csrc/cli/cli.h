@@ -88,8 +88,6 @@ enum class OptionId {
     DpMinScore,
     // align: band geometry (minimap2 -r) and maximum gap (minimap2 -g).
     DpBw, DpMaxGap,
-    // the DNA dense chain passes' band (-b)
-    ChainBand,
     // RNA intron bounds, strand and junction annotation
     MinIntron, MaxIntron, SpliceStrand, RnaJunctionBed, RnaJunctionBonus,
     // Secondary retention ratio (-p), the RNA retention band
@@ -287,11 +285,9 @@ struct AlignOptions {
     // DP bandwidths. A single -r value leaves the long-join bandwidth unset.
     std::optional<int> dp_bw;          // -r (1st)    -> cigar_dp_bw_
     std::optional<int> dp_bw_long;     // -r (2nd)    -> cigar_dp_bw_long_
-    // -g: the DP's maximum gap and the chains' gap (on a splice preset the
-    // fine chain's query gap).
+    // -g: the DP's maximum gap (on a splice preset also the fine chain's
+    // query gap).
     std::optional<int> dp_max_gap;
-    // -b NUM: the dense chain passes' band, >= 1. DNA presets only.
-    std::optional<int> chain_band;
     // Every option the command line gave, filled where the parser dispatches
     // a spelling.
     std::set<OptionId> given_options;

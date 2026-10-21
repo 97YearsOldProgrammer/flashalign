@@ -21,7 +21,7 @@ namespace fa::cpu::lr {
 namespace internal {
 
 int pass_diagonal_band(const DnaContext& context) {
-  return std::max(1, context.opts.chain_band);
+  return std::max(1, context.opts.cigar_dp_bw_long);
 }
 
 HarvestWindow harvest_window(const DnaContext& context,
@@ -929,8 +929,9 @@ chaining::ColinearChainParams dna_candidate_chain_params(
     const DnaContext& context, int band, int seed_length) {
   chaining::ColinearChainParams params;
   params.bw = std::max(1, band);
-  params.max_dist_x = params.max_dist_y = std::max(
-      params.bw, context.opts.cigar_local_interval_anchor_chain_max_gap);
+  // minimap2's long join: the reach is at least the band.
+  params.max_dist_x = params.max_dist_y =
+      std::max(params.bw, context.opts.cigar_dp_max_gap);
   params.min_cnt = 1;
   params.min_sc = 1;
   params.chn_pen_gap = 0.008f * static_cast<float>(seed_length);

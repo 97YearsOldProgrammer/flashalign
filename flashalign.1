@@ -223,27 +223,23 @@ Stop alignment elongation if there are no seeds within
 [5000]. It bounds how far base alignment extends toward a read end, and under a
 DNA preset two pieces of a read join into one record only across gaps of at most
 .IR NUM .
-Under a DNA preset it is also the maximum gap of chaining, whose reach is the
-larger of it and the chain's band
-.RB ( \-b ),
-so values under the band leave that chain unchanged.
+Under a DNA preset chaining links anchors across at most the larger of it and
+.BR \-r 's
+second value, so values under that band leave the chain unchanged.
 Under a splice preset it bounds base alignment and is also the maximum
 query gap of the fine chain; there
 .B \-G
 bounds introns.
 Untyped,
 .B lr
-uses 5000 for base alignment and 20000 for chaining,
+uses 5000,
 .B lr:hq
-10000 for both, the assembly presets 10000 and 20000, and the splice presets
-2000 for both; a typed
-.I NUM
-sets both.
+10000, the assembly presets 10000 and the splice presets 2000.
 .I NUM
 may be ending with k/K/m/M/g/G.
 .TP
 .B \-r \fINUM1\fR[,\fINUM2\fR]
-Bandwidth for base alignment and gap filling [500,20000].
+Bandwidth for base alignment, and for gap filling and chaining [500,20000].
 Under a DNA preset,
 .I NUM1
 is used for alignment extension toward the read ends and for inverted middles,
@@ -251,9 +247,20 @@ and
 .I NUM2
 for closing gaps between anchors, both only when base-level alignment runs
 .RB ( \-c ,
-SAM); neither bands chaining, which
-.B \-b
-sets.
+SAM).
+.I NUM2
+is also the band of the dense chain over the whole read, one for each contig
+and strand of the read's candidates: each candidate contributes every anchor of
+its window, which widens by at most the band, and the chain links anchors
+within the band across at most the band, or
+.B \-g
+where that is larger, whatever the read length. So
+.I NUM2
+acts on placement, and so also on plain PAF output.
+.BR ava\-ont " and " ava\-hifi
+refuse
+.BR \-r ;
+their chains band at 20000.
 A single value sets
 .I NUM1
 only. Each value may be ending with k/K/m/M/g/G, and
@@ -269,23 +276,6 @@ only bounds
 neither bands base alignment there, and
 .B \-G
 sets both [200000,200000].
-.TP
-.BI \-b \ NUM
-Chaining bandwidth [20000; 100000 on asm5, asm10, asm20]. It bands the
-dense chain over the whole read, one for each contig and strand of the read's
-candidates: each candidate contributes every anchor of its window, which
-widens by at most the band, and the chain links
-anchors across at most the band, or
-.BR \-g 's
-chaining gap where that is larger, whatever the read length. It acts on
-placement, so also on
-plain PAF output.
-.I NUM
-may end with k/K/m/M/g/G. The long form is
-.BR \-\-chain\-band .
-DNA presets only;
-.BR ava\-ont " and " ava\-hifi ,
-which chain each contig and strand of the read once, refuse it.
 .TP
 .BI \-m \ INT
 Discard alignments with chaining score
@@ -889,7 +879,7 @@ and the MAPQ coverage threshold (0.70 against 0.55).
 Experimental. Long assembly to reference mapping
 .RB ( \-k21
 .B \-s9 \-A1 \-B19 \-O39,81 \-E3,1 \-z200,200 \-\-score\-N 1 \-r1000,100000
-.BR "\-b100000 \-S200 \-v4096,2048" ).
+.BR "\-S200 \-v4096,2048" ).
 Use this preset if the average divergence is not much higher than 0.1%.
 .TP
 .B asm10

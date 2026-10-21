@@ -205,11 +205,14 @@ struct DnaLongOptions {
   int cigar_dp_tail_zdrop = 400; // minimap2 -z
   int cigar_dp_tail_end_bonus = -1;
   // Bandwidths (minimap2 -r) before minimap2's 1.5x inflation, which
-  // dp/dp.h bw_eff() and bw_long_eff() apply. On a splice preset
-  // cigar_dp_bw is only the fine chain's band and cigar_dp_bw_long only
-  // bounds it.
+  // dp/dp.h bw_eff() and bw_long_eff() apply. On a DNA preset
+  // cigar_dp_bw_long also bands the dense (whole-query) chains, whose reach
+  // is max(cigar_dp_bw_long, cigar_dp_max_gap), as minimap2's long join. On a
+  // splice preset cigar_dp_bw is only the fine chain's band and
+  // cigar_dp_bw_long only bounds it.
   int cigar_dp_bw = 500;
   int cigar_dp_bw_long = 20000;
+  // minimap2 -g; on a splice preset also the fine chain's query gap.
   int cigar_dp_max_gap = 5000;
   // minimap2 -s: the DP half of the DNA per-record emission floor
   // (mm_filter_regs) and the inversion-segment gate. 0 disables.
@@ -243,11 +246,6 @@ struct DnaLongOptions {
   int cigar_dp_min_ksw_len = kDnaMinKswLen;
   int cigar_local_interval_anchor_occ_cap = 32;
   int cigar_local_interval_anchor_interval_pad = 512;
-  // The chains' maximum gap (-g); on a splice preset the fine chain's query
-  // gap.
-  int cigar_local_interval_anchor_chain_max_gap = 5000;
-  // The dense (whole-query) chain passes' diagonal band (-b).
-  int chain_band = 20000;
   bool cigar_local_occ_mode_global = true;
   // Dense-chain search crossover (kDnaDenseDiagMinRuns); not settable.
   int dna_dense_diag_min_runs = kDnaDenseDiagMinRuns;
@@ -368,7 +366,6 @@ enum class LaneStage {
   BaseAlignment,   // base-level alignment: DP scoring, bands, CIGAR operators
   SamOutput,       // the shape of SAM output
   Selection,       // primary and secondary selection
-  CandidateChains, // the catalogue candidates' whole-query chains
   OverlapPairs,    // which reads of an overlap pair print it
 };
 
@@ -483,15 +480,13 @@ struct UserOverrides {
   std::optional<int> dp_inversion_zdrop; // -z's second value
   std::optional<int> dp_tail_end_bonus;
   std::optional<int> dp_min_dp_max; // -S (minimap2 -s)
-  // DP bandwidths (-r INT[,INT]) and maximum gap (-g); -g is also the chains'
-  // gap. On a splice preset the first bandwidth is only the fine chain's band
-  // and the second only bounds it; both apply after rna_max_intron, which
-  // sets both.
+  // DP bandwidths (-r INT[,INT]) and maximum gap (-g). On a DNA preset the
+  // second bandwidth also bands the dense chains. On a splice preset the
+  // first bandwidth is only the fine chain's band and the second only bounds
+  // it; both apply after rna_max_intron, which sets both.
   std::optional<int> dp_bw;
   std::optional<int> dp_bw_long;
   std::optional<int> dp_max_gap;
-  // -b NUM: the dense chain passes' diagonal band, >= 1. DNA presets only.
-  std::optional<int> chain_band;
   std::optional<int> rna_min_intron;
   std::optional<int> rna_max_intron;
   // RNA transcript strand (-u) as rna::StrandMode: 0 auto, 1 forward,

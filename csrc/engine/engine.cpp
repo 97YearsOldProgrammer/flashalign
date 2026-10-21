@@ -350,8 +350,7 @@ void LongReadEngine::compose_rna_runtime(
       effective_long_primary_occ_cap(long_occ_policy_config(mapping));
   opts.cigar_local_global_occ =
       occ_cap > 0 ? occ_cap : std::numeric_limits<int>::max();
-  opts.cigar_local_interval_anchor_chain_max_gap =
-      mapping.cigar_local_interval_anchor_chain_max_gap;
+  opts.fine_chain_query_gap = mapping.cigar_dp_max_gap;
   opts.fine_chain_band = mapping.cigar_dp_bw;
   opts.query_occ_frac = static_cast<float>(mapping.query_occ_frac);
   opts.occ_dist = mapping.occ_dist;
@@ -543,9 +542,6 @@ void LongReadEngine::bind_dual_order() {
       index_.get(), &chr_names_, &chr_lengths_, &chr_encs_};
   dctx.opts.cigar_local_interval_anchor_interval_pad =
       mapping.cigar_local_interval_anchor_interval_pad;
-  dctx.opts.cigar_local_interval_anchor_chain_max_gap =
-      mapping.cigar_local_interval_anchor_chain_max_gap;
-  dctx.opts.chain_band = mapping.chain_band;
   dctx.opts.dna_dense_diag_min_runs = mapping.dna_dense_diag_min_runs;
   dctx.opts.dna_pool_gate_occ = chain_occ.pool_gate_occ;
   dctx.opts.dna_query_occ_frac = static_cast<float>(mapping.query_occ_frac);

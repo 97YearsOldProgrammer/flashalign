@@ -701,9 +701,6 @@ std::string resolved_config_text(const AlignOptions& opt,
       src(opt.vote_diag_width_max.has_value(), "preset"));
   row("mapq.output_range", "0..60", "fixed");
 
-  // On a splice preset, the fine chain's query gap.
-  row("chain_max_gap", i2s(mapping.cigar_local_interval_anchor_chain_max_gap),
-      src(opt.dp_max_gap.has_value(), "preset"));
   row("interval_pad", i2s(mapping.cigar_local_interval_anchor_interval_pad),
       "builtin");
   // The bound the vote catalogue runs with.
@@ -713,12 +710,6 @@ std::string resolved_config_text(const AlignOptions& opt,
   else
     row("chain_max_cands", i2s(fa::cpu::lr::dna_chain_max_candidates(mapping)),
         src(opt.max_cands.has_value(), overlap ? "preset" : "derived"));
-  // -b's band, only where its stage runs.
-  if (!is_rna &&
-      fa::cpu::api::lane_runs_stage(
-          fa::cpu::api::LaneStage::CandidateChains, opt.preset))
-    row("chain_band", i2s(mapping.chain_band),
-        src(opt.chain_band.has_value(), "preset"));
 
   // lr, lr:hq: -A -B -O -E -z --score-N are the gap-fill row; the end row,
   // which prices every path, is the preset's (dp_end_row). The assembly
@@ -1236,8 +1227,6 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
     u.dp_bw_long = *opt.dp_bw_long;
   if (opt.dp_max_gap)
     u.dp_max_gap = *opt.dp_max_gap;
-  if (opt.chain_band)
-    u.chain_band = *opt.chain_band;
   // Passed as given; the resolver validates the intron bounds.
   if (opt.min_intron)
     u.rna_min_intron = *opt.min_intron;

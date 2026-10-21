@@ -47,9 +47,6 @@ class RetainedSeedDensity;
 struct ResolvedDnaOptions {
   // Local interval-anchor harvest.
   int cigar_local_interval_anchor_interval_pad = 512;
-  int cigar_local_interval_anchor_chain_max_gap = 5000;
-  // The whole-query passes' diagonal band (-b).
-  int chain_band = 20000;
   // Run count at or above which the dense chain uses the diagonal-keyed
   // predecessor search instead of the linear scan. Both are exact; 0 always
   // uses the diagonal search, -1 never does.
@@ -712,7 +709,8 @@ struct DnaPlacementChainingResult {
   selection_anchors(const DnaSelectionItem& item) const noexcept;
 };
 
-// Chain parameters for the candidate paths under diagonal band `band`.
+// Chain parameters for the candidate paths under diagonal band `band`: reach
+// max(band, cigar_dp_max_gap).
 chaining::ColinearChainParams
 dna_candidate_chain_params(const DnaContext& context, int band,
                            int seed_length);
@@ -749,8 +747,8 @@ DnaPlacementChainingResult build_dna_placement_chains(
 namespace fa::cpu::lr {
 namespace internal {
 
-// The band of a chain pass, for both its harvest and its chain: -b's first
-// value.
+// The band of a whole-query chain pass, for its chain and its window's
+// widening, and of the ava lane's harvest: -r's second value.
 int pass_diagonal_band(const DnaContext& context);
 
 // A candidate's harvest window [low, high) on its contig: the read's span from

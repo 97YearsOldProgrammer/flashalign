@@ -132,11 +132,6 @@ struct DnaPresetProfile {
   int fill_dp_gap_extend2;
   int fill_dp_tail_zdrop;
   int fill_dp_inversion_zdrop;
-  // The dense chain's maximum gap; the splice presets borrow it as the fine
-  // chain's query gap. -g sets it.
-  int chain_max_gap;
-  // The dense (whole-query) chain passes' diagonal band; -b sets it.
-  int chain_band;
   DnaPlacementDefaults placement;
   DnaOverlapDefaults overlap;
 };
@@ -148,30 +143,30 @@ constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
-     20000, 20000, kReadPlacement, kNoOverlap},
+     kReadPlacement, kNoOverlap},
     {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048,
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
      10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
-     10000, 20000, kReadPlacement, kNoOverlap},
+     kReadPlacement, kNoOverlap},
     // minimap2's asm5, asm10 and asm20 scoring with its -r1k,100k -g10k -s200
-    // -z200, one row for the fills and the read ends, and its 100k bandwidth
-    // as the dense chains' band; lr's seeding, vote width and chain gap.
+    // -z200, one row for the fills and the read ends; lr's seeding and vote
+    // width.
     {"asm5", DnaPresetKind::Asm, 21, 9, 64, 128, 2048,
      1, 19, 1, 39, 3, 81, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 19, 1, 39, 3, 81, 1, 200, 200,
-     20000, 100000, kAssemblyPlacement, kNoOverlap},
+     kAssemblyPlacement, kNoOverlap},
     {"asm10", DnaPresetKind::Asm, 21, 9, 64, 128, 2048,
      1, 9, 1, 16, 2, 41, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 9, 1, 16, 2, 41, 1, 200, 200,
-     20000, 100000, kAssemblyPlacement, kNoOverlap},
+     kAssemblyPlacement, kNoOverlap},
     {"asm20", DnaPresetKind::Asm, 21, 9, 64, 128, 2048,
      1, 4, 1, 6, 2, 26, 1, 200, -1, 1000, 100000,
      10000, 200,
      1, 4, 1, 6, 2, 26, 1, 200, 200,
-     20000, 100000, kAssemblyPlacement, kNoOverlap},
+     kAssemblyPlacement, kNoOverlap},
     // Experimental all-vs-all read overlap, map-only: lr's row at k17 with
     // the vote width L/64, and lr:hq's row, as overlap rows. They follow the
     // row of their kind, which dna_preset_profile returns.
@@ -179,12 +174,12 @@ constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
-     20000, 20000, kOntOverlapPlacement, kOntOverlap},
+     kOntOverlapPlacement, kOntOverlap},
     {"ava-hifi", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048,
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
      10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
-     10000, 20000, kReadPlacement, kHiFiOverlap},
+     kReadPlacement, kHiFiOverlap},
 }};
 
 static const DnaPresetProfile* find_dna_preset_profile(
@@ -263,7 +258,6 @@ static void set_dna_long_platform_fields(
     mapping.cigar_dp_tail_end_bonus = profile.cigar_dp_tail_end_bonus;
     mapping.cigar_dp_bw = profile.cigar_dp_bw;
     mapping.cigar_dp_bw_long = profile.cigar_dp_bw_long;
-    mapping.chain_band = profile.chain_band;
     mapping.cigar_dp_max_gap = profile.cigar_dp_max_gap;
     mapping.cigar_dp_min_dp_max = profile.cigar_dp_min_dp_max;
     mapping.fill_dp_match = profile.fill_dp_match;
@@ -275,9 +269,6 @@ static void set_dna_long_platform_fields(
     mapping.fill_dp_gap_extend2 = profile.fill_dp_gap_extend2;
     mapping.fill_dp_tail_zdrop = profile.fill_dp_tail_zdrop;
     mapping.fill_dp_inversion_zdrop = profile.fill_dp_inversion_zdrop;
-    // 20000 under lr and the asm rows (minimap2's bw_long), 10000 under lr:hq
-    // (map-hifi's max_gap).
-    mapping.cigar_local_interval_anchor_chain_max_gap = profile.chain_max_gap;
 }
 
 static bool is_hifi_preset(std::string_view preset) {
@@ -304,7 +295,6 @@ bool lane_runs_stage(LaneStage stage, std::string_view preset) {
         case LaneStage::BaseAlignment:
         case LaneStage::SamOutput:
         case LaneStage::Selection:
-        case LaneStage::CandidateChains:
             return !overlap;
         case LaneStage::OverlapPairs:
             return overlap;
@@ -402,9 +392,8 @@ static void set_splice_fields(
     // -r: the fine chain's band, and a bound on it; -G sets both.
     mapping.base.cigar_dp_bw = 200000;
     mapping.base.cigar_dp_bw_long = 200000;
+    // minimap2's max_gap under splice, also the fine chain's query gap.
     mapping.base.cigar_dp_max_gap = 2000;
-    // minimap2's max_gap under splice is also the fine chain's query gap.
-    mapping.base.cigar_local_interval_anchor_chain_max_gap = 2000;
     mapping.splice_transition = 0;
     // The penalty is used only by ksw2's scored-splice-site mode, which is
     // not exposed.
@@ -736,7 +725,7 @@ void apply_vote_width_overrides(bool rna_mode,
   }
 }
 
-// -r and -G's bands, -g and -b.
+// -r and -G's bands, and -g.
 void apply_band_and_gap_overrides(bool rna_mode,
     ::fa::cpu::lr::DnaLongOptions& mapping, const UserOverrides& user) {
   // On a splice preset -G sets both -r values, as minimap2's
@@ -756,20 +745,10 @@ void apply_band_and_gap_overrides(bool rna_mode,
         "with '-rNUM1,NUM2', NUM1 (" + std::to_string(mapping.cigar_dp_bw) +
         ") can't be larger than NUM2 (" +
         std::to_string(mapping.cigar_dp_bw_long) + ")");
-  // -g, minimap2's max_gap, sets the DP's gap and the chains' gap, which on a
-  // splice preset is the fine chain's query gap. Untyped, each keeps its own
-  // preset value.
-  if (user.dp_max_gap) {
+  // -g, minimap2's max_gap: the DP's gap, and on a splice preset the fine
+  // chain's query gap.
+  if (user.dp_max_gap)
     mapping.cigar_dp_max_gap = std::max(1, *user.dp_max_gap);
-    mapping.cigar_local_interval_anchor_chain_max_gap =
-        mapping.cigar_dp_max_gap;
-  }
-  // -b: the dense chain passes' band.
-  if (user.chain_band) {
-    if (rna_mode)
-      throw std::invalid_argument("-b is valid only with a DNA preset");
-    mapping.chain_band = std::max(1, *user.chain_band);
-  }
 }
 
 // The splice presets' introns and strand, then minimap2's checks on their
