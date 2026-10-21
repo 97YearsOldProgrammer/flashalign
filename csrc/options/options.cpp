@@ -139,6 +139,7 @@ struct DnaPresetProfile {
 constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
     // End row as minimap2: lr is map-ont (-A2 -B4 -O4,24 -E2,1), lr:hq is
     // map-hifi (-A1 -B4 -O6,26 -E2,1). The fill rows are gentler on gaps.
+    // lr:hq's -g is 5000, under map-hifi's 10000.
     {"lr", DnaPresetKind::Ont, 21, 9, 64, 128, 2048,
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
      5000, 80,
@@ -146,7 +147,7 @@ constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
      kReadPlacement, kNoOverlap},
     {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048,
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
-     10000, 200,
+     5000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
      kReadPlacement, kNoOverlap},
     // minimap2's asm5, asm10 and asm20 scoring with its -r1k,100k -g10k -s200

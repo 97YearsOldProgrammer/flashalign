@@ -232,9 +232,9 @@ query gap of the fine chain; there
 bounds introns.
 Untyped,
 .B lr
-uses 5000,
+and
 .B lr:hq
-10000, the assembly presets 10000 and the splice presets 2000.
+use 5000, the assembly presets 10000 and the splice presets 2000.
 .I NUM
 may be ending with k/K/m/M/g/G.
 .TP
@@ -841,7 +841,7 @@ Align accurate long reads (error rate <1%), such as PacBio HiFi reads, to a
 reference genome
 .RB ( \-k21
 .B \-s5 \-\-min\-support 3 \-A3 \-B12 \-O18,78 \-E6,1
-.B \-z1200,600 \-\-score\-N 3 \-r500,20000 \-g10000 \-m40 \-p0.8 \-W48,64
+.B \-z1200,600 \-\-score\-N 3 \-r500,20000 \-g5000 \-m40 \-p0.8 \-W48,64
 .BR \-S200 ).
 Its alignments are scored with minimap2's map-hifi scoring
 .RB ( \-A1 " " \-B4 " " \-O6,26 " " \-E2,1 ,
