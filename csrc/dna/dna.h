@@ -1362,6 +1362,8 @@ struct RealizationRequest {
   int inversion_min_chain_score = 0;
   int inversion_min_dp_max = 0;
   InversionProbeGate inversion_probe_gate;
+  // A gap fill takes dp_fill_gap's exact first pass.
+  bool exact_first_pass = false;
   int end_bonus = -1;
   std::int64_t matrix_cell_cap = 0;
   bool long_join = false;
@@ -1619,6 +1621,7 @@ struct VerifiedRegionInputs {
 // Runs one realization packet through the controller. Slicing the packet and
 // committing the resulting CIGAR are left to the caller. `inversion_probe_gate`,
 // when set, gates the late probe of a fill whose probe is enabled.
+// `exact_first_pass` asks a gap fill for dp_fill_gap's exact first pass.
 realization::RealizationOutcome run_dna_long_realization(
     realization::RealizationRole role, const DpScoringParams &dp,
     realization::SequenceSlice query, realization::SequenceSlice target,
@@ -1626,7 +1629,8 @@ realization::RealizationOutcome run_dna_long_realization(
     realization::ExecutionContext *execution_context = nullptr,
     bool inversion_probe_enabled = false,
     const VerifiedRegionInputs *verified_region = nullptr,
-    const realization::InversionProbeGate *inversion_probe_gate = nullptr);
+    const realization::InversionProbeGate *inversion_probe_gate = nullptr,
+    bool exact_first_pass = false);
 
 } // namespace lr
 } // namespace cpu
@@ -1770,6 +1774,13 @@ struct DnaFamilyRealizationRequest {
   const std::vector<std::uint8_t>* reverse_query = nullptr;
 };
 
+// An interior fill takes dp_fill_gap's exact first pass when the read's last
+// interior fills hold enough exact retries that did not confirm the Z-drop.
+// The window, in the read's last interior fills (fewer than 32).
+inline constexpr int kDnaExactFirstWindow = 16;
+// The unconfirmed retries in the window that make the first pass exact.
+inline constexpr int kDnaExactFirstUnconfirmed = 2;
+
 // The -c lane's realization of one read (realization.cpp) and its work.
 struct DnaFamilyRealizationOutcome {
   dna::Result output;
@@ -1794,6 +1805,10 @@ struct DnaFamilyRealizationOutcome {
   int inversion_splits = 0;
   int inversion_middles = 0;
   int inversion_records = 0;
+  // The read's interior gap fills in realization order, the latest in bit 0:
+  // set where the fill's exact retry returned a fill that did not Z-drop
+  // (kDnaExactFirstWindow).
+  std::uint32_t unconfirmed_window = 0;
   int unit_count = 0;
   int ksw2_attempts = 0;
   std::int64_t estimated_cells = 0;

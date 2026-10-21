@@ -44,7 +44,8 @@
 // A seam joins two neighbouring verified regions with one gap fill from the
 // left region's last center to the right region's first. It is minimap2's
 // fill: pinned-global DP at bw_long_eff(), or max(q_span, r_span) across a
-// long join, with the approximate pass, the Z-drop test and one exact retry.
+// long join, with the Z-drop test and minimap2's exact pass on a drop
+// (dp_fill_gap).
 //
 // A stretch is everything else: a region with any failing gap, a lone anchor,
 // the material between verified regions that are not neighbours. minimap2's
@@ -299,7 +300,8 @@ ExecutorResult ksw2_execute(const RealizationRequest& request,
     raw = ::fa::cpu::dp::dp_fill_gap(
         opt, request.query.length, request.query.data, request.target.length,
         request.target.data, request.long_join, &observer,
-        request.inversion_probe_enabled ? &inversion_control : nullptr);
+        request.inversion_probe_enabled ? &inversion_control : nullptr,
+        request.exact_first_pass);
   } else if (request.role == RealizationRole::DnaLocalInversionMiddle) {
     raw = ::fa::cpu::dp::dp_align_inversion_middle(
         opt, request.query.length, request.query.data, request.target.length,
@@ -882,14 +884,16 @@ namespace lr {
 
 // As in minimap2: flank extensions use the band bw_eff() and gap fills
 // bw_long_eff() (max(q_span, r_span) across a long join); a gap fill runs the
-// KSW_EZ_APPROX_MAX pass first; a fill whose matrix exceeds opt.max_sw_mat is
-// not run but returned Z-dropped.
+// KSW_EZ_APPROX_MAX pass first, or with exact_first_pass dp_fill_gap's exact
+// one; a fill whose matrix exceeds opt.max_sw_mat is not run but returned
+// Z-dropped.
 realization::RealizationOutcome run_dna_long_realization(
     realization::RealizationRole role, const DpScoringParams &dp,
     realization::SequenceSlice query, realization::SequenceSlice target,
     int caller_requested_band, int interior_zdrop, bool long_join, realization::ExecutionContext *execution_context,
     bool inversion_probe_enabled, const VerifiedRegionInputs *verified_region,
-    const realization::InversionProbeGate *inversion_probe_gate) {
+    const realization::InversionProbeGate *inversion_probe_gate,
+    bool exact_first_pass) {
   realization::RealizationRequest request;
   request.role = role;
   request.objective = realization::objective_for_role(role);
@@ -940,6 +944,7 @@ realization::RealizationOutcome run_dna_long_realization(
   request.inversion_min_dp_max = dp.inversion_min_dp_max;
   if (inversion_probe_gate != nullptr)
     request.inversion_probe_gate = *inversion_probe_gate;
+  request.exact_first_pass = exact_first_pass;
   request.end_bonus =
       request.objective == realization::EndpointObjective::PinnedGlobal ||
               role == realization::RealizationRole::DnaLocalInversionMiddle

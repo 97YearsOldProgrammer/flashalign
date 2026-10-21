@@ -105,12 +105,14 @@ static void notify_attempt(const DpAttemptObserver* observer, DpKernelId kernel,
 
 // Kernel dispatch, as minimap2's mm_align_pair: single or dual affine, with the per-call
 // max_sw_mat guard. `ez` must be value-initialized by the caller (ksw_reset_extz leaves
-// ez.cigar and ez.m_cigar untouched). Splice alignment goes through dp.h.
+// ez.cigar and ez.m_cigar untouched), and so must `zstop`, which the dual-affine kernel
+// fills (ksw_extd2_sse_zstop). Splice alignment goes through dp.h.
 static void dp_align_pair(const DpMapOpt& opt, int qlen, const uint8_t* qseq,
                           int tlen, const uint8_t* tseq, const int8_t* mat,
                           int w, int end_bonus, int zdrop, int ksw_flag,
                           ksw_extz_t* ez,
-                          const DpAttemptObserver* observer = nullptr) {
+                          const DpAttemptObserver* observer = nullptr,
+                          ksw_zstop_t* zstop = nullptr) {
   if (opt.max_sw_mat > 0 &&
       static_cast<int64_t>(tlen) * qlen > opt.max_sw_mat) {
     ksw_reset_extz(ez); // too big: skip and report Z-dropped, as minimap2
@@ -127,6 +129,12 @@ static void dp_align_pair(const DpMapOpt& opt, int qlen, const uint8_t* qseq,
     ksw_extz2_sse(km, qlen, qseq, tlen, tseq, 5, mat,
                   static_cast<int8_t>(opt.q), static_cast<int8_t>(opt.e), w,
                   zdrop, end_bonus, ksw_flag, ez);
+  } else if (zstop != nullptr) {
+    ksw_extd2_sse_zstop(km, qlen, qseq, tlen, tseq, 5, mat,
+                        static_cast<int8_t>(opt.q), static_cast<int8_t>(opt.e),
+                        static_cast<int8_t>(opt.q2),
+                        static_cast<int8_t>(opt.e2), w, zdrop, end_bonus,
+                        ksw_flag, ez, zstop);
   } else {
     ksw_extd2_sse(km, qlen, qseq, tlen, tseq, 5, mat,
                   static_cast<int8_t>(opt.q), static_cast<int8_t>(opt.e),
@@ -312,11 +320,17 @@ dp_align_inversion_middle(const DpMapOpt& opt, int qlen, const uint8_t* qseq,
   return out;
 }
 
+static void free_zstop(ksw_zstop_t& zstop) {
+  for (ksw_extz_t& stop : zstop.ez)
+    free(stop.cigar);
+}
+
 DpAlnResult
 dp_fill_gap(const DpMapOpt& opt, int qlen, const uint8_t* qseq, int tlen,
             const uint8_t* tseq, bool long_join,
             const DpAttemptObserver* observer,
-            const DpInversionProbeControl* inversion_control) {
+            const DpInversionProbeControl* inversion_control,
+            bool exact_first) {
   DpAlnResult out;
   if (qlen <= 0 || tlen <= 0)
     return out;
@@ -326,10 +340,30 @@ dp_fill_gap(const DpMapOpt& opt, int qlen, const uint8_t* qseq, int tlen,
   const int w = long_join ? std::max(qlen, tlen) : opt.bw_long_eff();
 
   ksw_extz_t ez{};
-  dp_align_pair(opt, qlen, qseq, tlen, tseq, mat, w, -1, opt.zdrop,
-                KSW_EZ_APPROX_MAX, &ez, observer);
-  // As minimap2, re-score the approximate traceback even when the pass itself Z-dropped,
-  // and confirm a drop with one exact pass.
+  ksw_zstop_t zstop{};
+  // Pass 1 is minimap2's approximate pass or, where the caller asks for it (the DNA
+  // realization does when its window holds kDnaExactFirstUnconfirmed unconfirmed retries),
+  // the exact pass run to the corner, recording where it would stop at zdrop and zdrop_inv.
+  // Only the dual-affine kernel records, and only a fill with Z-drop retries. An exact
+  // pass 1 that Z-drops without stopping (the band ran out or the matrix cap held) is
+  // replaced by the approximate one.
+  exact_first = exact_first && opt.zdrop >= 0 && !opt.single_affine();
+  if (exact_first) {
+    zstop.zdrop[0] = opt.zdrop;
+    zstop.zdrop[1] = opt.zdrop_inv;
+    dp_align_pair(opt, qlen, qseq, tlen, tseq, mat, w, -1, -1, 0, &ez,
+                  observer, &zstop);
+    if (ez.zdropped) {
+      free(ez.cigar);
+      ez = ksw_extz_t{};
+      exact_first = false;
+    }
+  }
+  if (!exact_first)
+    dp_align_pair(opt, qlen, qseq, tlen, tseq, mat, w, -1, opt.zdrop,
+                  KSW_EZ_APPROX_MAX, &ez, observer);
+  // As minimap2, re-score pass 1's traceback even when the pass itself Z-dropped, and
+  // confirm a drop with the exact pass.
   if (opt.zdrop >= 0) {
     // O(ops) bound before the O(bases) re-score. dp_test_zdrop charges gaps at system 1,
     // so its final score is T' = ez.score + sum over gaps of [min(s1, s2) - s1]. Every
@@ -362,6 +396,7 @@ dp_fill_gap(const DpMapOpt& opt, int qlen, const uint8_t* qseq, int tlen,
       detail::fill_result(out, ez);
       if (ez.cigar)
         free(ez.cigar);
+      free_zstop(zstop);
       return out;
     }
     std::vector<uint32_t> tmp;
@@ -370,12 +405,23 @@ dp_fill_gap(const DpMapOpt& opt, int qlen, const uint8_t* qseq, int tlen,
     out.zdrop_test =
         dp_test_zdrop(opt, qseq, tseq, tmp, mat, inversion_control);
     if (out.zdrop_test.code != 0) {
-      free(ez.cigar);
-      ez = ksw_extz_t{};
       const int retry_zdrop =
           out.zdrop_test.code == 2 ? opt.zdrop_inv : opt.zdrop;
-      dp_align_pair(opt, qlen, qseq, tlen, tseq, mat, w, -1, retry_zdrop, 0,
-                    &ez, observer);
+      if (exact_first) {
+        // The exact pass at retry_zdrop is pass 1's recorded stop there, or pass 1 itself
+        // where it records none.
+        const int k = out.zdrop_test.code == 2 ? 1 : 0;
+        if (zstop.hit[k]) {
+          free(ez.cigar);
+          ez = zstop.ez[k];
+          zstop.ez[k].cigar = nullptr;
+        }
+      } else {
+        free(ez.cigar);
+        ez = ksw_extz_t{};
+        dp_align_pair(opt, qlen, qseq, tlen, tseq, mat, w, -1, retry_zdrop, 0,
+                      &ez, observer);
+      }
       out.exact_retry = true;
       out.exact_retry_zdrop = retry_zdrop;
     }
@@ -383,6 +429,7 @@ dp_fill_gap(const DpMapOpt& opt, int qlen, const uint8_t* qseq, int tlen,
   detail::fill_result(out, ez);
   if (ez.cigar)
     free(ez.cigar);
+  free_zstop(zstop);
   return out;
 }
 

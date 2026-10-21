@@ -198,13 +198,17 @@ dp_align_inversion_middle(const DpMapOpt& opt, int qlen, const uint8_t* qseq,
 
 // Gap fill between anchors, as mm_align1: global alignment over the wide band (or
 // max(qlen, tlen) for a long join) with Z-drop. The first pass is approximate
-// (KSW_EZ_APPROX_MAX); when dp_test_zdrop confirms a drop, one exact pass reruns. The
-// result carries zdropped and the max cell so the caller can split.
+// (KSW_EZ_APPROX_MAX); when dp_test_zdrop flags a drop, the exact pass at its threshold
+// reruns. With `exact_first` on a dual-affine fill the first pass is exact and records
+// where that pass stops, so the retry is read from it; the DNA realization asks for it when
+// kDnaExactFirstUnconfirmed of the read's last kDnaExactFirstWindow fills were unconfirmed
+// retries. The result carries zdropped and the max cell so the caller can split.
 DpAlnResult
 dp_fill_gap(const DpMapOpt& opt, int qlen, const uint8_t* qseq, int tlen,
             const uint8_t* tseq, bool long_join = false,
             const DpAttemptObserver* observer = nullptr,
-            const DpInversionProbeControl* inversion_control = nullptr);
+            const DpInversionProbeControl* inversion_control = nullptr,
+            bool exact_first = false);
 
 // Text CIGAR and ref/match accounting for a result, over the same (qseq, tseq). The score
 // follows minimap2: the corner score for a gap fill (`global`), mqe for a flank on

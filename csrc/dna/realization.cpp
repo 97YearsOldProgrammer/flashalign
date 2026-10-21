@@ -630,6 +630,10 @@ bool plan_and_realize_packets(const DnaContext& context,
         result.geometry.failing_gaps += first_piece_of->failing_gaps;
       }
     }
+    const bool exact_first =
+        __builtin_popcount(result.unconfirmed_window &
+                           ((1u << kDnaExactFirstWindow) - 1u)) >=
+        kDnaExactFirstUnconfirmed;
     realization::RealizationOutcome outcome = run_dna_long_realization(
         realization::RealizationRole::DnaInternalFill, scoring,
         realization::make_query_slice(
@@ -639,11 +643,17 @@ bool plan_and_realize_packets(const DnaContext& context,
             r_span > 0 ? reference.data() + step.target_begin : nullptr, r_span,
             step.target_begin),
         two_axis ? step.selected_band : -1, scoring.zdrop, step.long_join, nullptr,
-        /*inversion_probe_enabled=*/true, verified_region, gated ? &probe_gate : nullptr);
+        /*inversion_probe_enabled=*/true, verified_region,
+        gated ? &probe_gate : nullptr, exact_first);
     price_fill_path(context.opts, query.data() + step.query_begin, q_span,
                     reference.data() + step.target_begin, r_span, outcome);
     record_kernel_work(outcome, q_span, r_span, result);
     record_inversion_probe(outcome, result);
+    // Every fill the ksw2 gap fill took enters the window, capped ones too.
+    if (outcome.committed_executor == realization::ExecutorId::Ksw2)
+      result.unconfirmed_window =
+          result.unconfirmed_window << 1 |
+          (outcome.trace.exact_retry && !outcome.raw.zdropped ? 1u : 0u);
     const bool successful =
         outcome.kind == realization::OutcomeKind::Aligned ||
         outcome.kind == realization::OutcomeKind::PureInsertion ||

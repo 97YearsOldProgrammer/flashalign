@@ -50,18 +50,29 @@
 #endif
 #endif
 
-#ifdef KSW_CPU_DISPATCH
-#ifdef __SSE4_1__
-void ksw_extd2_sse41(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
-				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
-#else
-void ksw_extd2_sse2(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
-				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
-#endif
-#else
-void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
-				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
-#endif // ~KSW_CPU_DISPATCH
+// FlashAlign: the stop test ksw_apply_zdrop makes at this anti-diagonal, for each threshold not yet
+// hit, read from the live ez; at the first stop ez is copied as the stopped pass's state.
+static inline void ksw_zstop_test(ksw_zstop_t *zs, const ksw_extz_t *ez, int32_t H, int r, int t, int8_t e)
+{
+	int k, tl, ql, l;
+	if (H > (int32_t)ez->max || t < ez->max_t || r - t < ez->max_q) return; // a new max, or no test
+	tl = t - ez->max_t, ql = (r - t) - ez->max_q;
+	l = tl > ql? tl - ql : ql - tl;
+	for (k = 0; k < KSW_ZSTOP_N; ++k) {
+		ksw_extz_t *a = &zs->ez[k];
+		uint32_t *cigar;
+		int m_cigar;
+		if (zs->hit[k] || zs->zdrop[k] < 0 || !(ez->max - H > zs->zdrop[k] + l * e)) continue;
+		cigar = a->cigar, m_cigar = a->m_cigar;
+		*a = *ez;
+		a->zdropped = 1, a->cigar = cigar, a->m_cigar = m_cigar, zs->hit[k] = 1;
+	}
+}
+
+// FlashAlign: the kernel, with ksw_extd2_sse_zstop's record `zs` (NULL for ksw_extd2_sse).
+static void ksw_extd2_core(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
+						   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez,
+						   ksw_zstop_t *zs)
 {
 #define __dp_code_block1 \
 	z = _mm_load_si128(&s[t]); \
@@ -101,6 +112,10 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 	__m128i *u, *v, *x, *y, *x2, *y2, *s, *p = 0;
 
 	ksw_reset_extz(ez);
+	if (zs) { // FlashAlign
+		int k;
+		for (k = 0; k < KSW_ZSTOP_N; ++k) ksw_reset_extz(&zs->ez[k]), zs->hit[k] = 0;
+	}
 	if (m <= 1 || qlen <= 0 || tlen <= 0) return;
 
 	if (q2 + e2 < q + e) t = q, q = q2, q2 = t, t = e, e = e2, e2 = t; // make sure q+e no larger than q2+e2
@@ -389,6 +404,7 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 				ez->mte = H[en0], ez->mte_q = r - en0;
 			if (r - st0 == qlen - 1 && H[st0] > ez->mqe)
 				ez->mqe = H[st0], ez->mqe_t = st0;
+			if (zs) ksw_zstop_test(zs, ez, max_H, r, max_t, e2); // FlashAlign
 			if (ksw_apply_zdrop(ez, 1, max_H, r, max_t, zdrop, e2)) break;
 			if (r == qlen + tlen - 2 && en0 == tlen - 1)
 				ez->score = H[tlen - 1];
@@ -424,7 +440,40 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 		} else if (ez->max_t >= 0 && ez->max_q >= 0) {
 			ksw_backtrack(km, 1, rev_cigar, 0, (uint8_t*)p, off, off_end, n_col_*16, ez->max_t, ez->max_q, &ez->m_cigar, &ez->n_cigar, &ez->cigar);
 		}
+		if (zs) { // FlashAlign: a stopped pass backtracks from its max cell; p is the same up to its stop
+			int k;
+			for (k = 0; k < KSW_ZSTOP_N; ++k) {
+				ksw_extz_t *a = &zs->ez[k];
+				if (zs->hit[k] && a->max_t >= 0 && a->max_q >= 0)
+					ksw_backtrack(km, 1, rev_cigar, 0, (uint8_t*)p, off, off_end, n_col_*16, a->max_t, a->max_q, &a->m_cigar, &a->n_cigar, &a->cigar);
+			}
+		}
 		kfree(km, mem2); kfree(km, off);
 	}
 }
+
+#ifdef KSW_CPU_DISPATCH
+#ifdef __SSE4_1__
+void ksw_extd2_sse41(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
+				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
+#else
+void ksw_extd2_sse2(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
+				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
+#endif
+#else
+void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
+				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
+#endif // ~KSW_CPU_DISPATCH
+{
+	ksw_extd2_core(km, qlen, query, tlen, target, m, mat, q, e, q2, e2, w, zdrop, end_bonus, flag, ez, 0);
+}
+
+#ifndef KSW_CPU_DISPATCH
+void ksw_extd2_sse_zstop(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
+						 int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez,
+						 ksw_zstop_t *zs)
+{
+	ksw_extd2_core(km, qlen, query, tlen, target, m, mat, q, e, q2, e2, w, zdrop, end_bonus, flag, ez, zs);
+}
+#endif
 #endif // __SSE2__

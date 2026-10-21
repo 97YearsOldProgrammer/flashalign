@@ -99,6 +99,22 @@ void ksw_extd(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t 
 void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
 				   int8_t gapo, int8_t gape, int8_t gapo2, int8_t gape2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez);
 
+/* FlashAlign: the Z-drop stops of an exact pass, recorded without stopping. For each threshold
+ * zdrop[k] (<0: none), hit[k] is set at the first anti-diagonal where ksw_apply_zdrop would stop
+ * the pass, and ez[k] is what that stopped pass returns, CIGAR included. The caller zeroes the
+ * struct once and frees each ez[k].cigar, as ez->cigar. */
+#define KSW_ZSTOP_N 2
+typedef struct {
+	int zdrop[KSW_ZSTOP_N];
+	int hit[KSW_ZSTOP_N];
+	ksw_extz_t ez[KSW_ZSTOP_N];
+} ksw_zstop_t;
+
+/* ksw_extd2_sse that also fills `zs`; zs is read only without KSW_EZ_APPROX_MAX. */
+void ksw_extd2_sse_zstop(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
+						 int8_t gapo, int8_t gape, int8_t gapo2, int8_t gape2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez,
+						 ksw_zstop_t *zs);
+
 void ksw_exts2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
 				   int8_t gapo, int8_t gape, int8_t gapo2, int8_t noncan, int zdrop, int end_bonus, int8_t junc_bonus, int8_t junc_pen, int flag, const uint8_t *junc, ksw_extz_t *ez);
 
