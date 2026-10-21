@@ -154,39 +154,31 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dd>Stop alignment elongation if there are no seeds within <i>NUM</i>-bp
       [5000]. It bounds how far base alignment extends toward a read end, and
       under a DNA preset two pieces of a read join into one record only across
-      gaps of at most <i>NUM</i>. Under a DNA preset it is also the maximum gap
-      of chaining, whose reach is never below the chain's band and grows with
-      the read length, so values under the band leave that chain unchanged. The
-      band is <b>-b</b>'s first value for the dense chains and its second for
-      the screening chain. Under a splice preset it bounds base alignment and is
-      also the maximum query gap of the fine chain; there <b>-G</b> bounds
-      introns. Untyped, <b>lr</b> uses 5000 for base alignment and 20000 for
-      chaining, <b>lr:hq</b> 10000 for both, the assembly presets 10000 and
-      20000, and the splice presets 2000 for both; a typed <i>NUM</i> sets both.
-      <i>NUM</i> may be ending with k/K/m/M/g/G.</dd>
+      gaps of at most <i>NUM</i>. Under a DNA preset chaining links anchors
+      across at most the larger of it and <b>-r</b>'s second value, so values
+      under that band leave the chain unchanged. Under a splice preset it bounds
+      base alignment and is also the maximum query gap of the fine chain; there
+      <b>-G</b> bounds introns. Untyped, <b>lr</b> and <b>lr:hq</b> use 5000,
+      the assembly presets 10000 and the splice presets 2000. <i>NUM</i> may be
+      ending with k/K/m/M/g/G.</dd>
   <dt id="r"><a class="permalink" href="#r"><b>-r
     <i>NUM1</i>[,<i>NUM2</i>]</b></a></dt>
-  <dd>Bandwidth for base alignment and gap filling [500,20000]. Under a DNA
-      preset, <i>NUM1</i> is used for alignment extension toward the read ends
-      and for inverted middles, and <i>NUM2</i> for closing gaps between
-      anchors, both only when base-level alignment runs (<b>-c</b>, SAM);
-      neither bands chaining, which <b>-b</b> sets. A single value sets
-      <i>NUM1</i> only. Each value may be ending with k/K/m/M/g/G, and
-      <i>NUM1</i> may not exceed <i>NUM2</i>. Under a splice preset <i>NUM1</i>
-      is the diagonal band of the fine chain and <i>NUM2</i> only bounds
-      <i>NUM1</i>; neither bands base alignment there, and <b>-G</b> sets both
-      [200000,200000].</dd>
-  <dt id="b"><a class="permalink" href="#b"><b>-b
-    <i>NUM1</i>[,<i>NUM2</i>]</b></a></dt>
-  <dd>Chaining bandwidth [20000,20000; 100000,20000 on asm5, asm10, asm20].
-      <i>NUM1</i> bands each candidate's dense chain over the whole read and
-      <i>NUM2</i> its bounded screening chain: a chain keeps only the anchors
-      whose diagonal lies within the band of the candidate's, and long reads
-      chain with a reach that grows with their length. It acts on placement, so
-      also on plain PAF output. A single value sets both. Each value may end
-      with k/K/m/M/g/G. The long form is <b>--chain-band</b>. DNA presets only;
-      <b>ava-ont</b> and <b>ava-hifi</b>, which do not partition the read,
-      refuse it.</dd>
+  <dd>Bandwidth for base alignment, and for gap filling and chaining
+      [500,20000]. Under a DNA preset, <i>NUM1</i> is used for alignment
+      extension toward the read ends and for inverted middles, and <i>NUM2</i>
+      for closing gaps between anchors, both only when base-level alignment runs
+      (<b>-c</b>, SAM). <i>NUM2</i> is also the band of the dense chain over the
+      whole read, one for each contig and strand of the read's candidates: each
+      candidate contributes every anchor of its window, which widens by at most
+      the band, and the chain links anchors within the band across at most the
+      band, or <b>-g</b> where that is larger, whatever the read length. So
+      <i>NUM2</i> acts on placement, and so also on plain PAF output.
+      <b>ava-ont</b> and <b>ava-hifi</b> refuse <b>-r</b>; their chains band at
+      20000. A single value sets <i>NUM1</i> only. Each value may be ending with
+      k/K/m/M/g/G, and <i>NUM1</i> may not exceed <i>NUM2</i>. Under a splice
+      preset <i>NUM1</i> is the diagonal band of the fine chain and <i>NUM2</i>
+      only bounds <i>NUM1</i>; neither bands base alignment there, and <b>-G</b>
+      sets both [200000,200000].</dd>
   <dt id="m"><a class="permalink" href="#m"><b>-m</b><i>&#x00A0;INT</i></a></dt>
   <dd>Discard alignments with chaining score &lt;<i>INT</i> [40; 100 on ava-ont,
       ava-hifi]. Chaining score equals the approximate number of matching bases
@@ -202,31 +194,34 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       [0.8]. Under a splice preset it retains a rival: a retained rival is
       aligned, is what <b>md</b> and <b>XA</b> report, and is a record of its
       own under <b>--secondary=yes</b>. Under a DNA preset it decides which
-      alternative loci enter the ownership selection, which chains attached to
-      an owner are aligned beside it and kept as secondary alignments, and which
-      rival a piece of a split read is weighed against in the mapping quality:
-      one whose chain scores at least <i>FLOAT</i> times the primary's, or
-      within 2<i>k</i> of it.</dd>
+      chains attached to an owner are kept as secondary alignments, aligned
+      beside it with a CIGAR and written from their chains without one: those
+      whose chain scores at least <i>FLOAT</i> times the owner's, or within
+      2<i>k</i> of it.</dd>
   <dt id="N"><a class="permalink" href="#N"><b>-N</b><i>&#x00A0;INT</i></a></dt>
-  <dd>Retain at most <i>INT</i> secondary alignments [1; splice presets 5].
-      Under a DNA preset the base-level lane realizes and keeps up to <i>INT</i>
-      rivals per read whether or not they are printed; one prices the mapping
-      quality. <b>-N0</b> is <b>--secondary=no</b>.</dd>
+  <dd>Retain at most <i>INT</i> secondary alignments [5]. Under a DNA preset
+      both lanes keep up to <i>INT</i> per read whether or not they are printed;
+      with a CIGAR they are aligned and the best of them prices the mapping
+      quality, and without one each is written from its whole chain. Under
+      <b>lr</b> and <b>lr:hq</b>, a secondary alignment ends where its alignment
+      first splits, at a Z-drop or at a gap too large to align. No secondary
+      alignment is kept past <i>INT</i>. <b>-N0</b> is
+    <b>--secondary=no</b>.</dd>
   <dt id="rival"><a class="permalink" href="#rival"><b>--rival-min-diff</b><i>&#x00A0;INT</i></a></dt>
   <dd>Absolute chain-score band that retains a rival beside <b>-p</b> [30].
       Splice presets only.</dd>
   <dt id="min"><a class="permalink" href="#min"><b>--min-support</b><i>&#x00A0;INT</i></a></dt>
-  <dd>Minimal number of seeds on a vote peak [3]. The splice presets use 2.</dd>
+  <dd>Minimal number of seeds on a vote peak [3].</dd>
   <dt id="max"><a class="permalink" href="#max"><b>--max-vote-occ</b><i>&#x00A0;INT</i></a></dt>
   <dd>Ignore a seed whose reference occurrence is above <i>INT</i> when voting,
-      and under a DNA preset when chaining too; 0 turns occurrence filtering off
-      [200]. Unset, the cap is the larger of 200 and the occurrence of the top
-      1.81e-4 fraction of the most frequent seeds in the index, at most 500
-      under <b>lr:hq</b>, and the DNA chaining gates take the same cap. The
-      splice presets keep the fixed 200. Under a DNA preset a vote tile whose
-      seeds are all above the cap still votes with its rarest seed of at most
-      4095 occurrences (<b>lr</b>) or 1024 (<b>lr:hq</b>), and chaining keeps
-      that seed.</dd>
+      under a DNA preset when chaining too, and under a splice preset in every
+      later step that reads seeds; 0 turns occurrence filtering off [200].
+      Unset, the cap is the larger of 200 and the occurrence of the top 1.81e-4
+      fraction (1.62e-3 under splice and splice:hq) of the most frequent seeds
+      in the index, at most 500 under <b>lr:hq</b>, and the DNA chaining gates
+      take the same cap. Under a DNA preset a vote tile whose seeds are all
+      above the cap still votes with its rarest seed of at most 4095 occurrences
+      (<b>lr</b>) or 1024 (<b>lr:hq</b>), and chaining keeps that seed.</dd>
   <dt id="vote"><a class="permalink" href="#vote"><b>--vote-ratio</b><i>&#x00A0;FLOAT</i></a></dt>
   <dd>Keep every vote peak whose vote is at least <i>FLOAT</i> of the best
       peak's [0.25; 0 on ava-ont, ava-hifi]. 0 keeps the top four peaks by count
@@ -236,71 +231,68 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       from the pool handed to chaining; 0 disables the gate [200]. Unset, the
       gate is the voting cap (<b>--max-vote-occ</b>). A seed an empty vote tile
       kept passes the gate. Only this gate bounds the seeds chaining receives:
-      with 0, repeats can cost several times the CPU and memory. DNA presets
+      with 0, repeats can cost several times the CPU and memory. The same value
+      removes, before voting, every seed whose k-mer occurs in the read itself
+      more than <i>INT</i> times and in more than the fraction of the read's
+      seeds that <b>--q-occ-frac</b> sets, as minimap2 does (not under ava-ont
+      and ava-hifi); 0 removes none. DNA presets only.</dd>
+  <dt id="q"><a class="permalink" href="#q"><b>--q-occ-frac</b><i>&#x00A0;FLOAT</i></a></dt>
+  <dd>Before voting, drop every seed whose k-mer occurs in the read more times
+      than the occurrence cap and in more than <i>FLOAT</i> of the read's seeds,
+      as minimap2's option of the same name does [0.01]; 0 turns this filter
+      off. The cap is the chaining cap (<b>--max-chain-occ</b>) under lr, lr:hq,
+      asm5, asm10 and asm20, and the voting cap (<b>--max-vote-occ</b>) under
+      splice and splice:hq. Not under ava-ont and ava-hifi.</dd>
+  <dt id="e"><a class="permalink" href="#e"><b>-e</b><i>&#x00A0;INT</i></a></dt>
+  <dd>In each run of the read's seeds whose occurrence is above the occurrence
+      cap, between two seeds at or under it or a read end, keep the rarest seeds
+      anyway, one per <i>INT</i> bases of the run and at most 128, except a seed
+      that occurs more than 4095 times, as minimap2's option of the same name
+      does; 0 turns this off [0; 500 under splice and splice:hq]. Every stage
+      that applies the cap takes the kept seeds. Under the DNA presets it is off
+      unless given, and unmeasured.</dd>
+  <dt id="v"><a class="permalink" href="#v"><b>-v
+    <i>NUM1</i>[,<i>NUM2</i>]</b></a></dt>
+  <dd>Seeds per strand that vote, and query tiles per read [128,128]. The read
+      is cut into <i>NUM1</i> equal tiles and each tile votes with one of its
+      seeds; 0 votes with every seed. Above 128, the preset keeps the seeds the
+      128-tile cut picks and adds seeds of the <i>NUM1</i>-tile cut, each the
+      farthest from those kept, until it holds as many as that cut picks; a
+      rescued seed that would exceed the strand's budget of rescued occurrences
+      is skipped, so the count can stop short. The exact refinement of the vote
+      peaks uses the seeds of both cuts. <i>NUM2</i> is the number of equal
+      query tiles on which a candidate's seed support over the read is counted
+      for its admission to the catalogue, 1 to 4096, of which admission by
+      <b>--vote-ratio</b> compares at most 2048; under <b>lr:hq</b> the blocks
+      of a split read are also measured in these tiles when their
+      mapping-quality rivals are chosen. A single value sets <i>NUM1</i> only.
+      Neither <b>--min-support</b> nor <b>--max-cands</b> scales with
+      <i>NUM1</i>; a vote peak needs <b>--min-support</b> votes, so a
+      <i>NUM1</i> below that places few reads or none. The Python field for
+      <i>NUM1</i> is <b>Config.max_query_seeds</b>. DNA presets only; the splice
+      presets take <b>--vote-spacing</b>.</dd>
+  <dt id="W"><a class="permalink" href="#W"><b>-W
+    <i>NUM1</i>[,<i>NUM2</i>]</b></a></dt>
+  <dd>Width in reference bases of the diagonal bin a seed votes into, and the
+      divisor of the read-length term that widens it [64,128]: a read of length
+      <i>L</i> votes into bins of width max(<i>NUM1</i>, <i>L</i>/<i>NUM2</i>),
+      at most <b>--dw-max</b>. A single value sets <i>NUM1</i> only and keeps
+      the preset's divisor; a <i>NUM2</i> of 0 drops the term and fixes the
+      width at <i>NUM1</i>. The splice presets take <i>NUM1</i> alone: their
+      width is fixed.</dd>
+  <dt id="dw"><a class="permalink" href="#dw"><b>--dw-max</b><i>&#x00A0;INT</i></a></dt>
+  <dd>Largest width the read-length term of <b>-W</b> may reach, greater than 0
+      and, while that term is on, not below <i>NUM1</i> [2048]. DNA presets
       only.</dd>
-  <dt id="dw"><a class="permalink" href="#dw"><b>--dw</b><i>&#x00A0;INT</i></a></dt>
-  <dd>Width in reference bases of the diagonal bin a seed votes into, greater
-      than 0 [64]. <b>lr:hq</b> and <b>splice:hq</b> use 48. Under a DNA preset
-      the width otherwise grows with the read length; a value given here fixes
-      it and turns that growth off.</dd>
-  <dt><b>--dw-slope-den</b><i>&#x00A0;INT</i></dt>
-  <dd>Denominator of the term that grows the vote bin with read length: the
-      width is the read length divided by <i>INT</i>, held between the base
-      width and the cap [128]. <b>lr:hq</b>, <b>ava-ont</b> and <b>ava-hifi</b>
-      use 64, and 0 drops the term. DNA presets only.</dd>
-  <dt><b>--dw-max</b><i>&#x00A0;INT</i></dt>
-  <dd>Largest width that growth may reach, greater than 0 [2048]. While the
-      growth is on it may not be below the width <b>--dw</b> sets. DNA presets
-      only.</dd>
-  <dt id="vote~2"><a class="permalink" href="#vote~2"><b>--vote-seeds</b><i>&#x00A0;INT</i></a></dt>
-  <dd>Seeds per strand that vote [128; 4096 on asm5, asm10, asm20; 256 on
-      ava-ont]: the read is cut into <i>INT</i> equal tiles and each tile votes
-      with one of its seeds; 0 votes with every seed. Above 128, the preset
-      keeps the seeds the 128-tile cut picks and adds seeds of the
-      <i>INT</i>-tile cut, each the farthest from those kept, until it holds as
-      many as that cut picks; a rescued seed that would exceed the strand's
-      budget of rescued occurrences is skipped, so the count can stop short. The
-      exact refinement of the vote peaks uses the seeds of both cuts. Neither
-      <b>--min-support</b> nor <b>--max-cands</b> scales with <i>INT</i>; a vote
-      peak needs <b>--min-support</b> votes (3 on the DNA presets), so an
-      <i>INT</i> below that places few reads or none. The Python field is
-      <b>Config.max_query_seeds</b>. DNA presets only; the splice presets take
-      <b>--vote-spacing</b>.</dd>
   <dt id="max~3"><a class="permalink" href="#max~3"><b>--max-cands</b><i>&#x00A0;INT</i></a></dt>
   <dd>Vote peaks and placement candidates kept per strand, 1 to 64 [16]; 1 to
-      16383 [16383] under <b>ava-ont</b> and <b>ava-hifi</b>, which partition
-      nothing. Elsewhere, unset, it is 16 when vote peaks are admitted by their
-      ratio to the best (<b>--vote-ratio</b>), where it only bounds the cost,
-      and 4 when <b>--vote-ratio</b> is 0, where it selects; a value replaces
-      whichever applies. With a CIGAR the secondary alignments come from these
-      candidates' chains, so a wider bound can add secondaries. DNA presets
-      only.</dd>
-  <dt id="tiles"><a class="permalink" href="#tiles"><b>--tiles</b><i>&#x00A0;INT</i></a></dt>
-  <dd>Query tiles the read is cut into for placement, 2 to 4096 [128; 2048 on
-      asm5, asm10, asm20]. The exact query partition gives each tile one
-      candidate or none, and an owned block needs two tiles with seed support.
-      Under the default <b>--tile-score</b>, 2 tiles place no read: a two-tile
-      block scores 8 - 12 = -4, below the -2 of leaving both tiles unowned. The
-      <b>--tile-score</b> terms are per tile, so their weight against each other
-      and against the read's length moves with <i>INT</i>. A candidate starts
-      with the tiles in which a voting seed supports it, so with fewer voting
-      seeds than tiles (<b>--vote-seeds</b>) most tiles start unsupported and
-      candidates are hard to admit; keep <b>--vote-seeds</b> at least
-      <i>INT</i>. Above 2048 tiles, candidates are admitted by comparing their
-      supports on 2048 tiles. The partition's work grows with <i>INT</i>. DNA
-      presets only.</dd>
-  <dt id="tile"><a class="permalink" href="#tile"><b>--tile-score
-    <i>hit</i>=<i>INT</i>,<i>block</i>=<i>INT</i>,<i>null</i>=<i>INT</i>,<i>miss</i>=<i>INT</i></b></a></dt>
-  <dd>Objective of the exact query partition, which decides for each of the
-      read's query tiles (<b>--tiles</b>) which candidate owns it
-      [hit=4,block=12,null=1,miss=0]. Under a DNA preset the partition picks the
-      candidates chained over the whole read, and the anchors of those chains
-      then decide which chain owns each part of the read. <i>hit</i> rewards an
-      owned tile the seeds support and is at least 1; <i>block</i> is charged
-      each time an ownership block opens, <i>null</i> per valid tile left
-      unowned, and <i>miss</i> per owned tile without seed support, each at
-      least 0. Any subset of the keys may be given, and a repeated key keeps its
-      last value. DNA presets only.</dd>
+      16383 [16383] under <b>ava-ont</b> and <b>ava-hifi</b>, which chain each
+      contig and strand of the read once. Elsewhere, unset, it is 16 when vote
+      peaks are admitted by their ratio to the best (<b>--vote-ratio</b>), where
+      it only bounds the cost, and 4 when <b>--vote-ratio</b> is 0, where it
+      selects; a value replaces whichever applies. With a CIGAR the secondary
+      alignments come from these candidates' chains, so a wider bound can add
+      secondaries. DNA presets only.</dd>
 </dl>
 </section>
 <section class="Ss">
@@ -390,7 +382,7 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dd>Score bonus for a splice donor or acceptor found in annotation [9].
       Effective with <b>--junc-bed</b>. <i>INT</i> ranges from 0 to 127. Splice
       presets only.</dd>
-  <dt id="vote~3"><a class="permalink" href="#vote~3"><b>--vote-spacing</b><i>&#x00A0;INT</i></a></dt>
+  <dt id="vote~2"><a class="permalink" href="#vote~2"><b>--vote-spacing</b><i>&#x00A0;INT</i></a></dt>
   <dd>One vote seed per <i>INT</i> query bases [8; splice:hq 16]: a read of
       length <i>L</i> votes with max(128, ceil(<i>L</i>/<i>INT</i>)) seeds per
       strand, one per equal tile, so a read of at most 128 times <i>INT</i>
@@ -452,12 +444,14 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       <b>tp:A:S</b> in PAF, mapping quality 0, and `<b>*</b>' for SEQ and QUAL.
       A secondary record carries <b>ms</b> and its own chain's <b>cm</b> and
       <b>s1</b>, but no <b>md</b>, <b>s2</b>, <b>SA</b> or <b>XA</b>. Under a
-      DNA preset the secondary alignments are those of the chains aligned beside
-      an owner that, after alignment, overlap a primary record by more than half
-      of the shorter, at most <b>-N</b> per read; they are listed on the
-      primary's <b>XA</b>. Without a CIGAR a DNA preset writes no secondary
-      alignment. The value may also be given as a separate word (<b>--secondary
-      yes</b>); typed twice, the last one wins.</dd>
+      DNA preset with a CIGAR the secondary alignments are those of the chains
+      aligned beside an owner that, after alignment, overlap a primary record by
+      more than half of the shorter, at most <b>-N</b> per read; they are listed
+      on the primary's <b>XA</b>. Without a CIGAR they are the chains kept
+      beside an owner (<b>-p</b>), at most <b>-N</b> per read, each written from
+      its whole chain, with no <b>ms</b>. The value may also be given as a
+      separate word (<b>--secondary yes</b>); typed twice, the last one
+    wins.</dd>
   <dt id="y"><a class="permalink" href="#y"><b>-y</b></a></dt>
   <dd>Copy input FASTA/Q comments to output, verbatim, as the last field of
       every record the read produces.</dd>
@@ -467,17 +461,22 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       budget, and decompression of compressed input borrows from it rather than
       adding to it: -t/8 threads, from 1 to 8, when every read input qualifies
       (BGZF or BAM of at least 16 MiB at any -t of 2 or more; other gzip of at
-      least 64 MiB from -t 32).</dd>
+      least 64 MiB from -t 32) and <b>--batch-window</b> is above 1.</dd>
   <dt id="K,"><a class="permalink" href="#K,"><b>-K, --batch-bp
     <i>NUM</i></b></a></dt>
   <dd>Number of bases loaded into memory to process in a mini-batch [500M]. As
       with <b>-I</b>, a k/K/m/M/g/G suffix is accepted. Output bytes and output
       order do not depend on it.</dd>
   <dt id="show"><a class="permalink" href="#show"><b>--show-config</b></a></dt>
-  <dd>Print the fully resolved configuration to stdout and exit 0. It loads
-      neither the reference nor the reads, so <b>flashalign align -x lr:hq
+  <dd>Print the fully resolved configuration to stdout and exit 0. It reads no
+      reference base and no read, so <b>flashalign align -x lr:hq
       --show-config</b> is a complete invocation; of a <i>.faix</i> target it
-      reads the header alone.</dd>
+      reads the header, except that with a DNA or splice preset and a
+      single-part index it loads the index without its bases (with them under
+      <b>--junc-bed</b>) and appends rows tagged <b>[resolved]</b>: the seed
+      occurrence cap and its parts, and under a DNA preset the rescue window,
+      the vote's bin width at four read lengths and the chain's band and
+    reach.</dd>
   <dt id="stats"><a class="permalink" href="#stats"><b>--stats</b></a></dt>
   <dd>Print a summary of the run to stderr: reads and bases, mapped reads,
       records written, wall time, throughput and peak memory.</dd>
@@ -491,9 +490,10 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dd>Generate CIGAR and output alignments in the SAM format. FlashAlign outputs
       in PAF by default.</dd>
   <dt id="batch"><a class="permalink" href="#batch"><b>--batch-window</b><i>&#x00A0;INT</i></a></dt>
-  <dd>Number of batches in flight in the compute stage [3]. With 1, all threads
-      finish a batch before the next one starts. Output bytes and order are
-      identical for every value.</dd>
+  <dd>Number of batches in flight in the compute stage [the preset's: 1 on asm5,
+      asm10 and asm20, 3 otherwise]. With 1, all threads finish a batch before
+      the next one starts. Output bytes and order are identical for every
+    value.</dd>
   <dt id="io"><a class="permalink" href="#io"><b>--io-staging</b><i>&#x00A0;MIB</i></a></dt>
   <dd>Ceiling, in MiB, on the decompressed gzip input staged ahead of the
       reader; 0 scales it with <b>-t</b> [0]. A non-zero value must be at least
@@ -521,9 +521,10 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dt id="lr:hq"><a class="permalink" href="#lr:hq"><b>lr:hq</b></a></dt>
   <dd>Align accurate long reads (error rate &lt;1%), such as PacBio HiFi reads,
       to a reference genome (<b>-k21</b> <b>-s5 --min-support 3 -A3 -B12 -O18,78
-      -E6,1</b> <b>-z1200,600 --score-N 3 -r500,20000 -g10000 -m40 -p0.8</b>
-      <b>-S200</b>). Its alignments are scored with minimap2's map-hifi scoring
-      (<b>-A1</b> <b>-B4</b> <b>-O6,26</b> <b>-E2,1</b>, <b>-S200</b>).</dd>
+      -E6,1</b> <b>-z1200,600 --score-N 3 -r500,20000 -g5000 -m40 -p0.8
+      -W48,64</b> <b>-S200</b>). Its alignments are scored with minimap2's
+      map-hifi scoring (<b>-A1</b> <b>-B4</b> <b>-O6,26</b> <b>-E2,1</b>,
+      <b>-S200</b>).</dd>
   <dt id="splice"><a class="permalink" href="#splice"><b>splice</b></a></dt>
   <dd>Long-read spliced alignment (<b>-k15</b> <b>-s10 --min-support 2 -A1 -B2
       -O2,32 -E1,0 -z200,100 -S80</b> <b>--min-intron 20 -g2000 -G200k -ub
@@ -534,15 +535,15 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       splice -u f</b>.</dd>
   <dt id="splice:hq"><a class="permalink" href="#splice:hq"><b>splice:hq</b></a></dt>
   <dd>Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq
-      (<b>-xsplice</b> <b>-B4</b> <b>-O6,24</b>). It differs from <b>splice</b>
-      in scoring and also in the vote's diagonal bin (48 against 64), the vote
-      spacing (16 against 8; see <b>--vote-spacing</b>) and the MAPQ coverage
-      threshold (0.70 against 0.55).</dd>
+      (<b>-xsplice</b> <b>-B4 -O6,24</b> <b>-W48</b>). It differs from
+      <b>splice</b> in scoring and also in the vote's diagonal bin (48 against
+      64), the vote spacing (16 against 8; see <b>--vote-spacing</b>) and the
+      MAPQ coverage threshold (0.70 against 0.55).</dd>
   <dt id="asm5"><a class="permalink" href="#asm5"><b>asm5</b></a></dt>
   <dd>Experimental. Long assembly to reference mapping (<b>-k21</b> <b>-s9 -A1
-      -B19 -O39,81 -E3,1 -z200,200 --score-N 1 -r1000,100000</b>
-      <b>-b100000,20000 -S200 --vote-seeds 4096 --tiles 2048</b>). Use this
-      preset if the average divergence is not much higher than 0.1%.</dd>
+      -B19 -O39,81 -E3,1 -z200,200 --score-N 1 -r1000,100000</b> <b>-S200
+      -v4096,2048</b>). Use this preset if the average divergence is not much
+      higher than 0.1%.</dd>
   <dt id="asm10"><a class="permalink" href="#asm10"><b>asm10</b></a></dt>
   <dd>Experimental. Long assembly to reference mapping (<b>-xasm5</b> <b>-B9
       -O16,41</b> <b>-E2,1</b>). Use this if the average divergence is around
@@ -553,14 +554,13 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       several percent.</dd>
   <dt id="ava"><a class="permalink" href="#ava"><b>ava-ont</b></a></dt>
   <dd>Experimental. Oxford Nanopore all-vs-all overlap mapping (<b>-k17</b>
-      <b>-s9 --min-support 2 --vote-seeds 256 --vote-ratio 0 --dw-slope-den
-      64</b> <b>--max-cands 16383 -m100</b> <b>--dual=no</b>). Output is PAF
-      without CIGAR; <b>-a</b> and <b>-c</b> are refused. Read names must be
-      unique.</dd>
+      <b>-s9 --min-support 2 -v256 --vote-ratio 0 -W64,64</b> <b>--max-cands
+      16383 -m100</b> <b>--dual=no</b>). Output is PAF without CIGAR; <b>-a</b>
+      and <b>-c</b> are refused. Read names must be unique.</dd>
   <dt id="ava~2"><a class="permalink" href="#ava~2"><b>ava-hifi</b></a></dt>
   <dd>Experimental. PacBio HiFi all-vs-all overlap mapping (<b>-k21</b> <b>-s5
-      --min-support 3 --vote-ratio 0 --dw-slope-den 64</b> <b>--max-cands 16383
-      -m100</b> <b>--dual=no</b>).</dd>
+      --min-support 3 --vote-ratio 0 -W48,64</b> <b>--max-cands 16383 -m100</b>
+      <b>--dual=no</b>).</dd>
 </dl>
 </div>
 </section>
@@ -861,8 +861,8 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
 </div>
 <table class="foot">
   <tr>
-    <td class="foot-date">11 October 2026</td>
-    <td class="foot-os">flashalign-0.3.0</td>
+    <td class="foot-date">21 October 2026</td>
+    <td class="foot-os">flashalign-0.4.0</td>
   </tr>
 </table>
 </body>
