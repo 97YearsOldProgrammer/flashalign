@@ -37,6 +37,19 @@ man ./flashalign.1
 
 ## Users' guide
 
+FlashAlign is a long-read aligner that maps DNA and mRNA sequences against a reference genome.
+Typical use cases include: (1) mapping Oxford Nanopore, PacBio HiFi and ultra-long genomic
+reads to a reference genome; (2) splice-aware alignment of PacBio Iso-Seq, Nanopore cDNA or
+Nanopore direct RNA reads against a reference genome; (3) assembly-to-reference alignment
+(experimental); (4) finding overlaps between long reads (experimental).
+
+Presets marked experimental work, but are not yet in their best-tuned form. For long genomic
+reads, FlashAlign is nearly twice as fast as the mainstream long-read mappers minimap2 and
+minibwa. It is more accurate on simulated long reads and produces biologically meaningful
+alignments ready for downstream analyses. For long spliced reads, FlashAlign is more accurate
+than minimap2, mapping more reads with fewer errors, at the same or a slightly higher speed.
+Detailed evaluations are available from the [preprint](docs/paper/preprint.pdf).
+
 ### Installation
 
 For Linux x86-64, a precompiled binary is on the
@@ -218,6 +231,104 @@ flashalign align -a ref.fa.faix reads.fq > aln.sam
 
 Mapping quality is incorrect given a multi-part index.
 
+#### The cs optional tag
+
+The `cs` SAM/PAF tag encodes bases at mismatches and INDELs. Like CIGAR, `cs` consists of a
+series of operations. Each leading character specifies the operation; the following sequence is
+the one involved in the operation.
+
+The `cs` tag is enabled by the command line option `--cs`, which implies `-c`. The following
+alignment, for example:
+
+```txt
+CGATCGATAAATAGAGTAG---GAATAGCA
+||||||   ||||||||||   |||| |||
+CGATCG---AATAGAGTAGGTCGAATtGCA
+```
+
+is represented as `:6-ata:10+gtc:4*at:3`, where `:[0-9]+` represents an identical block, `-ata`
+represents a deletion, `+gtc` an insertion and `*at` indicates reference base `a` is substituted
+with a query base `t`. It is similar to the `MD` SAM tag but is standalone and easier to parse.
+
+If `--cs=long` is used, the `cs` string also contains identical sequences in the alignment. The
+above example will become `=CGATCG-ata=AATAGAGTAG+gtc=GAAT*at=GCA`. The long form of `cs`
+encodes both reference and query sequences in one string. Under a splice preset the `cs` tag
+also encodes intron positions and splicing signals with the `~` operation (see
+[OUTPUT FORMAT](https://97yearsoldprogrammer.github.io/flashalign/#OUTPUT_FORMAT) in the manual).
+
+#### Working with the PAF format
+
+FlashAlign writes minimap2's PAF: the same 12 columns and the same tag names. The
+[`paftools.js`](https://github.com/lh3/minimap2/tree/master/misc) script that comes with
+minimap2 therefore reads FlashAlign's PAF and SAM as it reads minimap2's; the commands that
+need a CIGAR need `-c` (or `-a`) output.
+
+### Algorithm overview
+
+In the following, FlashAlign command line options have a dash ahead and are highlighted in bold,
+with their defaults under the `lr` preset in brackets. The description may help to tune
+FlashAlign parameters.
+
+Minimap2 chains a read's anchors colinearly, treating every anchor alike, and other aligners
+weight their seeds. FlashAlign instead samples the read's seeds and compresses them into votes for
+approximate diagonals; the vote peaks are the candidate placements. Each candidate is then
+decompressed in one pass of exact chaining over all of its anchors, organised by a tree, where
+minimap2 chains twice, its second pass with a range-maximum query (RMQ).
+
+1. Read **-I** [=*no split*] reference bases, extract (**-k**,**-s**)-closed syncmers
+   [=*21*,*9*] and index them. A closed syncmer is a k-mer whose minimal s-mer sits at one of its
+   two ends, so about 2/(k-s+1) of the k-mers are seeds.
+
+2. Read **-K** [=*500M*] query bases, with up to **--batch-window** [=*3*] batches in flight. For
+   each query sequence, do step 3 through 9. Output bytes and order depend on neither option.
+
+3. Look up the syncmers of the query in the index to find the seeds, and ignore, when voting and
+   chaining, a seed whose reference occurrence is above **--max-vote-occ** [=*200*; unset, the
+   larger of 200 and the occurrence of the top 1.81e-4 fraction of the most frequent seeds]. As
+   minimap2 does, drop a seed whose k-mer occurs in the read itself more often than that cap and
+   in more than **--q-occ-frac** [=*0.01*] of the read's seeds. A vote tile whose seeds are all
+   above the cap still votes with its rarest seed of at most 4095 occurrences.
+
+4. Sample the seeds and vote. Under a DNA preset the read is cut into **-v** [=*128*] equal tiles
+   per strand, so the voters are scattered over the read, and each tile votes with one of its
+   seeds for a diagonal bin **-W** [=*64*] reference bases wide, widened to L/128 for a read of
+   length L, at most **--dw-max** [=*2048*]; a bin with at least **--min-support** [=*3*] votes is
+   a vote peak. The splice presets vote with equally spaced seeds instead, one per
+   **--vote-spacing** [=*8*] query bases, at least 128 per strand.
+
+5. Admit the vote peaks to the catalogue as candidates: keep every peak whose vote is at least
+   **--vote-ratio** [=*0.25*] of the best peak's, at most **--max-cands** [=*16*] per strand. A
+   candidate's seed support over the read is counted on the second value of **-v** [=*128*]
+   equal query tiles.
+
+6. Under a DNA preset, chain the candidates of each contig and strand once, over the whole read:
+   every anchor of the candidates' windows enters one exact chaining pass, the anchors collapsed
+   into gap-free diagonal runs whose best predecessors are found exactly, through a k-d tree over
+   the runs when the pool is large. The chain links anchors within the band of the second value of **-r**
+   [=*500,20000*], across at most that band or **-g** [=*5000*] where that is larger, and a chain
+   scoring below **-m** [=*40*] is discarded. Under a splice preset the fine chain takes introns
+   up to **-G** [=*200k*] and query gaps up to **-g** [=*2000*].
+
+7. Choose the owner chains as minimap2's `mm_set_parent` does: taking the chains best score
+   first, attach each to the first owner whose query span overlaps its own by more than half of
+   the shorter, or else make it a new owner; the owners become the primary and supplementary
+   records. Keep as secondary alignments the chains attached to an owner that score at least
+   **-p** [=*0.8*] times the owner's score, or within 2k of it, at most **-N** [=*5*] per read.
+
+8. Without **-a** or **-c**, write each record from its owner chain's anchors: there is no
+   base-level alignment, so the coordinates are approximate. With **-a** or **-c**, align base by
+   base: close the gaps between anchors within the second value of **-r**, extend toward the read
+   ends within its first value [=*500*] and stop where there are no seeds within **-g**
+   [=*5000*]. Truncate where the running score drops too quickly, the Z-drop **-z** [=*800,200*]
+   in the gap fills and *400,200* in the read-end extensions, which use `lr`'s own scoring row; a
+   drop above the second value is tested for a small inversion, and an alignment needs a peak DP
+   score of at least **-S** [=*80*].
+
+9. Estimate the mapping quality against the best rival chain (the `s2` tag), a rival scoring under
+   **-m** being weighed as scoring **-m**, and write PAF or SAM. Secondary alignments are written
+   only with **--secondary**=*yes* [=*no*], at mapping quality 0; **-y** copies the FASTA/Q
+   comments of each read to its records.
+
 ### Getting help
 
 The [manual page](https://97yearsoldprogrammer.github.io/flashalign/) describes every option, the
@@ -255,6 +366,11 @@ The package needs CPython 3.12 or newer and installs no `flashalign` command.
 - FlashAlign requires SSE4.1 instructions on x86 CPUs or NEON on ARM CPUs. A build without
   them is not provided.
 - The assembly and overlap presets are experimental.
+- On HiFi reads FlashAlign splits inversion breakpoints less often than minimap2 and calls fewer
+  inversions; the Z-drop split is being reworked.
+- BAM stores at most 65535 CIGAR operations per record, which an ultra-long read can exceed.
+  FlashAlign has no `-L`: it writes the full CIGAR in SAM, and samtools moves a longer CIGAR to
+  the `CG:B,I` tag when it converts the SAM to BAM.
 
 ## License
 
