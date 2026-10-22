@@ -228,8 +228,9 @@ list the common options. Bugs and questions go to the
 
 ### Citing FlashAlign
 
-The manuscript is not yet public. Until then, please cite the software:
+The manuscript is not yet on a preprint server. Until then, please cite the software:
 [doi:10.5281/zenodo.22985251](https://doi.org/10.5281/zenodo.22985251).
+The preprint is in [`docs/paper/preprint.pdf`](docs/paper/preprint.pdf); the bioRxiv DOI will replace this link.
 
 ## Developers' guide
 

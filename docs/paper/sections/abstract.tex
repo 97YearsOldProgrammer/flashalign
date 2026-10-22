@@ -1,0 +1,12 @@
+\begin{abstract}
+\noindent\textbf{Motivation:} Nearly every long-read aligner follows the seed--chain--align recipe of \mmtwo{}: seed matches (anchors) between read and reference are collected from an index, anchors are chained colinearly by a dynamic programme, and base-level alignment after chaining. The chaining complexity is $O(hN)$ for $N$ anchors with a look-back of $h$ predecessors. For accurate long reads the anchor pool $N$ is too large to chain effectively. For noisy long reads, the chaining is hurt by noisier anchors that create more look-back during backtracing. For a further step in high-throughput long-read aligner, it is required to make a better chaining.
+
+\vspace{0.5\baselineskip}
+\noindent\textbf{Results:} \flash{} is an aligner for long genomic and long spliced RNA reads that improves chaining by introducing a new stage before such a recipe. It combines modified minimap and GraphMap diagonal voting for placement first before chaining to reduce chaining workload. It replaces minimizers with closed syncmers to skip reverse-strand searching. It also optimises colinear chaining and base alignment for throughput. \flash{} reaches around twice the throughput of \mmtwo{} on long genomic reads. On long spliced reads, \flash{} reaches better accuracy while achieving slightly faster throughput than \mmtwo{}.
+
+\vspace{0.5\baselineskip}
+\noindent\textbf{Availability and implementation:} \flash{} is implemented in C++17 with Python bindings and is available under the MIT licence at \url{https://github.com/97YearsOldProgrammer/flashalign}.
+
+\vspace{0.5\baselineskip}
+\noindent\textbf{Contact:} \texttt{dsbchen@ucdavis.edu}, \texttt{ifkorf@ucdavis.edu}
+\end{abstract}

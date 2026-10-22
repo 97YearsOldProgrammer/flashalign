@@ -1,0 +1,221 @@
+\documentclass[twocolumn,9pt]{extarticle}
+\usepackage[a4paper,margin=1.7cm,top=1.8cm,bottom=1.8cm,heightrounded]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+
+\usepackage{microtype}
+\usepackage{amsmath,amsthm}
+\usepackage{newtxtext,newtxmath}
+\usepackage[varqu,varl,scaled=0.96]{inconsolata}   %
+\usepackage{booktabs,array,float}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
+
+\definecolor{ink}{RGB}{28,31,36}          %
+\definecolor{accent}{RGB}{38,66,98}       %
+\definecolor{link}{RGB}{52,92,136}        %
+\definecolor{note}{RGB}{110,116,126}      %
+\definecolor{rulegray}{RGB}{160,165,172}  %
+\definecolor{todo}{RGB}{178,40,40}        %
+\definecolor{pholder}{RGB}{176,104,0}     %
+\color{ink}
+
+\usepackage[ruled,linesnumbered,noend]{algorithm2e}
+\usepackage{etoolbox}
+\DontPrintSemicolon
+\SetAlgoLined
+\SetAlFnt{\footnotesize\lineskiplimit=0pt\lineskip=1pt}
+\SetAlCapFnt{\small\bfseries}\SetAlCapNameFnt{\small}
+\SetAlgoCaptionSeparator{.}
+\SetAlgoNlRelativeSize{-1}
+\newcommand{\algnl}[1]{\textcolor{note}{#1}}
+\SetNlSty{algnl}{}{}
+\newcommand{\algcmt}[1]{\textcolor{note}{\itshape #1}}
+\SetCommentSty{algcmt}
+\SetKwComment{tcp}{$\triangleright$\ }{}
+\newcommand{\algkw}[1]{\textcolor{accent}{\textbf{#1}}}
+\SetKwSty{algkw}
+\SetArgSty{textnormal}
+\renewcommand{\ProgSty}[1]{\textnormal{#1}\unskip}%
+\newcommand{\AlgFn}[2]{\textsc{#1}\textnormal{(#2)}}
+\SetInd{0.45em}{0.85em}
+\setlength{\algomargin}{1.3em}
+\SetAlgoSkip{}
+\SetAlgoInsideSkip{}
+\setlength{\interspacetitleruled}{3pt}
+\setlength{\interspacealgoruled}{3pt}
+\makeatletter
+\AtBeginDocument{\setlength{\algoheightrule}{\heavyrulewidth}\setlength{\algotitleheightrule}{\lightrulewidth}}
+\def\@algocf@pre@ruled{{\color{accent}\hrule width\algocf@ruledwidth height\algoheightrule depth0pt}\kern\interspacetitleruled}
+\def\@algocf@post@ruled{\kern\interspacealgoruled{\color{accent}\hrule width\algocf@ruledwidth height\algoheightrule}\relax}
+\renewcommand{\algocf@caption@ruled}{\box\algocf@capbox\kern\interspacetitleruled
+  {\color{accent}\hrule width\algocf@ruledwidth height\algotitleheightrule depth0pt}\kern\interspacealgoruled}
+\renewcommand{\algocf@Vsline}[1]{%
+  \strut\par\nointerlineskip
+  \algocf@bblockcode
+  \algocf@push{\skiprule}%
+  \hbox{{\color{rulegray}\vrule width 0.3pt}%
+    \vtop{\algocf@push{\skiptext}%
+      \vtop{\algocf@addskiptotal #1}}}%
+  \algocf@pop{\skiprule}%
+  \algocf@eblockcode}
+\newlength{\alglabelw}\newlength{\algsymw}
+\newcommand{\alg@newrow}{\par\noindent\hskip\alglabelw\ignorespaces}
+\newcommand{\alg@head}[2]{%
+  \settowidth{\alglabelw}{\algkw{Constants}\enspace}%
+  \algocf@seteveryparnl{\relax}%
+  {\let\\\alg@newrow\rightskip=0pt plus 2em\relax
+   \noindent\hbox to\alglabelw{\algkw{#1}\hfil}#2\par}%
+  \algocf@linesnumbered}
+\newcommand{\AlgIn}[1]{\alg@head{Input}{#1}}
+\newcommand{\AlgOut}[1]{\alg@head{Output}{#1}}
+\newcommand{\AlgNote}[1]{\alg@head{Notation}{#1}}
+\newcommand{\AlgConst}[1]{\alg@head{Constants}{#1}}
+\setlength{\algsymw}{2.7em}
+\newcommand{\AlgRow}[2]{\hangindent=\dimexpr\alglabelw+\algsymw\relax\hangafter=1\relax
+  \makebox[\algsymw][l]{#1}#2}
+\newcommand{\AlgWide}[1]{\hangindent=\alglabelw\hangafter=1\relax #1}
+\newcommand{\AlgBody}{\par\nointerlineskip\vskip 2.5pt
+  \moveleft\algomargin\vbox{\color{rulegray}\hrule width\algocf@ruledwidth height 0.3pt}%
+  \vskip 2.5pt}
+\makeatother
+
+\usepackage[round,authoryear,sort]{natbib}
+\usepackage{url}
+\usepackage[colorlinks=true,linkcolor=link,citecolor=link,urlcolor=link]{hyperref}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf,labelsep=period,skip=5pt}
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries}{\textcolor{accent}{\thesection}}{0.6em}{\color{accent}}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{0.6em}{}
+\setlength{\columnsep}{0.6cm}
+\linespread{1.0}
+\setlength{\parskip}{0pt}
+\newcommand{\GridLinePitch}{\normallineskiplimit=-2.5pt \normallineskip=0pt
+  \lineskiplimit=\normallineskiplimit \lineskip=\normallineskip}%
+\titlespacing*{\section}{0pt}{9.9pt plus 4pt minus 1pt}{0pt}
+\titlespacing*{\subsection}{0pt}{10.95pt plus 4pt minus 1pt}{0pt}
+\titlespacing*{\subsubsection}{0pt}{10.95pt plus 4pt minus 1pt}{0pt}
+\makeatletter
+\g@addto@macro\normalsize{%
+  \abovedisplayskip 5.475pt plus 1.5pt minus 1pt \belowdisplayskip\abovedisplayskip
+  \abovedisplayshortskip\abovedisplayskip \belowdisplayshortskip\abovedisplayskip}
+\makeatother
+\normalsize
+\setlength{\textfloatsep}{13pt plus 3pt minus 2pt}
+\setlength{\floatsep}{13pt plus 3pt minus 2pt}
+\setlength{\intextsep}{13pt plus 3pt minus 2pt}
+\setlength{\dbltextfloatsep}{13pt plus 3pt minus 2pt}
+\setlength{\dblfloatsep}{13pt plus 3pt minus 2pt}
+\renewcommand{\topfraction}{0.9}\renewcommand{\bottomfraction}{0.8}\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.85}\renewcommand{\dbltopfraction}{0.9}\renewcommand{\dblfloatpagefraction}{1}
+\setcounter{topnumber}{3}\setcounter{bottomnumber}{2}\setcounter{totalnumber}{4}\setcounter{dbltopnumber}{1}%
+\makeatletter
+\newdimen\grid@bs \newdimen\grid@pad \newcount\grid@n
+\AtBeginDocument{\grid@bs=\baselineskip}
+\patchcmd\@cflb{\vskip \textfloatsep}{\vskip \textfloatsep \vskip \z@ \@plus 1fil\relax}{}{\PackageWarningNoLine{layout}{could not patch \string\@cflb}}
+\let\grid@endfloatbox\@endfloatbox
+\def\@endfloatbox{\grid@endfloatbox\grid@snapfloat}
+\def\grid@snapfloat{%
+  \@tempcnta=\count\@currbox \divide\@tempcnta 2 %
+  \ifodd\@tempcnta
+    \@tempdima=\dimexpr\ht\@currbox+\dp\@currbox+\textfloatsep\relax
+    \grid@n=\numexpr(\@tempdima+\grid@bs/2-1)/\grid@bs\relax
+    \grid@pad=\dimexpr\grid@n\grid@bs-\@tempdima\relax
+    \ifdim\grid@pad>\z@
+      \global\setbox\@currbox\vbox{\unvbox\@currbox\vskip\grid@pad}%
+    \fi
+  \fi}
+\makeatother
+\bibliographystyle{plainnat}
+
+\newtheorem{proposition}{Proposition}
+\newcommand{\flash}{FlashAlign}  %
+\newcommand{\mmtwo}{minimap2}
+\newcommand{\todo}[1]{\textcolor{todo}{[TODO: #1]}}
+\newcommand{\placeholder}[1]{\textcolor{pholder}{\textbf{[PLACEHOLDER: #1]}}}
+
+\renewenvironment{abstract}{%
+  \par\noindent{\color{accent}\rule{\textwidth}{0.6pt}}\par\vspace{6pt}%
+  \begin{list}{}{\setlength{\leftmargin}{0.5cm}\setlength{\rightmargin}{0.5cm}%
+    \setlength{\topsep}{0pt}\setlength{\parsep}{0pt}\setlength{\itemsep}{0pt}\setlength{\listparindent}{0pt}}%
+  \item\relax\normalsize}
+ {\end{list}\par\vspace{6pt}\noindent{\color{rulegray}\rule{\textwidth}{0.4pt}}\par}
+
+\title{\vspace{-1.2em}\LARGE\bfseries \flash: Faster Long-Read Alignment with Better Chaining\vspace{-0.3em}}
+\author{Gong Chen$^{1,*}$ and Ian Korf$^{1,2,*}$\\[0.3em]
+\small $^1$Genome Center, University of California, Davis, CA 95616, USA\\
+\small $^2$Department of Molecular and Cellular Biology, University of California, Davis, CA 95616, USA\\
+\small $^*$Corresponding authors: \texttt{dsbchen@ucdavis.edu}, \texttt{ifkorf@ucdavis.edu}}
+\date{\small Preprint, \today}
+
+\newcommand{\BodySpacing}{%
+  \setlength{\parskip}{4.5pt plus 1.5pt minus 1pt}%
+  \titlespacing*{\section}{0pt}{18pt plus 4pt minus 2pt}{3pt plus 1pt}%
+  \titlespacing*{\subsection}{0pt}{13.5pt plus 3pt minus 1.5pt}{2pt plus 0.5pt}%
+  \titlespacing*{\subsubsection}{0pt}{11pt plus 3pt minus 1pt}{1.5pt plus 0.5pt}%
+  \raggedbottom
+}
+\AtBeginEnvironment{algorithm}{\setlength{\parskip}{0pt}}
+\AtBeginEnvironment{figure}{\setlength{\parskip}{0pt}}
+\AtBeginEnvironment{figure*}{\setlength{\parskip}{0pt}}
+\AtBeginEnvironment{table}{\setlength{\parskip}{0pt}}
+\AtBeginEnvironment{table*}{\setlength{\parskip}{0pt}}
+
+\flushbottom
+
+\newcommand{\RefPageStart}{\ifnum\value{page}=7 \else
+  \PackageWarningNoLine{layout}{References start on page \thepage, not page 7}\fi}
+\newcommand{\RefPageCheck}{\ifnum\value{page}=7 \else
+  \PackageWarningNoLine{layout}{References run past page 7 (now on page \thepage)}\fi}
+
+\makeatletter
+\newlength{\frontgap}\setlength{\frontgap}{8pt}
+\newsavebox{\front@top}\newsavebox{\front@head}
+\newcommand{\FrontBlock}[2]{%
+  \twocolumn[{%
+    \setbox\front@top\vbox{\hsize\textwidth\@parboxrestore\@twocolumnfalse #1}%
+    \setbox\front@head\vbox{\hsize\textwidth\@parboxrestore #2\par
+      \vskip\dimexpr\baselineskip-\topskip-\prevdepth\relax}%
+    \@tempdima=\dimexpr\textheight-\ht\front@top-\dp\front@top-\frontgap
+                 -\ht\front@head-\dp\front@head-\topskip\relax   %
+    \grid@n=\numexpr(\@tempdima-\baselineskip/2)/\baselineskip\relax %
+    \@tempdimb=\dimexpr\@tempdima-\grid@n\baselineskip\relax         %
+    \box\front@top
+    \nointerlineskip\vskip\dimexpr\frontgap+\@tempdimb\relax
+    \nointerlineskip\box\front@head
+  }]%
+  \@afterindentfalse\@afterheading
+  \let\front@section\section
+  \gdef\section##1{\global\let\section\front@section\ignorespaces}}
+\makeatother
+
+\begin{document}
+\FrontBlock{%
+  \maketitle
+  \vspace{-1.6em}
+  \input{sections/abstract}
+}{%
+  \section{Introduction}
+}
+\GridLinePitch
+
+\input{sections/introduction}
+\BodySpacing
+\input{sections/methods}
+\input{sections/results}
+\input{sections/discussion}
+\input{sections/backmatter}
+
+\clearpage
+\RefPageStart
+\begingroup
+\small
+\setlength{\bibsep}{2.2pt plus 0.5pt}
+\bibliography{refs}
+\endgroup
+\RefPageCheck
+\end{document}

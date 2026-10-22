@@ -1,0 +1,84 @@
+
+\section{Results}
+
+
+We evaluated the mapping accuracy on simulated reads and measured the throughput performance on real data. We tested \flash{} v0.4.0, \mmtwo{} v2.31-r1302 \citep{li2018minimap2}, minibwa v0.7 \citep{li2026minibwa} and Winnowmap2 v2.03 \citep{jain2020winnowmap,jain2022winnowmap2}, with each tool's recommended preset over HiFi and ONT long reads. Minibwa over ONT long reads mapping accuracy evaluation is not shown, since their GitHub suggested it does not work for long noisy reads \citep{minibwa2026github}. All tools were run on a Linux workstation with an AMD Ryzen Threadripper 9970X 64-thread CPU at 5.0\,GHz.
+
+\subsection{Mapping accuracy on simulated long reads}
+\label{sec:res-dna}
+
+
+We used the Badread \citep{wick2019badread} for simulated long reads. For PacBio HiFi reads, we use the \texttt{pacbio2021} models and for ONT used the \texttt{nanopore2023} models. All interior knobs match how minibwa \citep{li2026minibwa} reported recipe for simulation long reads dataset. Evaluation is calculated by mapping errors compared to the simulated position to the mapping position.
+
+Figure~\ref{fig:mapeval} reports mapping accuracy in the style of \citet{li2026minibwa} and \citet{li2018minimap2}. A mapper of higher accuracy yields a curve closer to the upper-left corner. \flash{} is more accurate than all other tools. This is plainly because most tools use the same inherent seed--chain--align recipe while \flash{} added one more stage that can be informative enough for creating an improvement over the existing MAPQ formula.
+
+
+
+We used the LRGASP simulated reads \citep{pardopalacios2024lrgasp} for making the RNA panels (e,f). Because other existing RNA long reads aligners don't have a proper MAPQ emission over the 0--60 range, the only comparison tool over RNA long reads is \mmtwo{}. All four lanes, human and mouse and HiFi and ONT, from LRGASP are being examined. From Figure~\ref{fig:mapeval}e and f, as shown, generally, \flash{} maps more while keeping the same or lower error rate as \mmtwo{}.
+
+
+\subsection{Mapping performance}
+\label{sec:res-perf}
+
+\newcommand{\pend}{\textcolor{orange!80!black}{\textbf{pending}}}
+\begin{table}[b]
+\caption{Long-read structural variant calling on HG002 against the GIAB v5.0q truth. R recall, P precision.}
+\label{tab:sv}
+\footnotesize
+\setlength{\tabcolsep}{2pt}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrrrr@{}}
+\toprule
+ & \multicolumn{3}{c}{HiFi 37$\times$} & \multicolumn{3}{c}{ONT 60$\times$}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+ & R & P & F1 & R & P & F1\\
+\midrule
+\flash{} & \textbf{0.797} & 0.938 & \textbf{0.862} & \textbf{0.756} & 0.931 & \textbf{0.835}\\
+\mmtwo{} & 0.785 & \textbf{0.944} & 0.857 & 0.749 & \textbf{0.941} & 0.834\\
+minibwa & 0.776 & 0.916 & 0.841 & 0.740 & 0.925 & 0.822\\
+Winnowmap2 & 0.745 & 0.924 & 0.825 & 0.730 & 0.933 & 0.819\\
+\bottomrule
+\end{tabular*}
+\end{table}
+
+\begin{table}[t]
+\caption{Evaluation of junction accuracy on simulated ONT direct RNA reads}
+\label{tab:rna}
+\footnotesize
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrr@{}}
+\toprule
+ & \flash{} & \mmtwo{}\\
+\midrule
+\# aligned reads & 19\,969\,270 & 19\,783\,800\\
+\# chimeric alignments & 7\,030 & 6\,635\\
+\# non-spliced alignments & 4\,216\,935 & 4\,242\,046\\
+\# aligned introns & 79\,892\,314 & 79\,290\,562\\
+\# novel introns & 11\,464 & 26\,079\\
+\% exact introns & 96.2 & 96.1\\
+\% approx.\ introns & 99.1 & 99.1\\
+\bottomrule
+\end{tabular*}
+\par\smallskip
+{\scriptsize\noindent Notes: The 20 million LRGASP simulated mouse ONT direct RNA reads \citep{pardopalacios2024lrgasp} were mapped to the mouse genome GRCm39 with SIRV spike-ins with the following tools and command options: \flash{} (`\texttt{-{}-preset splice -u f}', index `\texttt{-k14}') and \mmtwo{} (`\texttt{-x splice -uf -k14}'). No gene annotation was given to either tool. The alignments were compared to the annotation the reads were simulated from: GENCODE M27 basic plus the human GENCODE 38 transcripts that LRGASP placed as novel isoforms. A predicted intron is novel if it has no overlaps with any annotated introns. An intron is exact if it is identical to an annotated intron. An intron is approximate if both its 5$'$- and 3$'$-end are within 10\,bp around the ends of an annotated intron. Chimeric alignments are supplementary alignments as defined in the SAM spec.\par}
+\end{table}
+
+We used several open source real reads dataset to evaluate our throughput performance on long reads compared to other aligners. For long genomic reads, we used the HG002 PacBio HiFi reads (\url{https://bit.ly/hg002-hprc-revio}), the HG002 Nanopore R10 reads (\nolinkurl{s3://ont-open-data/giab_2023}) and the HG002 Nanopore R10.4.1 ultra-long reads (HPRC bucket \nolinkurl{s3://human-pangenomics}, submission \texttt{UCSC\_GIAB\_R1041\_nanopore}, \texttt{HG002\_R1041\_UL}). For spliced long reads, we used the H69 cell line reads of the LongBench dataset \citep{you2025longbench} (\nolinkurl{s3://longbench-data/raw/fastq/}): PacBio Kinnex and ONT PCR-cDNA to GRCh38 with GENCODE~44.
+
+\flash{} is the fastest tool for handling long genomic reads (Figure~\ref{fig:perf}). It is 1.7 to 2.6 times as fast as \mmtwo{} and the fastest tool on all three tested long-read datasets. The voting mechanism allows chaining to become much more versatile. On long spliced RNA reads, \flash{} is equal to or faster than \mmtwo{}. This is because the voting mechanism allows \flash{} to align spliced reads of longer length faster than \mmtwo{}. The longer the reads in the dataset, the faster \flash{} behaves on the spliced RNA dataset.
+
+
+\subsection{Structural variant calling}
+\label{sec:res-sv}
+
+
+We aligned public long reads of HG002 from two platforms, PacBio Revio HiFi at $\sim$37$\times$ and ONT R10.4.1 SUP at 60$\times$, to T2T-CHM13v2.0 \citep{nurk2022chm13} with \flash{}, \mmtwo{} 2.31 \citep{li2018minimap2}, minibwa 0.7 \citep{li2026minibwa} and Winnowmap2 2.03 \citep{jain2022winnowmap2} at each tool's recommended long-read preset. As evaluated, \flash{} reaches the same or more biologically meaningful SV events compared to \mmtwo{} and other aligners at its more versatile throughput. We believe the exact form of chaining helps the performance of chaining become more accurate over long reads.
+
+SVs were then called with Sniffles2 2.8.0 \citep{smolka2024sniffles2} at defaults and cuteSV 2.1.4 \citep{jiang2020cutesv} with \texttt{\mbox{-{}-genotype}}. Then they are compared to the GIAB v5.0q draft benchmark \citep{zook2020giab,giab2025v50q} with Truvari 5.4.0 \citep{english2022truvari} using the benchmark's recommended settings (\texttt{\mbox{-{}-pick}~ac \mbox{-{}-passonly} \mbox{-r~2000} \mbox{-C~5000}}) with refine mode on \citep{english2024tandem}. Table~\ref{tab:sv} gives the Sniffles2 numbers; cuteSV preserves the ordering. \flash{} achieves better recall in finding structural variant events while losing a little precision compared to \mmtwo{}. Overall, \flash{} is not only faster than \mmtwo{} and other tools but ready for downstream analysis such as variant calling.
+
+
+\subsection{Spliced long reads}
+\label{sec:res-rna}
+
+We evaluated our performance on spliced long reads against \mmtwo{} on all four panels of spliced long reads from LRGASP. Overall, \flash{} maps more reads than \mmtwo{} (Table~\ref{tab:rna}), because the vote finds a plausible locus before chaining. Its MAPQ is also better calibrated: at the same threshold it places more reads with a lower error rate. The exception is the human ONT cDNA panel, where \flash{} is more conservative at Q60, keeping fewer reads with fewer errors.
+
+
+

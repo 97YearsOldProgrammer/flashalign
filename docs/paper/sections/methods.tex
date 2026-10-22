@@ -1,0 +1,295 @@
+\section{Methods}
+
+\flash{} adds one stage, the vote, to the seed--chain--align procedure. It uses closed syncmers \citep{edgar2021syncmers} in place of minimizers, for easier access to the reverse strand by arithmetic. Vote means that instead of taking all valid seeds of a query, it samples a subset of the seeds to find an optimal location. Subread applied it to short reads \citep{liao2013subread}. Unlike Subread, which takes overlapping seeds to find the optimal location, \flash{} samples seeds sparsely over the query and applies a colinear chain to check the colinearity of those candidates. \flash{} also applies a query partition to decide which combination of candidate chains explains the query, before the local chaining. The benefit of the vote replacing the placement role of a global colinear chain is that chaining can focus on a localised pool to improve wall time. A localised pool is further optimised by colinear chaining over exact diagonal clusters of anchors, while repetitive regions are optimised by a 2-d tree. For spliced long reads, since each intron makes a reference jump of the diagonal, \flash{} votes to compress exons into bins, then scores a possible placement of where the locus is first, then applies chaining and base-level DP.
+
+\subsection{Definitions}
+\label{sec:defs}
+
+An anchor is one of the hits that belong to a seed of a query and reference as an exact $k$-mer match. It contains query position $q$ and reference position $r$. The \emph{diagonal} of that hit is $d=r-q$. Let a read of length $L$ originate from the reference, starting at $r_0$. Assume the query is affected by substitutions and by insertions and deletions of total net length $\delta$. Every anchor of the true alignment satisfies
+\begin{equation}
+\lvert d - r_0 \rvert \;\le\; \delta,
+\label{eq:band}
+\end{equation}
+
+The anchors of a read map towards one diagonal unless the query drifts off the reference. A rival homology of the true placement would have anchors that spread over as many diagonals. Instead of sampling seeds in an overlapping manner, \flash{} takes seeds from \emph{tiles}, the segments of equal length that a query is cut into. We found that for ordinary long reads one seed per tile, 128 per read, is sufficient to express the diagonal structure of a read.
+
+\subsection{Whole-read voting}
+\label{sec:vote}
+
+In the vote, each sampled seed votes for the diagonal bins of its reference hits, and the bins with the most votes are the likely placements. Inside each tile, an occurrence gate is applied. The first seed that satisfies the gate becomes admitted, and each tile has only one valid seed admitted into the vote.
+
+\begin{algorithm}[b]
+\addtocounter{algocf}{1}%
+\caption{Candidate admission}
+\label{alg:admit}
+\SetKwProg{Fn}{function}{}{}
+\newcommand{\FAdmit}[1]{\AlgFn{Admit}{#1}}
+\AlgIn{\AlgRow{$\mathcal{P}$}{the ranked vote peaks}\\
+       \AlgRow{$v(p)$}{the support of a peak, eq.~\eqref{eq:support}}\\
+       \AlgRow{$M(p)$}{the tiles whose admitted seed voted for $p$}}
+\AlgNote{\AlgRow{$p \sim p'$}{when $M(p)$ and $M(p')$ overlap by at least half of the smaller}}
+\AlgConst{\AlgWide{$\rho=\tfrac14$,\ \ $K=16$}}
+\AlgBody
+\Fn{\FAdmit{$\mathcal{P}$, $\rho$, $K$}}{
+  $v_{\max} \leftarrow \max_{p\in\mathcal{P}} v(p)$ \tcp*{support of the best peak}
+  \ForEach(\tcp*[f]{strongest first}){$p \in \mathcal{P}$, by descending $v(p)$}{
+    $\text{keep}(p) \leftarrow \textbf{true}$ \tcp*{admitted by default}
+    \lIf(\tcp*[f]{near the best}){$v(p) \ge \lceil \rho\,v_{\max}\rceil$}{\textbf{continue}}
+    \ForEach{$p' \in \mathcal{P}\setminus\{p\}$, by descending $v(p')$}{
+      \lIf(\tcp*[f]{ratio test}){$v(p) \ge \lceil \rho\,v(p')\rceil$}{\textbf{break}}
+      \lIf(\tcp*[f]{rival test}){$p \sim p'$}{$\text{keep}(p) \leftarrow \textbf{false}$;\ \textbf{break}}
+    }
+  }
+  $\mathcal{C} \leftarrow$ kept peaks in rank order, one per $(\text{contig},\text{strand},\text{bin})$\;
+  \Return the first $K$ of $\mathcal{C}$ on each strand \tcp*{candidates}
+}
+\end{algorithm}
+
+
+Each indel drifts the diagonal, by up to the $\delta$ of eq.~\eqref{eq:band}, which makes it hard to count the sampled seeds into exact diagonal values. Instead of correcting the diagonal for the drift, \flash{} introduces a diagonal width $W$. The width is similar to the diagonal band of colinear chaining: a range of diagonals falls into the same bin. In practice $W$ grows with the query length, $W = \lfloor L/s \rfloor$ clamped to $[W_{\min}, W_{\max}]$, with $(W_{\min}, s) = (64, 128)$ for ONT and $(48, 64)$ for HiFi, and $W_{\max} = 2048$, which we found optimal even for ultra-long reads. A bin is a compressed result of multiple anchors' diagonals: every posting $r$ of an admitted seed at query position $q$ goes into the bin $\lfloor (r-q)/W \rfloor$ of its contig (Algorithm~\ref{alg:vote}, lines~6--7).
+
+To further distinguish compressed diagonals from each other, the number of distinct seeds belonging to the compressed diagonal bin is counted as the number of supporters (lines~8--9). A histogram stores the one-dimensional diagonal space. In it, each bin is further summed with its nearby neighbours' support counts, as in lines~10--11. We found in practice that the fold helps the true placement weigh more compared to the noise. After the fold, bins with fewer than $m$ supporters ($3$ for DNA, $2$ for RNA) are dropped. In spirit, this is similar to \mmtwo{} dropping a chain with fewer than $n$ anchors as a valid chain candidate. The bins with the highest number of supporters are the most likely primary placements.
+
+The survivors become peaks. A peak is the median diagonal of its bin and is discarded when it lies within one bin of a stronger peak. For spliced reads each peak is further compressed to show a possible placement locus (Section~\ref{sec:rna}).
+
+\addtocounter{algocf}{-2}%
+\begin{algorithm}[t]
+\caption{Whole-read diagonal vote for one strand}
+\label{alg:vote}
+\SetKwProg{Fn}{function}{}{}
+\newcommand{\FVote}[1]{\AlgFn{DiagonalVote}{#1}}
+\AlgIn{\AlgRow{$\mathcal{S}$}{the admitted seeds}\\
+       \AlgRow{$W$}{bin width}\\
+       \AlgRow{$m$}{the minimum support of a bin}}
+\AlgOut{\AlgRow{$P$}{the ranked peaks}}
+\AlgBody
+\Fn{\FVote{$\mathcal{S}$, $W$, $m$}}{
+  $B \leftarrow \varnothing$;\ \ $e \leftarrow 0$ \tcp*{bin map (support, epoch); epoch counter}
+  \ForEach{seed $(q,\,\text{postings}) \in \mathcal{S}$}{
+    $e \leftarrow e+1$ \tcp*{one epoch per distinct query seed}
+    \ForEach(\tcp*[f]{ascending}){$r \in \text{postings}$}{
+      $d \leftarrow (r - \text{start}) - q$ \tcp*{diagonal of the hit}
+      $\kappa \leftarrow \text{pack}(\text{contig}(r),\ \lfloor d/W \rfloor)$ \tcp*{bin key}
+      \If(\tcp*[f]{new for this seed}){$B[\kappa].\text{epoch} \neq e$}{
+        $B[\kappa].\text{support} \mathrel{+}= 1$;\ \ $B[\kappa].\text{epoch} \leftarrow e$\;
+      }
+    }
+  }
+  \ForEach(\tcp*[f]{second compression}){bin $(c,b) \in B$}{
+    fold support of $(c,\,b\pm1)$ into it \tcp*{neighbour fold}
+  }
+  drop bins with folded support $< m$ \tcp*{support floor}
+  $P \leftarrow$ empty list \tcp*{emitted peaks}
+  \ForEach{bin $(c,b) \in B$, by descending folded support}{
+    \lIf{$P$ has a peak $(c,b')$ with $|b - b'| \le 1$}{\textbf{continue}}
+    append peak$(c,\ \text{median diagonal of bin } b)$ to $P$\;
+  }
+  \Return $P$ \tcp*{ranked peaks}
+}
+\end{algorithm}
+\addtocounter{algocf}{1}%
+
+\subsection{Candidate admission}
+\label{sec:admit}
+
+After the voting there is a pool of peaks in the one-dimensional histogram. Let $v(p)$ be the number of seeds supporting a peak $p$ in contig $c$ and bin $b$,
+\begin{equation}
+v(p) \;=\; \bigl|\{\,q \;:\; \exists\, r,\ \ \text{contig}(r)=c,\ \ \lfloor (r-q)/W\rfloor = b\,\}\bigr|,
+\label{eq:support}
+\end{equation}
+The best peak is the one with the most seeds supporting it. Function \textsc{Admit}() in Algorithm~\ref{alg:admit} shows which peaks become candidates, from which the primary chain and its secondary chains (Section~\ref{sec:mapq}) can come. A peak with at least a quarter of the best peak's support is admitted outright (line~5). A weaker peak is dropped only when a peak more than four times stronger has its seeds in the same part of the read, overlapping by at least half of the shorter, as in \mmtwo{}'s test for a secondary chain (lines~6--8); otherwise it is kept. The peak set after the admission filter is therefore returned to rank order (lines~9--10).
+
+
+\subsection{Local chaining}
+\label{sec:chain}
+
+A chaining is global if the anchors it acquires require expansion of the seeds' postings. Its DP looks back over $h$ predecessors for each of $N$ anchors. Once a read's true placement is given by voting, \flash{} chains inside the window of a selected candidate instead. Equation~\eqref{eq:window} shows how the diagonal of a candidate turns into where the read is:
+\begin{equation}
+\bigl[\,d^\ast,\ \ d^\ast + L\,\bigr).
+\label{eq:window}
+\end{equation}
+
+Equation~\eqref{eq:window} assumes that the read lies on one diagonal. An indel shifts the diagonal. To model the diagonal drift, we fit a line to the winner's seeds, $d(q) = d_0 + \lambda q$, where $d_0$ is the diagonal at the start of the read and $\lambda$ the drift; the read then covers $(1+\lambda)L$ bases of the reference. The line is fitted after the vote and before the chaining, and it is used when enough of the winner's seeds agree on it and its slope lies inside $[-6\%,\,+10\%]$. A fit pinned at either end of that range is refused, since a line fitted across the copies of a repetitive element has a slope of its own that says nothing about drift. When the line is used, the winner's window is widened to hold both eq.~\eqref{eq:window} and the reference span of the line:
+\begin{equation}
+\bigl[\,\min(d^\ast, d_0) - p,\ \ \max\bigl(d^\ast + L,\ d_0 + (1+\lambda)L\bigr) + p\,\bigr).
+\label{eq:windowdrift}
+\end{equation}
+Both windows are padded by $p = 512$\,bp on each side so that the terminal anchors are covered.
+
+The closed syncmers of the read are fetched there by a binary search over the sorted posting array. To further reduce chaining complexity, the anchors are grouped into runs, maximal sets of anchors on one diagonal ($\Delta d = 0$) whose $k$-mers overlap or touch, and only runs are chained. The chain uses \mmtwo{}'s chaining recurrence and backtrace without its heuristic look-back limits \citep[Section~2.1]{li2018minimap2}, applied to runs instead of single anchors (Section~\ref{sec:runs}).
+
+\begin{algorithm}[t]
+\caption{Gathering a candidate's runs}
+\label{alg:runs}
+\SetKwProg{Fn}{function}{}{}
+\newcommand{\FRuns}[1]{\AlgFn{GatherRuns}{#1}}
+\AlgIn{\AlgRow{$\mathcal{F}$}{the read's closed syncmers $(q, z, P)$: orientation bit $z$, postings $P$ sorted by $r$}\\
+       \AlgRow{$s$}{the candidate's strand}\\
+       \AlgRow{$[\ell, u)$}{the window, eq.~\eqref{eq:window} or \eqref{eq:windowdrift}}}
+\AlgOut{\AlgRow{$R$}{the runs in reference order, with extents, diagonal $d$ and weight $w$}}
+\AlgConst{\AlgWide{$N=200$ (human)}}
+\AlgNote{\AlgWide{$\mathrm{LB}(P, v)$ is the first posting of $P$ at or after $v$; a seed is rescued when the vote admitted it past $N$}}
+\AlgBody
+\Fn{\FRuns{$\mathcal{F}$, $s$, $\ell$, $u$, $N$}}{
+  $\mathcal{A} \leftarrow \varnothing$ \tcp*{anchor pool}
+  \ForEach{seed $(q, z, P) \in \mathcal{F}$}{
+    \lIf{$|P| > N$ and not rescued}{skip the seed \tcp*[f]{occurrence gate}}
+    $i \leftarrow \mathrm{LB}(P, \ell)$,\ \ $j \leftarrow \mathrm{LB}(P, u)$ \tcp*{two binary searches}
+    \ForEach(\tcp*[f]{$\ell \le r < u$}){posting $(r, z_r) \in P[i, j)$}{
+      \lIf{$z \oplus z_r \neq s$}{skip it \tcp*[f]{other strand}}
+      append anchor $(q, r)$ to $\mathcal{A}$ \tcp*{exact $k$-mer match}
+    }
+  }
+  sort $\mathcal{A}$ by $(r, q)$ and drop repeated anchors \tcp*{radix sort}
+  $R \leftarrow$ empty list,\ \ $O \leftarrow$ empty map \tcp*{open run of each diagonal}
+  \ForEach(\tcp*[f]{by $r$, then $q$}){anchor $(q, r) \in \mathcal{A}$}{
+    $d \leftarrow r - q$,\ \ $\rho \leftarrow O[d]$ \tcp*{diagonal and its open run}
+    \uIf(\tcp*[f]{$k$-mers overlap or touch}){$\rho$ exists and $r \le r_e(\rho)$}{
+      $w_\rho \leftarrow w_\rho + r + k - r_e(\rho)$ \tcp*{newly matched bases}
+      $q_e(\rho) \leftarrow q + k$,\ \ $r_e(\rho) \leftarrow r + k$ \tcp*{extend}
+    }
+    \lElse{append $(q, q{+}k, r, r{+}k, d, k)$ to $R$ as $O[d]$ \tcp*[f]{new run}}
+  }
+  sort $R$ by $(r_b, q_b, q_e)$ \tcp*{reference order}
+  \Return $R$ \tcp*{$w = r_e - r_b$ for every run}
+}
+\end{algorithm}
+
+\subsubsection{Chaining over runs}
+\label{sec:runs}
+
+Function \textsc{GatherRuns}() in Algorithm~\ref{alg:runs} shows how the anchor set of a candidate is collected before the colinear chain. The base element \flash{} chains is a run, not a single anchor. A run is a maximal exact match on one diagonal, taken as the anchors give it, without greedy extension. We found that collapsing overlapping anchors of the same diagonal into runs before chaining does not hurt the accuracy of local chaining and increases the throughput.
+
+\flash{} chains over runs instead of anchors, applying \mmtwo{}'s chaining recurrence \citep[Section~2.1]{li2018minimap2}. The same award of chain score whenever more base pairs are explained, and the same penalty for each change in diagonal as drift, are applied. Because each run is one diagonal value that a certain number of anchors belong to, a simple sorting algorithm can handle the relationship of the anchors within the run (lines~11--16).
+
+Chaining over runs makes the complexity of chaining depend on how many interruptions there are in the read's exact-match structure. This helps \flash{} to handle chaining in an exact manner instead of a heuristic approximation of the search depth. In practice, whenever a set of runs is below 2,048, we chain the pool by a linear scan back over it, because chaining over that is already cheap enough. Inside repetitive regions, where the run set blows up, we use an optimised 2-d tree search to keep exactness while reducing the searching complexity (Section~\ref{sec:laddersearch}). Neither keeps \mmtwo{}'s heuristic limits on the iterations of the scan.
+
+\subsubsection{Exact predecessor 2-d search}
+\label{sec:laddersearch}
+
+Whenever the size of the run set blows up, instead of using a heuristic limit on the look-back to bound its cost, \flash{} splits the whole set into a 2-d tree, alternately split by the query end and by diagonal at the median, until each leaf holds at most sixteen runs (Algorithm~\ref{alg:exact}, line~2). Inside the tree, each node is called a box, it's a union of the set of nodes below it and its own set of runs. A box also keeps the best score among its runs scored so far and the range of their query ends and diagonals (line~10). When we want to score a run $B$, before opening the tree, we score the last scored run on $B$'s own diagonal, where the drift is zero. So the score of that is the best score we have so far (lines~4--5).
+
+Because each box can compute its ceiling score for $B$ from the information it holds, the stored best score plus the most a run in it could gain minus the least drift it could pay, it does not require opening the box to tell whether it is worth exploring. From the root, we can know if opening the whole pool could give us a better predecessor by direct comparison of the root's ceiling with the best score so far. If that test passes, we open the box and test its children the same way, the better child comes first (line~9). A box whose ceiling cannot beat the best so far is skipped with everything inside it (line~7).
+
+When the walk reaches a leaf, its runs are scored against $B$, and the best of them replaces the best so far if it is better (line~8). When no box is left, the best so far is the best chain score that ends at $B$, and the run that gave it is $B$'s predecessor (line~10). A box is skipped only when its ceiling cannot beat the best. So the result of the tree always equals a scan over the whole pool. In practice the SIMD form of the tree allows the search to return the same chain scores and predecessors as the sequential scan at about 1/30 of its cost.
+
+\begin{algorithm}[t]
+\caption{Chaining a ladder: exact predecessor search over a tree of runs}
+\label{alg:exact}
+\SetKwProg{Fn}{function}{}{}
+\newcommand{\FChain}[1]{\AlgFn{ChainRuns}{#1}}
+\newcommand{\FCeil}[1]{\AlgFn{Ceiling}{#1}}
+\newcommand{\FTry}[1]{\AlgFn{Try}{#1}}
+\AlgIn{\AlgRow{$R$}{the pool sorted in reference order, with query end $q_e$, diagonal $d$ and weight $w$}}
+\AlgOut{\AlgWide{the chain score $F$ and the predecessor of every run}}
+\AlgNote{\AlgWide{$\text{score}(A,B) = F(A) + \text{gain} - \text{drift}$}\\
+         \AlgWide{\FCeil{$n$,$B$} is the best score stored in box $n$ plus the most gain and minus the least drift any run in it could have with $B$}}
+\AlgBody
+\Fn{\FChain{$R$}}{
+  build the tree: split $R$ at the median, alternately by $q_e$ and by $d$, a block of runs per leaf \tcp*{once per pool}
+  \ForEach{$B \in R$}{
+    best $\leftarrow w_B$;\ \ pred $\leftarrow \varnothing$ \tcp*{fresh start}
+    \FTry{the last scored run on diagonal $d_B$} \tcp*{incumbent, drift 0}
+    \ForEach{box $n$ popped from a stack seeded with the root}{
+      \lIf{\FCeil{$n$,$B$} $<$ best, or $=$ best and no run in $n$ is after pred}{skip $n$}
+      \lIf{$n$ is a leaf}{\FTry{each run $A$ in it}}
+      \lElse{push the worse child, then the better}
+    }
+    $F(B) \leftarrow$ best;\ \ write $F(B)$ and $B$'s extents into every box on its path to the root \tcp*{activate}
+  }
+}
+\Fn{\FTry{$A$}}{
+  \lIf{$\text{score}(A,B) >$ best, or equal, pred $\neq \varnothing$ and $A$ after pred}{best $\leftarrow \text{score}(A,B)$;\ \ pred $\leftarrow A$}
+}
+\end{algorithm}
+
+\subsubsection{MAPQ ratio of voting}
+\label{sec:mapq}
+
+For each primary chain, \mmtwo{} estimates its mapping quality with an empirical formula,
+\begin{equation}
+\text{mapQ} \;=\; 40\cdot\Bigl(1-\frac{f_2}{f_1}\Bigr)\cdot\min\Bigl\{1,\ \frac{m}{10}\Bigr\}\cdot\log f_1,
+\label{eq:mapq}
+\end{equation}
+where $m$ is the number of anchors on the primary chain, $f_1$ its chaining score and $f_2 \le f_1$ the score of the best chain secondary to it \citep[Section~2.1.3]{li2018minimap2}. \flash{} keeps eq.~\eqref{eq:mapq} and lets the vote weigh the rivals: $f_2/f_1$ becomes
+\begin{equation}
+x \;=\; \max\Bigl\{\frac{f_2}{f_1},\ \max_i\ \frac{v_i}{v_1}\cdot\frac{f_i}{f_1}\Bigr\}.
+\label{eq:mapqvote}
+\end{equation}
+$f_2$ is the score of the best secondary chain. $v_1$ and $v_i$ are the numbers of seeds that voted for $f_1$ and $f_i$, with $f_i$ the score of the $i$-th secondary chain. The revised formula shows we just added in the number of seeds that vote for a chain instead of just using the chain score ratio. The vote ratio helps \flash{} become more informative on MAPQ than \mmtwo{} while mapping to an assembly genome such as HG002, where the ratios $f_i/f_1$ are near 0.97 to 0.99 (Figure~\ref{fig:mapeval}).
+
+\subsection{Base-level alignment}
+\label{sec:kernel}
+
+\flash{} vendored \mmtwo{}'s ksw2 kernel \texttt{ksw\_\allowbreak extd2\_\allowbreak sse} (v2.31) together with the \mmtwo{} scoring rows for HiFi and ONT. The rescoring of rivals over HiFi is the same as in minibwa \citep{li2026minibwa}. The specific Z-drop rule, its end extension, and the two-piece affine gap cost and the Suzuki--Kasahara formulation are described in \citet[Section~2.2]{li2018minimap2} and \citet{suzuki2018difference} and are not re-derived here.
+
+\flash{} optimised the base level alignment by applying ungapped scoring path whenever its score is more optimal locally than gapped path. The ungapped alignment path has been applied in \mmtwo{}'s short reads mode and minibwa. \flash{} continues to apply that idea to long reads with an equality check on base level before materialising the Smith--Waterman DP.
+
+Let $a_i = (q_i, r_i)$ be an anchor, an exact $k$-mer match, and $d_i = r_i - q_i$ its diagonal. For two consecutive anchors define
+\begin{equation}
+\left\{
+\begin{aligned}
+\Delta d_i &= d_{i+1} - d_i\\
+L_i &= q_{i+1} - q_i - k\\
+g(l) &= \min\{O + lE,\ O_2 + lE_2\}
+\end{aligned}
+\right.
+\label{eq:gapdefs}
+\end{equation}
+where $\Delta d_i$ is the change of diagonal between the two anchors, $L_i$ the gap between their $k$-mers, of equal length on both sequences when $\Delta d_i = 0$, and $g(l)$ \mmtwo{}'s two-piece cost of an $l$-base gap \citep[eq.~3]{li2018minimap2}, with match score $A$, mismatch penalty $B$ and a penalty $\nu$ for a pairing with an N.
+
+\flash{} first compares the $L_i$ bases of the gap without gaps when $\Delta d_i = 0$. Let the ungapped score for $\Delta d_i = 0$ as $S_0$.
+\begin{equation}
+S_0 \;=\; A L_i - (A + B)\,X - (A + \nu)\,z
+\label{eq:s0}
+\end{equation}
+Given $X$ mismatches and $z$ pairings with N, $S_0$ is better than gapped path if and only if
+\begin{equation}
+S_0 \;\ge\; A(L_i - 1) - 2g(1).
+\label{eq:cert}
+\end{equation}
+To make equation~\eqref{eq:cert} true, this has to be satisfied:
+\begin{equation}
+(A + B)\,X + (A + \nu)\,z \;\le\; A + 2g(1).
+\label{eq:certmm}
+\end{equation}
+Let $P$ be any other alignment of the gap pinned at the two anchors. Assume $I(P)$ as amount of base pair that is inserted, $D(P)$ as deleted bases and gap cost $G(P)$ for path $P$. $\Delta d_i = 0$ and $g$ is subadditive, so
+\begin{equation}
+\left\{
+\begin{aligned}
+&I(P) = D(P) \ge 1\\
+&G(P) \ge 2g\bigl(I(P)\bigr)
+\end{aligned}
+\right.
+\label{eq:certproof}
+\end{equation}
+because once entering an anchor of diagonal the path has to go back to the same diagonal. Therefore
+\begin{equation}
+\operatorname{score}(P) \le A\bigl(L_i - I(P)\bigr) - G(P) \le A(L_i - 1) - 2g(1)
+\label{eq:scorebound}
+\end{equation}
+and no gapped alignment of the gap scores above $S_0$. To compute the condition of equation~\eqref{eq:cert}, a linear scan between base pairs of two anchors that live in the same diagonal is therefore sufficient. If that inequality does not pass, for example $\Delta d_i \ne 0$ or one that fails eq.~\eqref{eq:cert}, then it is filled as in \mmtwo{} \citep[Section~2.2]{li2018minimap2} the SIMD dynamic programming of \citet{suzuki2018difference} under the two-piece gap cost and over \mmtwo{}'s band. In practice, this helps \flash{} reach a nicer throughput without hurting the downstream biological meaning.
+
+\subsection{Spliced alignment}
+\label{sec:rna}
+
+Unlike the genomic read problem, an intron is a reference jump that makes the diagonal of eq.~\eqref{eq:band} harder to compress, because each exon is a diagonal and the following intron shifts the diagonal by the length of the intron:
+\begin{equation}
+d_j \;=\; d_1 + \sum_{i=2}^{j} I_i ,
+\label{eq:exondiag}
+\end{equation}
+\flash{} adopts voting for RNA reads before the chaining stage. It still treats each exon as a unique peak, while each peak is no longer a placement but an exon hypothesis. The same splice gap model from \mmtwo{} \citep{li2018minimap2} is applied for scoring to find the best coarse placement of the locus. Within each coarse placement, the exact anchors are recovered by interval search and chained with \mmtwo{}'s intron-aware recurrence with an occurrence cap. Finally, the alignment uses the same splice-aware ksw2 kernel \citep{li2018minimap2} at \mmtwo{}'s splice scoring. We found that applying the diagonal vote before \mmtwo{}'s splice chaining and its splice DP helps the mapping performance of spliced long reads, as shown in Section~\ref{sec:res-rna}.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/fig2_mapq.pdf}
+\caption{Mapping accuracy on simulated long reads. Reads are simulated from T2T-CHM13, the diploid HG002 genome or LRGASP transcript models and mapped back to the source reference. Suppose a read originates from interval $G_s$ and is mapped to $G_a$. A read is considered as mapped correctly if $|G_s\cap G_a|/|G_s\cup G_a| \ge 10\%$. \textbf{(a,b)} HiFi and ONT reads simulated from T2T-CHM13. \textbf{(c,d)} HiFi and ONT reads simulated from the diploid HG002 genome. \textbf{(e,f)} LRGASP long RNA reads, human and mouse. Each ONT panel also carries that genome's ONT ultra-long cohort, as a second dashed arm of the same colour, labelled (UL).}
+\label{fig:mapeval}
+\end{figure*}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/fig3_perf.pdf}
+\caption{Speed and peak memory on real data. All tools in the panel are pinned to 32 threads, although Winnowmap2 consumed all 64 threads. PacBio HiFi and ONT are mapped to GRCh38 and ultra-long is mapped to T2T-CHM13v2.0. The RNA lanes are mapped to GRCh38 with GENCODE~44. All outputs of the aligners are sent to /dev/null.}
+\label{fig:perf}
+\end{figure*}

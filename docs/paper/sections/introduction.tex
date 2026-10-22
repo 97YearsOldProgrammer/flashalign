@@ -1,0 +1,28 @@
+\section{Introduction}
+
+With innovation of long-read sequencing technology developed from Pacific Biosciences (PacBio) or Oxford Nanopore Technologies (ONT), sequencing reads are becoming more dominant for sequence analysis. Long reads genomic sequence is useful for structural variant finding whereas long spliced RNA reads contributes to more novel exon and junction finding. The dominant aligner for these data is \mmtwo{} \citep{li2018minimap2}, which like most full-genome aligners before and after it \citep{chaisson2012blasr,sedlazeck2018ngmlr,jain2020winnowmap,jain2022winnowmap2,ren2021lra,li2026minibwa,wang2026rammap} follows the seed--chain--align recipe. Minimizers \citep{roberts2004minimizers} are indexed in a hash table. The colinear chaining algorithm leap over the sorted anchor pool to align the read coarsely \citep{li2018minimap2}. Then, the base-level alignment \citep{suzuki2018difference} not just take the role of filling the gap between anchors while also extending towards left and right of the anchor chain. Lots optimisation been applied to \mmtwo{}, for example weighted seeds in repeats \citep{jain2020winnowmap,jain2022winnowmap2}, faster chaining \citep{li2021accuracy,kalikar2022mm2fast,chandra2024accelerating}, acceleration of the dynamic programming (DP) stage \citep{suzuki2018difference,kalikar2022mm2fast}, or replacing C by Rust \citep{wang2026rammap}. Most recently minibwa \citep{li2026minibwa}, successor of BWA-MEM from the author of \mmtwo{}, replaces \mmtwo{} seeding and reaches a higher throughput over long accurate genomic reads. We will explain how that new tool also related to our work next.
+
+The existing chaining has a structural cost. It is hidden for short reads but grows with read length. The chaining complexity is $O(hN)$ for $N$ anchors with a look-back of $h$ predecessors. Number of anchor is related to the query length because anchor is each individual index hit that belongs to the whole posting of a seed. In long reads, the amount of seed that a query retains is much more than short reads therefore it is a much larger anchor set. The chaining stage carries two things: finding where the read maps, and returning its optimal scored structure. This means, if we can ablated the role of where the long query is before chaining when mapping long reads, then chaining complexity would scaled to only to the query length despite the reference size. \flash{} resolved that by compression diagonal from raw anchor before chaining to find where the read is before chaining.
+
+It is not novel that computing diagonal from raw anchors as a plain idea. Wilbur and Lipman's $k$-tuple diagonals \citeyearpar{wilbur1983diagonal} and FASTA's \citeyearpar{pearson1988fasta}, Ning et al.'s shift-sorted hits \citeyearpar{ning2001ssaha}, Kent's diagonal clumps \citeyearpar{kent2002blat}, Rasmussen et al.'s $q$-gram filter \citeyearpar{rasmussen2006swift}, and Liao et al.'s seed-and-vote \citeyearpar{liao2013subread} all assign a query to the diagonal collecting the most seed hits before computing any alignment. The idea reached long reads twice. GraphMap \citep{sovic2016graphmap} applied it as a Hough transform from image analysis. Every hit votes for its diagonal. A graph-based anchor search is run over the three distinct partitions of the read. The original minimap \citep{li2016minimap}, \mmtwo{} predecessor, used a colinear clustered minimizer hit along the diagonal for clustering with a 500\,bp band. Its successor replaced the clustering with the global colinear chaining DP described above \citep{li2018minimap2}, the original diagonal voting cannot tolerate even short indel drift. The idea is abandoned before because to our knowledge to make it work: a complete aligner need keep diagonal survive the indel drift, sequencing errors, and structural variants in long reads.
+
+Here we present \flash{}: an aligner for PacBio HiFi and ONT genomic long reads, and for spliced long RNA reads from both platforms. \flash{} does not map short reads, because query need to be long enough to have enough anchor to be compressed into a plausible placement before chaining. Table~\ref{tab:lineage} shows our relationship to other versatile long reads aligners.
+
+\begin{table}[b]
+\caption{Comparison of long-read aligners.}
+\label{tab:lineage}
+\centering
+\renewcommand{\arraystretch}{1.1}%
+\setlength{\tabcolsep}{3pt}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lllll@{}}
+\toprule
+Stage & \flash{} & \mmtwo{} & minibwa & Winnowmap2 \\
+\midrule
+Indexing & hash table & hash table & FM-index & hash table \\
+Seeding & \begin{tabular}[t]{@{}l@{}}closed\\syncmers\end{tabular} & minimizers & SMEMs & \begin{tabular}[t]{@{}l@{}}weighted\\minimizers\end{tabular} \\
+Placement & diagonal vote & -- & -- & -- \\
+Chaining & local & global & global & global \\
+Alignment & ksw2 & ksw2 & ksw2 & ksw2 + MCAS \\
+\bottomrule
+\end{tabular*}
+\end{table}

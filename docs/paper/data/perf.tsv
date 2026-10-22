@@ -1,0 +1,20 @@
+panel	readset	tool	preset	mode	threads	reference	gbp	gbp_per_hr	peak_gb	tool_version	source
+dna_long	hifi	minibwa	lr	sam	32	grch38_no_alt	117.97	267.56	17.31	0.7-r421	peers-timing-20260910/hifi-minibwa
+dna_long	hifi	minimap2	map-hifi	sam	32	grch38_no_alt	117.97	229.82	25.04	2.31-r1302	peers-timing-20260910/hifi-mm2
+dna_long	hifi	rammap	map-hifi	sam	32	grch38_no_alt	117.97	217.66	16.47	1.1.2	peers-timing-20260910/hifi-rammap
+dna_long	hifi	winnowmap2	map-pb	sam	64	grch38_no_alt	117.97	43.57	34.08	2.03	peers-timing-20260910/hifi-winnowmap
+dna_long	ont	minibwa	lr	sam	32	grch38_no_alt	185.15	254.80	28.96	0.7-r421	peers-timing-20260910/ont-minibwa
+dna_long	ont	minimap2	lr:hq	sam	32	grch38_no_alt	185.15	235.43	26.67	2.31-r1302	peers-timing-20260910/ont-mm2
+dna_long	ont	rammap	lr:hq	sam	32	grch38_no_alt	185.15	204.01	19.25	1.1.2	peers-timing-20260910/ont-rammap
+dna_long	ont	winnowmap2	map-ont	sam	64	grch38_no_alt	185.15	39.39	64.36	2.03	peers-timing-20260910/ont-winnowmap
+dna_long	ul	minibwa	lr	sam	32	chm13v2	116.27	169.10	21.64	0.7-r421	peers-timing-20260910/ul-minibwa
+dna_long	ul	minimap2	lr:hq	sam	32	chm13v2	116.27	139.39	25.63	2.31-r1302	peers-timing-20260910/ul-mm2
+dna_long	ul	rammap	lr:hq	sam	32	chm13v2	116.27	171.46	18.25	1.1.2	peers-timing-20260910/ul-rammap
+dna_long	ul	winnowmap2	map-ont	sam	64	chm13v2	116.27	17.56	49.34	2.03	peers-timing-20260910/ul-winnowmap
+rna	pb_kinnex	minimap2	splice:hq -uf	cigar	32	grch38_gencode44	75.62	71.83	26.72	2.31-r1302	rna-timing-20260912/kinnex-mm2
+rna	ont_cdna	minimap2	splice -ub	cigar	32	grch38_gencode44	27.34	39.25	28.23	2.31-r1302	rna-timing-20260912/ontcdna-mm2
+rna	pb_kinnex	flash	splice:hq -u f	cigar	32	grch38_gencode44	75.62	72.70	30.80	0.1.0+ga59d54d	rna-timing-20261011/kinnex-flash
+rna	ont_cdna	flash	splice	cigar	32	grch38_gencode44	27.34	41.93	31.53	0.1.0+ga59d54d	rna-timing-20261011/ontcdna-flash
+dna_long	hifi	flash	lr:hq	sam	32	grch38_no_alt	117.97	422.09	23.13	0.4.0	peers-timing-20261021/hifi-flash
+dna_long	ont	flash	lr	sam	32	grch38_no_alt	185.15	411.07	26.74	0.4.0	peers-timing-20261021/ont-flash
+dna_long	ul	flash	lr	sam	32	chm13v2	116.27	368.42	34.88	0.4.0	peers-timing-20261021/ul-flash

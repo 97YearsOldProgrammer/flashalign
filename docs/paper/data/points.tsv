@@ -1,0 +1,633 @@
+panel	run	criterion	mapq	cum_aligned	cum_wrong	err_rate	pct_aligned	denominator
+Simulated long reads to CHM13	flash (HiFi)	paftools	60	384360	2	6.504310407e-06	97.047499	396054
+Simulated long reads to CHM13	flash (HiFi)	paftools	0	388101	1509	0.003889446446	97.992067	396054
+Simulated long reads to CHM13	flash (ONT)	paftools	60	371706	1	4.035441941e-06	93.026861	399569
+Simulated long reads to CHM13	flash (ONT)	paftools	48	373823	1	4.012588829e-06	93.556682	399569
+Simulated long reads to CHM13	flash (ONT)	paftools	36	375844	2	6.651687067e-06	94.062477	399569
+Simulated long reads to CHM13	flash (ONT)	paftools	24	377918	4	1.190732923e-05	94.581537	399569
+Simulated long reads to CHM13	flash (ONT)	paftools	13	379919	17	4.606238953e-05	95.082326	399569
+Simulated long reads to CHM13	flash (ONT)	paftools	6	382007	40	0.0001060188609	95.604889	399569
+Simulated long reads to CHM13	flash (ONT)	paftools	1	386427	572	0.001481519819	96.711081	399569
+Simulated long reads to CHM13	flash (ONT)	paftools	0	390212	3125	0.008009738284	97.658352	399569
+Simulated long reads to CHM13	flash (UL)	paftools	60	177656	1	8.443259886e-06	92.697441	191652
+Simulated long reads to CHM13	flash (UL)	paftools	32	179672	2	1.391420501e-05	93.749348	191652
+Simulated long reads to CHM13	flash (UL)	paftools	9	181683	7	4.128057859e-05	94.798645	191652
+Simulated long reads to CHM13	flash (UL)	paftools	0	185108	1195	0.006458374413	96.585739	191652
+Simulated long reads to CHM13	minibwa (HiFi)	paftools	60	374074	0	1.336632141e-06	94.450378	396054
+Simulated long reads to CHM13	minibwa (HiFi)	paftools	39	376208	0	1.329050247e-06	94.989193	396054
+Simulated long reads to CHM13	minibwa (HiFi)	paftools	24	378214	0	1.32200114e-06	95.49569	396054
+Simulated long reads to CHM13	minibwa (HiFi)	paftools	14	380353	1	3.943699742e-06	96.035768	396054
+Simulated long reads to CHM13	minibwa (HiFi)	paftools	8	382622	1	3.920313102e-06	96.60867	396054
+Simulated long reads to CHM13	minibwa (HiFi)	paftools	3	385103	4	1.168517035e-05	97.235099	396054
+Simulated long reads to CHM13	minibwa (HiFi)	paftools	0	388101	1484	0.003825030308	97.992067	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	60	360846	0	1.385630732e-06	91.110429	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	48	362989	0	1.377450312e-06	91.651517	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	38	365170	0	1.369223418e-06	92.2022	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	31	367214	0	1.361602006e-06	92.718291	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	25	369334	0	1.353786337e-06	93.253571	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	20	371544	0	1.345733822e-06	93.811576	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	16	373652	1	4.014425168e-06	94.343827	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	12	376228	1	3.986938789e-06	94.994243	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	9	378241	1	3.965720314e-06	95.502507	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	6	380477	1	3.942414466e-06	96.067077	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	3	383096	4	1.174638766e-05	96.72835	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	1	386174	42	0.0001100538746	97.505517	396054
+Simulated long reads to CHM13	minimap2 (HiFi)	paftools	0	388100	1510	0.00389203312	97.991814	396054
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	60	358576	0	1.394402589e-06	89.740821	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	50	360651	0	1.386379926e-06	90.26013	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	40	362761	1	4.134948168e-06	90.788199	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	32	364882	1	4.110912417e-06	91.319021	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	26	366897	2	6.813892163e-06	91.823315	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	20	369252	3	9.478608811e-06	92.4127	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	15	371780	5	1.47936753e-05	93.045381	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	11	374177	13	3.607913357e-05	93.645278	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	8	376236	24	6.511861555e-05	94.160583	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	5	378356	41	0.0001096849136	94.691155	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	2	380598	124	0.0003271163707	95.252259	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	1	386225	1520	0.003936819293	96.660527	399569
+Simulated long reads to CHM13	minimap2 (ONT)	paftools	0	389522	3818	0.009803028066	97.485666	399569
+Simulated long reads to CHM13	minimap2 (UL)	paftools	60	171223	3	2.044111936e-05	89.340837	191652
+Simulated long reads to CHM13	minimap2 (UL)	paftools	42	173295	3	2.019671601e-05	90.421963	191652
+Simulated long reads to CHM13	minimap2 (UL)	paftools	28	175468	5	3.13446573e-05	91.555789	191652
+Simulated long reads to CHM13	minimap2 (UL)	paftools	18	177609	5	3.096681202e-05	92.672918	191652
+Simulated long reads to CHM13	minimap2 (UL)	paftools	10	179780	9	5.284221592e-05	93.8057	191652
+Simulated long reads to CHM13	minimap2 (UL)	paftools	2	181960	37	0.0002060886841	94.943178	191652
+Simulated long reads to CHM13	minimap2 (UL)	paftools	0	184671	1254	0.006793143501	96.357721	191652
+Simulated long reads to CHM13	winnowmap2 (HiFi)	paftools	60	383512	4	1.173364623e-05	96.833386	396054
+Simulated long reads to CHM13	winnowmap2 (HiFi)	paftools	1	386179	26	6.862093923e-05	97.506779	396054
+Simulated long reads to CHM13	winnowmap2 (HiFi)	paftools	0	388101	1487	0.003832760244	97.992067	396054
+Simulated long reads to CHM13	winnowmap2 (ONT)	paftools	60	370965	33	9.030489358e-05	92.841412	399569
+Simulated long reads to CHM13	winnowmap2 (ONT)	paftools	46	373101	37	0.0001005088428	93.375988	399569
+Simulated long reads to CHM13	winnowmap2 (ONT)	paftools	31	375147	39	0.0001052919185	93.888039	399569
+Simulated long reads to CHM13	winnowmap2 (ONT)	paftools	19	377237	45	0.0001206136718	94.411103	399569
+Simulated long reads to CHM13	winnowmap2 (ONT)	paftools	7	379366	82	0.0002174678049	94.943927	399569
+Simulated long reads to CHM13	winnowmap2 (ONT)	paftools	1	385339	830	0.002155242325	96.438788	399569
+Simulated long reads to CHM13	winnowmap2 (ONT)	paftools	0	388950	3337	0.008580783416	97.342512	399569
+Simulated long reads to CHM13	winnowmap2 (UL)	paftools	60	177619	9	5.348511847e-05	92.678135	191652
+Simulated long reads to CHM13	winnowmap2 (UL)	paftools	24	179646	11	6.401460646e-05	93.735782	191652
+Simulated long reads to CHM13	winnowmap2 (UL)	paftools	1	182368	200	0.001099422323	95.156064	191652
+Simulated long reads to CHM13	winnowmap2 (UL)	paftools	0	183820	1260	0.006857233007	95.913687	191652
+Simulated long reads to HG002	flash (HiFi)	paftools	60	318584	4	1.412498097e-05	80.431336	396095
+Simulated long reads to HG002	flash (HiFi)	paftools	30	336286	5	1.635510197e-05	84.900466	396095
+Simulated long reads to HG002	flash (HiFi)	paftools	9	339249	25	7.516591771e-05	85.648519	396095
+Simulated long reads to HG002	flash (HiFi)	paftools	1	355818	460	0.001294199149	89.831606	396095
+Simulated long reads to HG002	flash (HiFi)	paftools	0	386227	15518	0.04017968684	97.508805	396095
+Simulated long reads to HG002	flash (ONT)	paftools	60	140876	1	1.064762398e-05	35.236567	399802
+Simulated long reads to HG002	flash (ONT)	paftools	58	144677	1	1.03678872e-05	36.187288	399802
+Simulated long reads to HG002	flash (ONT)	paftools	56	148531	1	1.009886792e-05	37.151265	399802
+Simulated long reads to HG002	flash (ONT)	paftools	54	152427	1	9.84074396e-06	38.125747	399802
+Simulated long reads to HG002	flash (ONT)	paftools	53	154450	1	9.711849427e-06	38.631748	399802
+Simulated long reads to HG002	flash (ONT)	paftools	52	156637	1	9.576250898e-06	39.178768	399802
+Simulated long reads to HG002	flash (ONT)	paftools	51	158815	1	9.444921938e-06	39.723538	399802
+Simulated long reads to HG002	flash (ONT)	paftools	50	160892	1	9.322995168e-06	40.243045	399802
+Simulated long reads to HG002	flash (ONT)	paftools	49	162976	1	9.203780913e-06	40.764303	399802
+Simulated long reads to HG002	flash (ONT)	paftools	48	165002	1	9.090771352e-06	41.271054	399802
+Simulated long reads to HG002	flash (ONT)	paftools	47	167073	1	8.978084496e-06	41.789061	399802
+Simulated long reads to HG002	flash (ONT)	paftools	46	169126	2	1.47818349e-05	42.302565	399802
+Simulated long reads to HG002	flash (ONT)	paftools	45	171191	3	2.044494032e-05	42.81907	399802
+Simulated long reads to HG002	flash (ONT)	paftools	44	173310	3	2.019496799e-05	43.349083	399802
+Simulated long reads to HG002	flash (ONT)	paftools	43	175460	3	1.994750955e-05	43.886849	399802
+Simulated long reads to HG002	flash (ONT)	paftools	42	177568	3	1.971070319e-05	44.41411	399802
+Simulated long reads to HG002	flash (ONT)	paftools	41	179619	3	1.948563491e-05	44.927114	399802
+Simulated long reads to HG002	flash (ONT)	paftools	40	181724	3	1.925992368e-05	45.453625	399802
+Simulated long reads to HG002	flash (ONT)	paftools	39	183825	3	1.903979589e-05	45.979135	399802
+Simulated long reads to HG002	flash (ONT)	paftools	38	185914	3	1.882585812e-05	46.501643	399802
+Simulated long reads to HG002	flash (ONT)	paftools	37	188059	3	1.861113105e-05	47.038159	399802
+Simulated long reads to HG002	flash (ONT)	paftools	36	190195	3	1.840211782e-05	47.572423	399802
+Simulated long reads to HG002	flash (ONT)	paftools	35	192505	3	1.818129872e-05	48.150209	399802
+Simulated long reads to HG002	flash (ONT)	paftools	34	195253	3	1.792541491e-05	48.83755	399802
+Simulated long reads to HG002	flash (ONT)	paftools	33	197902	3	1.768547643e-05	49.500128	399802
+Simulated long reads to HG002	flash (ONT)	paftools	32	200432	4	2.245144874e-05	50.132941	399802
+Simulated long reads to HG002	flash (ONT)	paftools	31	202802	4	2.218907558e-05	50.725734	399802
+Simulated long reads to HG002	flash (ONT)	paftools	30	205236	4	2.192592448e-05	51.334536	399802
+Simulated long reads to HG002	flash (ONT)	paftools	29	207684	5	2.648247703e-05	51.946839	399802
+Simulated long reads to HG002	flash (ONT)	paftools	28	209928	7	3.572644972e-05	52.508117	399802
+Simulated long reads to HG002	flash (ONT)	paftools	27	212309	8	4.0035891e-05	53.103661	399802
+Simulated long reads to HG002	flash (ONT)	paftools	26	214631	8	3.960276101e-05	53.684449	399802
+Simulated long reads to HG002	flash (ONT)	paftools	25	216920	8	3.918486266e-05	54.256982	399802
+Simulated long reads to HG002	flash (ONT)	paftools	24	219209	8	3.877569175e-05	54.829516	399802
+Simulated long reads to HG002	flash (ONT)	paftools	23	221481	9	4.2892973e-05	55.397797	399802
+Simulated long reads to HG002	flash (ONT)	paftools	22	223764	10	4.69243334e-05	55.96883	399802
+Simulated long reads to HG002	flash (ONT)	paftools	21	226046	11	5.087448821e-05	56.539612	399802
+Simulated long reads to HG002	flash (ONT)	paftools	20	228386	11	5.035323892e-05	57.124902	399802
+Simulated long reads to HG002	flash (ONT)	paftools	19	230845	11	4.981686886e-05	57.739956	399802
+Simulated long reads to HG002	flash (ONT)	paftools	18	233445	12	5.354568839e-05	58.390278	399802
+Simulated long reads to HG002	flash (ONT)	paftools	17	238009	28	0.0001197431195	59.531843	399802
+Simulated long reads to HG002	flash (ONT)	paftools	16	242187	46	0.000192	60.576861	399802
+Simulated long reads to HG002	flash (ONT)	paftools	15	245763	62	0.0002543095293	61.471303	399802
+Simulated long reads to HG002	flash (ONT)	paftools	14	249176	74	0.0002989848561	62.324976	399802
+Simulated long reads to HG002	flash (ONT)	paftools	13	252735	91	0.0003620385739	63.215167	399802
+Simulated long reads to HG002	flash (ONT)	paftools	12	256128	103	0.0004040940387	64.063837	399802
+Simulated long reads to HG002	flash (ONT)	paftools	11	259745	123	0.0004754654075	64.968534	399802
+Simulated long reads to HG002	flash (ONT)	paftools	10	263445	142	0.0005409088407	65.893993	399802
+Simulated long reads to HG002	flash (ONT)	paftools	9	267269	158	0.0005930343717	66.850466	399802
+Simulated long reads to HG002	flash (ONT)	paftools	8	271416	180	0.0006650295763	67.887729	399802
+Simulated long reads to HG002	flash (ONT)	paftools	7	275270	203	0.0007392728244	68.851707	399802
+Simulated long reads to HG002	flash (ONT)	paftools	6	278900	225	0.0008085320751	69.759656	399802
+Simulated long reads to HG002	flash (ONT)	paftools	5	282529	268	0.0009503432385	70.667355	399802
+Simulated long reads to HG002	flash (ONT)	paftools	4	285258	308	0.001081475223	71.349943	399802
+Simulated long reads to HG002	flash (ONT)	paftools	2	288675	382	0.001325017191	72.204616	399802
+Simulated long reads to HG002	flash (ONT)	paftools	1	329802	3867	0.01172671523	82.491458	399802
+Simulated long reads to HG002	flash (ONT)	paftools	0	388617	32984	0.0848765174	97.20249	399802
+Simulated long reads to HG002	flash (UL)	paftools	60	102375	3	3.418786721e-05	53.172686	192534
+Simulated long reads to HG002	flash (UL)	paftools	56	104835	3	3.33856375e-05	54.450383	192534
+Simulated long reads to HG002	flash (UL)	paftools	53	106835	3	3.276064604e-05	55.48916	192534
+Simulated long reads to HG002	flash (UL)	paftools	50	108909	3	3.213677411e-05	56.566373	192534
+Simulated long reads to HG002	flash (UL)	paftools	46	111585	6	5.825129609e-05	57.956257	192534
+Simulated long reads to HG002	flash (UL)	paftools	42	114181	6	5.692691023e-05	59.30459	192534
+Simulated long reads to HG002	flash (UL)	paftools	38	116825	6	5.563853782e-05	60.677854	192534
+Simulated long reads to HG002	flash (UL)	paftools	35	119436	6	5.442222436e-05	62.033978	192534
+Simulated long reads to HG002	flash (UL)	paftools	32	122059	9	7.783089395e-05	63.396335	192534
+Simulated long reads to HG002	flash (UL)	paftools	29	124429	9	7.634845435e-05	64.627287	192534
+Simulated long reads to HG002	flash (UL)	paftools	26	126712	9	7.497287166e-05	65.813051	192534
+Simulated long reads to HG002	flash (UL)	paftools	23	129268	9	7.349044818e-05	67.140609	192534
+Simulated long reads to HG002	flash (UL)	paftools	20	131953	9	7.199505887e-05	68.535168	192534
+Simulated long reads to HG002	flash (UL)	paftools	18	134553	10	7.803587421e-05	69.885579	192534
+Simulated long reads to HG002	flash (UL)	paftools	16	137668	18	0.000134380777	71.503475	192534
+Simulated long reads to HG002	flash (UL)	paftools	14	140379	22	0.0001602798129	72.911538	192534
+Simulated long reads to HG002	flash (UL)	paftools	12	143046	24	0.0001712729777	74.296748	192534
+Simulated long reads to HG002	flash (UL)	paftools	10	145779	28	0.0001955007391	75.716237	192534
+Simulated long reads to HG002	flash (UL)	paftools	8	148971	32	0.0002181625344	77.374126	192534
+Simulated long reads to HG002	flash (UL)	paftools	6	151489	42	0.0002805474967	78.681947	192534
+Simulated long reads to HG002	flash (UL)	paftools	4	154147	56	0.0003665320553	80.062482	192534
+Simulated long reads to HG002	flash (UL)	paftools	1	165030	760	0.004608239083	85.714991	192534
+Simulated long reads to HG002	flash (UL)	paftools	0	184913	10744	0.05810554665	96.041998	192534
+Simulated long reads to HG002	minibwa (HiFi)	paftools	60	82283	2	3.038276204e-05	20.773678	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	58	84600	2	2.955065277e-05	21.358639	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	56	87230	2	2.865970045e-05	22.022621	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	54	90179	2	2.772248682e-05	22.767139	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	52	93520	2	2.673210686e-05	23.610624	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	50	97182	2	2.572479613e-05	24.535149	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	48	101233	2	2.469538246e-05	25.557884	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	47	103336	2	2.419280699e-05	26.088817	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	46	105659	2	2.366091076e-05	26.675293	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	45	108034	2	2.314075596e-05	27.274896	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	44	110562	2	2.2611645e-05	27.913127	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	43	113308	2	2.206365807e-05	28.606395	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	42	116032	2	2.154568763e-05	29.294109	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	41	118973	2	2.101308275e-05	30.036607	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	40	121975	2	2.049591926e-05	30.794506	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	39	125171	2	1.99725976e-05	31.601384	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	38	128526	2	1.945124157e-05	32.448403	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	37	131939	2	1.894807848e-05	33.310065	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	36	135386	2	1.846565204e-05	34.18031	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	35	139068	2	1.797675246e-05	35.109885	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	34	142864	2	1.74990988e-05	36.068241	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	33	146847	2	1.702446415e-05	37.073808	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	32	150881	2	1.656929445e-05	38.092251	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	31	154975	2	1.613158209e-05	39.125841	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	30	159239	2	1.569962227e-05	40.20235	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	29	163567	2	1.528420988e-05	41.295018	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	28	168091	2	1.487285199e-05	42.437168	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	27	172573	2	1.448658108e-05	43.568715	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	26	177159	2	1.411157742e-05	44.726518	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	25	181798	2	1.37514886e-05	45.897701	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	24	186460	2	1.340766543e-05	47.074692	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	23	191089	2	1.308287478e-05	48.243351	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	22	195875	3	1.7868493e-05	49.451647	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	21	200646	4	2.24275031e-05	50.656156	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	20	205440	5	2.67717417e-05	51.866471	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	19	210216	6	3.092050339e-05	53.072243	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	18	215019	6	3.022981637e-05	54.284831	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	17	219715	6	2.958371166e-05	55.470405	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	16	224580	6	2.894285123e-05	56.698646	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	15	229357	7	3.270004251e-05	57.904669	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	14	234067	8	3.631431104e-05	59.093778	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	13	238804	8	3.559396913e-05	60.289703	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	12	243815	8	3.486242671e-05	61.554804	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	11	248975	8	3.413990533e-05	62.857522	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	10	254468	8	3.340295557e-05	64.24431	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	9	260379	8	3.264465905e-05	65.736629	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	8	266750	10	3.936262537e-05	67.345081	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	7	274112	11	4.195357745e-05	69.203726	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	6	282212	12	4.429286442e-05	71.24869	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	5	291934	12	4.281782386e-05	73.703152	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	4	303300	12	4.12132522e-05	76.572666	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	3	316990	20	6.46707078e-05	80.028907	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	2	330480	70	0.0002133257484	83.434656	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	1	357787	752	0.002103203717	90.328709	396095
+Simulated long reads to HG002	minibwa (HiFi)	paftools	0	386232	15031	0.03891826814	97.510067	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	60	59217	0	8.443449994e-06	14.950328	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	58	63320	0	7.896336889e-06	15.98619	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	57	65462	0	7.637960665e-06	16.52697	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	56	67723	0	7.382961601e-06	17.097792	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	55	70051	0	7.137605904e-06	17.68553	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	54	72377	0	6.908224241e-06	18.272763	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	53	74959	0	6.670268612e-06	18.924627	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	52	77617	0	6.441846233e-06	19.595678	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	51	80369	0	6.22126553e-06	20.290461	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	50	83148	0	6.013337583e-06	20.99206	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	49	86100	0	5.807167206e-06	21.737336	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	48	89157	0	5.608053164e-06	22.50912	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	47	92362	0	5.413452429e-06	23.31827	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	46	95718	0	5.2236506e-06	24.165541	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	45	99083	0	5.046248871e-06	25.015085	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	44	102616	0	4.872510756e-06	25.907043	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	43	106234	0	4.706568958e-06	26.82046	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	42	109808	0	4.553381569e-06	27.722769	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	41	113589	0	4.401815309e-06	28.677338	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	40	117521	0	4.254540659e-06	29.670029	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	39	121466	0	4.116361301e-06	30.666002	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	38	125491	0	3.9843336e-06	31.682172	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	37	129576	0	3.858724383e-06	32.71349	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	36	133751	0	3.738275832e-06	33.767531	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	35	138074	0	3.621233465e-06	34.858935	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	34	142474	0	3.509399928e-06	35.96978	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	33	146968	0	3.402089563e-06	37.104356	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	32	151493	0	3.300471637e-06	38.246759	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	31	156191	0	3.201198529e-06	39.432838	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	30	160853	0	3.10841853e-06	40.609828	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	29	165555	0	3.020135242e-06	41.796917	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	28	170219	0	2.93738379e-06	42.974413	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	27	174958	0	2.857820569e-06	44.170843	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	26	179648	0	2.783212774e-06	45.354902	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	25	184289	0	2.71312256e-06	46.526591	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	24	189032	0	2.645047809e-06	47.724031	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	23	193778	0	2.580265613e-06	48.922228	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	22	198333	0	2.521006285e-06	50.072205	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	21	202928	0	2.463922022e-06	51.23228	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	20	207458	1	7.230361735e-06	52.375945	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	19	212041	2	1.179014485e-05	53.532991	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	18	216571	2	1.154353181e-05	54.676656	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	17	221086	2	1.130779129e-05	55.816534	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	16	225525	2	1.108522096e-05	56.937225	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	15	229941	2	1.087233057e-05	58.052109	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	14	234340	2	1.066823703e-05	59.162701	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	13	238909	3	1.464989881e-05	60.316212	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	12	243538	3	1.437144435e-05	61.484871	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	11	248445	4	1.81126243e-05	62.723715	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	10	253635	4	1.77419959e-05	64.034007	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	9	259253	5	2.121475698e-05	65.452354	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	8	265411	6	2.449027265e-05	67.007031	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	7	272488	6	2.38542177e-05	68.793724	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	6	280786	7	2.671068588e-05	70.888676	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	5	290651	8	2.924464522e-05	73.37924	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	4	302398	10	3.472239446e-05	76.344943	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	3	315045	10	3.332851921e-05	79.537863	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	2	329661	35	0.0001076862175	83.227887	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	1	357134	707	0.001981046356	90.16385	396095
+Simulated long reads to HG002	minimap2 (HiFi)	paftools	0	386227	15340	0.03971881857	97.508805	396095
+Simulated long reads to HG002	minimap2 (ONT)	paftools	60	48281	12	0.0002588983358	12.076353	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	58	51387	12	0.0002432498176	12.853237	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	56	54625	12	0.0002288308574	13.663138	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	54	58233	12	0.0002146530777	14.565585	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	52	62077	12	0.0002013612017	15.527061	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	51	64142	12	0.0001948785906	16.043567	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	50	66365	12	0.0001883508751	16.599592	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	49	68595	12	0.0001822276972	17.157368	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	48	71005	12	0.0001760427009	17.760166	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	47	73277	12	0.0001705844222	18.328448	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	46	75673	12	0.0001651833204	18.927744	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	45	78251	12	0.0001597413468	19.572563	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	44	80948	12	0.0001544191677	20.247147	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	43	83734	13	0.0001612238683	20.943992	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	42	86649	14	0.0001673408387	21.673103	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	41	89588	14	0.0001618511304	22.408217	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	40	92658	14	0.0001564886114	23.176097	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	39	95750	14	0.0001514352405	23.94948	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	38	99015	15	0.0001565411476	24.766134	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	37	102387	15	0.0001513856672	25.609552	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	36	105936	15	0.0001463140655	26.497241	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	35	109470	15	0.0001415906568	27.381179	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	34	113221	17	0.0001545642833	28.319393	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	33	117062	18	0.0001580352376	29.280119	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	32	121092	21	0.0001775502199	30.288118	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	31	125128	21	0.0001718233656	31.297617	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	30	129207	22	0.0001741384982	32.317872	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	29	133387	23	0.0001761784275	33.36339	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	28	137640	24	0.0001779999346	34.427166	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	27	141940	26	0.0001866979474	35.502699	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	26	146421	31	0.0002151323405	36.623504	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	25	150877	35	0.0002352902189	37.738055	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	24	155519	37	0.0002411273184	38.89913	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	23	160351	38	0.0002400975357	40.107728	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	22	165092	40	0.0002453170192	41.293565	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	21	169912	40	0.0002383579784	42.499162	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	20	174838	43	0.0002488010364	43.731272	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	19	179932	46	0.0002584302447	45.005403	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	18	184879	50	0.0002731508902	46.242765	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	17	189940	54	0.0002869319603	47.508642	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	16	195147	60	0.0003100219065	48.811036	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	15	200238	67	0.0003370980106	50.084417	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	14	205475	72	0.0003528401196	51.394315	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	13	210844	83	0.0003960264555	52.73723	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	12	216074	92	0.0004280930883	54.045377	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	11	221469	103	0.0004673329736	55.394795	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	10	226843	116	0.0005135699282	56.738961	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	9	232368	130	0.0005616079632	58.120895	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	8	238206	147	0.0006192106429	59.581118	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	7	244503	167	0.000685061768	61.156147	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	6	251262	189	0.0007541913338	62.846734	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	5	258690	231	0.0008948917722	64.704654	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	4	267002	290	0.001088004794	66.783683	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	3	275797	378	0.001372383724	68.983522	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	2	284217	494	0.001739864716	71.089564	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	1	330857	5465	0.01651919633	82.755339	399802
+Simulated long reads to HG002	minimap2 (ONT)	paftools	0	388078	34389	0.08861480345	97.067673	399802
+Simulated long reads to HG002	minimap2 (UL)	paftools	60	33007	28	0.0008634401272	17.143725	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	58	35189	28	0.0008099006806	18.277032	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	56	37652	28	0.0007569218511	19.556286	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	54	40175	28	0.0007093875621	20.866704	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	52	42831	28	0.0006653981299	22.246201	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	50	45722	28	0.0006233254962	23.747754	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	48	48673	29	0.0006060792834	25.28047	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	46	51775	29	0.0005697675542	26.891614	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	44	55193	29	0.0005344832272	28.666885	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	42	58720	31	0.0005364395739	30.498769	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	40	62315	31	0.000505492213	32.365972	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	38	65963	31	0.0004775368196	34.260702	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	36	70003	32	0.0004642625012	36.359033	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	34	73979	32	0.0004393108902	38.424122	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	33	76004	32	0.0004276062602	39.475885	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	32	78079	32	0.0004162424196	40.553617	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	31	80143	32	0.0004055225938	41.625635	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	30	82214	32	0.0003953073971	42.701289	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	29	84269	32	0.0003856674123	43.768633	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	28	86381	32	0.0003762379676	44.865582	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	27	88490	32	0.000367271063	45.960973	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	26	90596	33	0.0003697714592	47.054806	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	25	92734	33	0.0003612463538	48.165259	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	24	94812	34	0.0003638760712	49.244549	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	23	96979	34	0.0003557452864	50.370065	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	22	99065	36	0.0003684431008	51.45351	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	21	101228	36	0.0003605703927	52.576947	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	20	103305	36	0.0003533209752	53.655718	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	19	105457	36	0.0003461109926	54.773443	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	18	107571	37	0.0003486053462	55.871431	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	17	109635	39	0.0003602847618	56.943449	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	16	111734	40	0.0003624663824	58.033646	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	15	113895	42	0.0003731490709	59.156045	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	14	116151	43	0.0003745108759	60.327786	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	13	118278	45	0.0003846852978	61.432526	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	12	120453	50	0.0004192489218	62.562197	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	11	122568	52	0.0004283319124	63.660704	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	10	124788	58	0.0004687931981	64.813747	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	9	127114	61	0.0004838157724	66.021845	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	8	129533	64	0.0004979406872	67.278247	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	7	132255	68	0.0005179368722	68.692023	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	6	135292	72	0.0005358759724	70.269407	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	5	138813	81	0.000587118688	72.098175	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	4	142908	98	0.0006892522138	74.225072	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	3	147483	114	0.0007763580333	76.601276	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	2	152203	143	0.0009428166895	79.052791	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	1	165205	1103	0.0066795597	85.805884	192534
+Simulated long reads to HG002	minimap2 (UL)	paftools	0	184534	10883	0.05897813146	95.845149	192534
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	60	303097	18	6.103646516e-05	76.521415	396095
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	50	305218	18	6.061231544e-05	77.056893	396095
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	42	307369	18	6.018814489e-05	77.599944	396095
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	36	310635	18	5.955533093e-05	78.424494	396095
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	26	312700	20	6.555793803e-05	78.945834	396095
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	17	314917	23	7.462271865e-05	79.505548	396095
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	15	321307	30	9.492464384e-05	81.118797	396095
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	7	323448	30	9.429630992e-05	81.659324	396095
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	1	357463	691	0.001934463239	90.24691	396095
+Simulated long reads to HG002	winnowmap2 (HiFi)	paftools	0	386231	15149	0.03922388516	97.509815	396095
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	60	176978	145	0.000822133762	44.266537	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	54	179405	149	0.000833307786	44.873587	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	50	181553	150	0.0008289567538	45.410853	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	46	183901	151	0.0008238105725	45.998144	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	42	186477	153	0.0008231556086	46.642463	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	39	188929	154	0.0008177653569	47.255767	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	36	191482	155	0.0008120846553	47.894333	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	34	193962	156	0.0008068569956	48.51464	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	32	196595	159	0.0008113105336	49.173216	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	30	199009	159	0.0008014692766	49.777015	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	28	201678	161	0.0008007794584	50.444595	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	26	204603	162	0.0007942190627	51.176207	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	24	207609	163	0.0007875362158	51.928079	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	22	210896	166	0.0007894867862	52.750236	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	20	214612	168	0.0007851360009	53.679696	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	19	216678	170	0.0007868801012	54.196452	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	17	220758	179	0.0008131057241	55.216957	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	16	222838	183	0.000823466322	55.737215	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	15	224989	184	0.0008200382685	56.275231	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	14	228943	194	0.0008495545844	57.264221	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	13	232178	215	0.0009281651833	58.073371	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	12	234817	222	0.0009475443696	58.733448	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	11	237397	234	0.0009877947325	59.378767	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	10	239854	238	0.0009943528264	59.993322	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	9	242357	247	0.001021218654	60.619382	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	8	244847	257	0.001051675022	61.24219	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	7	247174	264	0.001070094205	61.824228	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	6	249395	276	0.00110868079	62.379753	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	4	253017	301	0.001191617181	63.285701	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	2	256158	360	0.001407331789	64.07134	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	1	331266	4510	0.01361592555	82.85764	399802
+Simulated long reads to HG002	winnowmap2 (ONT)	paftools	0	387312	32769	0.08460739067	96.876079	399802
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	60	122231	30	0.0002495265132	63.48567	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	49	124244	31	0.0002535323495	64.5312	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	40	126346	31	0.0002493143854	65.622955	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	34	128651	31	0.0002448475144	66.820146	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	28	130992	33	0.0002557398324	68.036035	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	23	133262	37	0.0002813994935	69.215048	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	19	135377	40	0.0002991634504	70.313555	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	15	138214	41	0.0003002579324	71.787061	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	13	140215	45	0.000324500501	72.826358	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	9	142844	52	0.0003675325266	74.191831	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	5	145317	65	0.0004507371789	75.47628	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	1	165140	862	0.005222825412	85.772123	192534
+Simulated long reads to HG002	winnowmap2 (UL)	paftools	0	183565	10236	0.05576483598	95.341862	192534
+Simulated long RNA reads to human	flash (HiFi)	iou	60	974122	549	0.0005640974313	97.714579	996906
+Simulated long RNA reads to human	flash (HiFi)	iou	51	976289	557	0.0005710396353	97.931951	996906
+Simulated long RNA reads to human	flash (HiFi)	iou	42	978413	617	0.0006311237529	98.145011	996906
+Simulated long RNA reads to human	flash (HiFi)	iou	33	980536	677	0.0006909482717	98.35797	996906
+Simulated long RNA reads to human	flash (HiFi)	iou	22	982664	793	0.0008074983883	98.57143	996906
+Simulated long RNA reads to human	flash (HiFi)	iou	12	984754	939	0.0009540448914	98.781079	996906
+Simulated long RNA reads to human	flash (HiFi)	iou	3	986776	1137	0.001152743301	98.983906	996906
+Simulated long RNA reads to human	flash (HiFi)	iou	0	996905	4290	0.004303818165	99.99995	996906
+Simulated long RNA reads to human	flash (ONT)	iou	60	825635	4619	0.005595084029	83.909117	983964
+Simulated long RNA reads to human	flash (ONT)	iou	59	830068	4692	0.005653147903	84.359641	983964
+Simulated long RNA reads to human	flash (ONT)	iou	58	834321	4765	0.005711826916	84.791872	983964
+Simulated long RNA reads to human	flash (ONT)	iou	57	838395	4844	0.005778299144	85.205912	983964
+Simulated long RNA reads to human	flash (ONT)	iou	56	842536	4912	0.005830607932	85.626761	983964
+Simulated long RNA reads to human	flash (ONT)	iou	55	846493	4994	0.005900222506	86.02891	983964
+Simulated long RNA reads to human	flash (ONT)	iou	54	850345	5059	0.005949934468	86.420387	983964
+Simulated long RNA reads to human	flash (ONT)	iou	53	854193	5134	0.00601093312	86.811459	983964
+Simulated long RNA reads to human	flash (ONT)	iou	52	857963	5227	0.00609291654	87.194603	983964
+Simulated long RNA reads to human	flash (ONT)	iou	51	861675	5313	0.006166474502	87.571852	983964
+Simulated long RNA reads to human	flash (ONT)	iou	50	865190	5400	0.006241977923	87.929081	983964
+Simulated long RNA reads to human	flash (ONT)	iou	49	868788	5474	0.006301303482	88.294745	983964
+Simulated long RNA reads to human	flash (ONT)	iou	48	872235	5566	0.006381877371	88.645062	983964
+Simulated long RNA reads to human	flash (ONT)	iou	47	875587	5660	0.006464802204	88.985725	983964
+Simulated long RNA reads to human	flash (ONT)	iou	46	878802	5761	0.006556080576	89.312465	983964
+Simulated long RNA reads to human	flash (ONT)	iou	45	881969	5877	0.006664062646	89.634326	983964
+Simulated long RNA reads to human	flash (ONT)	iou	44	885050	5977	0.006753851899	89.947447	983964
+Simulated long RNA reads to human	flash (ONT)	iou	43	888048	6093	0.006861674785	90.252133	983964
+Simulated long RNA reads to human	flash (ONT)	iou	42	891064	6208	0.006967509086	90.558648	983964
+Simulated long RNA reads to human	flash (ONT)	iou	41	893899	6303	0.007051687578	90.846769	983964
+Simulated long RNA reads to human	flash (ONT)	iou	40	896669	6422	0.007162616772	91.128283	983964
+Simulated long RNA reads to human	flash (ONT)	iou	39	899398	6537	0.007268746835	91.405631	983964
+Simulated long RNA reads to human	flash (ONT)	iou	38	902153	6639	0.007359612305	91.685621	983964
+Simulated long RNA reads to human	flash (ONT)	iou	37	904736	6772	0.007485604925	91.94813	983964
+Simulated long RNA reads to human	flash (ONT)	iou	36	907191	6892	0.007597624096	92.197631	983964
+Simulated long RNA reads to human	flash (ONT)	iou	35	909568	7023	0.007721793356	92.439205	983964
+Simulated long RNA reads to human	flash (ONT)	iou	34	911914	7137	0.007826939916	92.677628	983964
+Simulated long RNA reads to human	flash (ONT)	iou	33	914162	7266	0.007948805601	92.906092	983964
+Simulated long RNA reads to human	flash (ONT)	iou	32	916334	7382	0.008056555766	93.126832	983964
+Simulated long RNA reads to human	flash (ONT)	iou	31	918384	7518	0.008186658203	93.335173	983964
+Simulated long RNA reads to human	flash (ONT)	iou	29	922233	7781	0.008437667901	93.726346	983964
+Simulated long RNA reads to human	flash (ONT)	iou	27	925902	8097	0.008745521262	94.099225	983964
+Simulated long RNA reads to human	flash (ONT)	iou	25	929254	8366	0.009003453844	94.439888	983964
+Simulated long RNA reads to human	flash (ONT)	iou	23	932308	8655	0.009283944102	94.750265	983964
+Simulated long RNA reads to human	flash (ONT)	iou	21	935182	8966	0.009587968124	95.042349	983964
+Simulated long RNA reads to human	flash (ONT)	iou	19	937773	9274	0.009889914782	95.305672	983964
+Simulated long RNA reads to human	flash (ONT)	iou	17	940461	9648	0.01025932481	95.578852	983964
+Simulated long RNA reads to human	flash (ONT)	iou	15	942825	10034	0.0106430087	95.819105	983964
+Simulated long RNA reads to human	flash (ONT)	iou	13	944942	10397	0.01100331502	96.034255	983964
+Simulated long RNA reads to human	flash (ONT)	iou	10	947443	10809	0.0114091236	96.288431	983964
+Simulated long RNA reads to human	flash (ONT)	iou	7	950165	11402	0.01200054096	96.565067	983964
+Simulated long RNA reads to human	flash (ONT)	iou	5	952526	11963	0.01255975556	96.805015	983964
+Simulated long RNA reads to human	flash (ONT)	iou	2	955138	12750	0.01334937289	97.070472	983964
+Simulated long RNA reads to human	flash (ONT)	iou	0	983738	23441	0.02382899521	99.977082	983964
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	60	957212	761	0.0007955391305	96.018331	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	59	961015	772	0.000803837191	96.399811	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	58	964624	779	0.0008080864627	96.761831	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	57	968094	785	0.0008113877313	97.109908	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	56	971011	789	0.0008130696701	97.402513	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	55	973144	797	0.0008195083053	97.616475	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	53	975649	815	0.0008358534494	97.867753	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	50	977884	854	0.0008738250785	98.091946	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	46	980120	884	0.0009024400571	98.31624	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	40	982397	939	0.0009563338669	98.544647	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	32	984434	992	0.001008193029	98.748979	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	21	986568	1107	0.001122577905	98.963042	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	10	988591	1300	0.001315507973	99.16597	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	1	992766	1604	0.001616190716	99.584765	996906
+Simulated long RNA reads to human	minimap2 (HiFi)	iou	0	996906	4727	0.004742169903	100.00005	996906
+Simulated long RNA reads to human	minimap2 (ONT)	iou	60	852584	6625	0.007771077236	86.647936	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	59	856161	6703	0.00782971437	87.011466	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	58	859680	6790	0.007898864753	87.369101	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	57	863233	6865	0.007953236291	87.730191	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	56	866738	6945	0.008013374276	88.086404	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	55	870290	7019	0.008065697603	88.447392	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	54	873782	7104	0.008130741918	88.802283	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	53	877205	7193	0.008200472979	89.150162	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	52	880769	7314	0.008304669951	89.51237	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	51	884240	7429	0.008402125892	89.865127	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	50	887637	7518	0.008470237006	90.210363	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	49	891032	7604	0.008534481066	90.555396	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	48	894270	7716	0.008628820922	90.884473	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	47	897299	7841	0.008738999632	91.19231	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	46	900115	7967	0.008851641817	91.478499	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	45	902767	8091	0.008962994348	91.748021	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	44	905387	8251	0.00911377725	92.014291	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	43	907663	8352	0.009202198832	92.2456	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	42	909900	8482	0.009322447894	92.472946	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	41	911913	8606	0.009437846901	92.677527	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	39	915390	8871	0.009691492319	93.030893	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	37	918291	9104	0.009914607725	93.325721	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	35	920922	9327	0.010128431	93.593109	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	33	923401	9554	0.01034707004	93.845049	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	31	925681	9750	0.01053332059	94.076765	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	29	927918	9974	0.01074932766	94.304111	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	27	930098	10204	0.01097141862	94.525664	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	25	932118	10432	0.01119224648	94.730956	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	22	935014	10772	0.0115212117	95.025275	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	19	937648	11092	0.01183012611	95.292968	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	16	940185	11439	0.01216727975	95.550803	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	13	942736	11844	0.0125639561	95.81006	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	10	945645	12354	0.01306462094	96.105701	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	7	948201	12879	0.01358308334	96.365467	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	4	950765	13478	0.01417647149	96.626045	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	1	973113	18692	0.01920896175	98.897267	983964
+Simulated long RNA reads to human	minimap2 (ONT)	iou	0	980622	23748	0.02421778003	99.660404	983964
+Simulated long RNA reads to mouse	flash (HiFi)	iou	60	954417	768	0.0008052031737	95.697933	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	55	956896	840	0.0008783604078	95.946499	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	51	958963	926	0.0009661473038	96.153754	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	46	961583	1084	0.001127827173	96.416457	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	42	963840	1199	0.001244500516	96.642763	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	38	965860	1331	0.001378563467	96.845305	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	34	967895	1472	0.001521341922	97.049351	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	29	970306	1755	0.001809222138	97.291098	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	24	972716	2027	0.002084368878	97.532745	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	18	975068	2180	0.002236253145	97.768576	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	12	977213	2332	0.002386888843	97.983652	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	6	979389	2536	0.002589878695	98.201836	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	1	981443	2655	0.002705708479	98.407788	997323
+Simulated long RNA reads to mouse	flash (HiFi)	iou	0	997323	4258	0.004269928464	100.00005	997323
+Simulated long RNA reads to mouse	flash (ONT)	iou	60	874967	5071	0.005796215288	88.474213	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	58	877582	5186	0.005909985671	88.738634	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	56	880060	5314	0.006038789379	88.989203	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	54	882471	5469	0.006197933871	89.232996	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	52	884786	5657	0.006394197922	89.467082	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	50	886967	5846	0.00659156057	89.687619	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	48	889303	6024	0.006774402665	89.923828	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	46	891494	6207	0.006963026693	90.145376	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	44	893633	6403	0.00716568929	90.361666	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	42	895680	6626	0.007398285438	90.568652	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	40	897859	6869	0.007650974345	90.788987	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	38	900106	7131	0.00792295134	91.016197	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	36	902246	7385	0.008185678747	91.232588	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	34	904274	7623	0.008430515292	91.437653	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	31	907250	8040	0.008862491671	91.738578	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	29	909376	8363	0.009196960775	91.953553	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	27	911517	8706	0.009551654247	92.170045	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	25	913532	9048	0.009904956857	92.373796	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	22	916440	9590	0.01046494562	92.667844	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	20	918589	9975	0.01085958418	92.885145	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	18	921013	10504	0.01140537028	93.130253	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	16	923188	11024	0.01194176487	93.350183	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	14	925196	11533	0.01246600047	93.553226	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	11	927252	11999	0.01294091954	93.761123	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	9	929265	12581	0.01353918767	93.964672	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	7	931290	13122	0.01409066237	94.169434	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	6	933605	13904	0.01489333557	94.40352	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	4	935807	14607	0.01560951371	94.62618	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	2	938532	15652	0.01667763237	94.901724	988952
+Simulated long RNA reads to mouse	flash (ONT)	iou	0	988899	28764	0.02908738451	99.994691	988952
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	60	951757	1029	0.001081683097	95.431219	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	59	953806	1036	0.001086698403	95.636669	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	57	957634	1050	0.001096973845	96.020497	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	55	961325	1069	0.001112526402	96.390588	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	53	964296	1091	0.001131913265	96.688485	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	51	966727	1128	0.001167340331	96.932238	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	48	969551	1170	0.001207259233	97.215396	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	45	971871	1208	0.001243477147	97.448018	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	41	974341	1281	0.001315247272	97.695681	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	37	976430	1359	0.001392316197	97.905142	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	32	978714	1476	0.001508611551	98.134155	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	27	980900	1675	0.00170812432	98.353342	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	21	983286	1964	0.001997891764	98.592582	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	16	985323	2285	0.002319542769	98.796829	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	10	987525	2610	0.002643476042	99.01762	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	3	989722	2903	0.002933650594	99.23791	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	1	996092	3578	0.003592537842	99.87662	997323
+Simulated long RNA reads to mouse	minimap2 (HiFi)	iou	0	997323	4269	0.004280957984	100.00005	997323
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	60	850839	5640	0.00662933491	86.034459	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	59	853117	5719	0.006704234763	86.264804	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	58	855479	5805	0.006786252622	86.503642	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	57	857746	5886	0.006862750241	86.732875	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	56	860085	5976	0.006948727772	86.969388	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	55	862549	6083	0.007052928557	87.21854	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	54	864823	6203	0.007173139953	87.448481	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	53	867154	6323	0.007292241463	87.684185	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	52	869511	6442	0.007409332712	87.922518	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	51	871885	6588	0.007556611505	88.16257	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	50	874211	6721	0.007688642851	88.397769	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	49	876505	6883	0.007853344902	88.629731	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	48	878890	7055	0.008027734968	88.870896	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	47	881194	7215	0.008188317108	89.10387	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	46	883341	7366	0.008339356863	89.320968	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	45	885402	7554	0.008532277693	89.52937	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	43	889273	7940	0.008929198947	89.920795	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	41	892721	8295	0.009292371697	90.269447	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	39	895596	8637	0.009644410178	90.560159	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	37	898179	8977	0.009995218105	90.821344	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	35	900669	9302	0.01032842791	91.073126	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	33	903085	9665	0.01070275184	91.317425	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	31	905519	10052	0.01110136226	91.563544	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	29	908136	10540	0.01160673533	91.828168	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	27	910484	10983	0.01206335748	92.065591	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	25	912768	11450	0.01254480189	92.296542	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	23	914922	11904	0.01301148458	92.514349	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	21	916953	12266	0.01337745044	92.719717	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	18	919884	12875	0.01399686591	93.016092	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	16	922076	13453	0.014590438	93.237741	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	13	925266	14241	0.01539178172	93.560304	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	11	928298	15165	0.01633687871	93.866891	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	9	930652	15853	0.01703482234	94.104921	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	7	933017	16675	0.01787265512	94.344063	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	5	935229	17526	0.01874031989	94.567734	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	3	937330	18258	0.01947925518	94.780181	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	1	970088	26271	0.02708154978	98.092577	988952
+Simulated long RNA reads to mouse	minimap2 (ONT)	iou	0	985407	35410	0.03593487973	99.64159	988952
