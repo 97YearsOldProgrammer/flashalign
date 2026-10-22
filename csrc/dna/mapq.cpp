@@ -31,7 +31,7 @@
 //     a rival. A chained rival at another locus that ties the winner exactly
 //     gives x = 1.
 //   - minimap2's seed-repetitiveness factor (uniq_ratio) is not applied.
-//   - The margin terms (mapq_alt, and the HiFi rule's guard, ladder and R4
+//   - The margin terms (mapq_alt, and the HiFi rule's guard and ladder
 //     below) read dp1 and dp2 before the controller's rank rescale
 //     (minimap2's dp_max0, which it prints as ms:i). The ratio, the n_sub DP
 //     rule and the dp1 > dp2 never-Q0 promotion read the rescaled pair.
@@ -68,8 +68,8 @@
 //      kDnaChainMapqHifiSingleEventMapq when one gap event explains the
 //      margin, scaled by min(pen_s1, pen_cm) without the vote floor, then the
 //      n_sub term and the clamp.
-//   R4 The never-Q0 promotion needs a seat beaten by at least A + B and
-//      x_other < 1.
+//   R4 The never-Q0 promotion is minimap2's: dp1 > dp2 on the rescaled
+//      pair, as on every preset.
 //   R5 Otherwise minimap2's ratio form on the rescaled dp1 / dp2, with its
 //      mapq_alt on m_eff.
 //   R6 On a block record of a multi-block family the MAPQ is capped at
@@ -454,7 +454,7 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   pen_cm = std::min(pen_cm, std::min(1.0, w_abs / kDnaChainMapqVoteFloor));
 
   const double match_sc = static_cast<double>(std::max(1, evidence.match_sc));
-  // R2. `margin_beats_rival` also gates the never-Q0 promotion below.
+  // R2.
   const bool margin_beats_rival =
       hifi && dp_branch && dp1_margin > 0.0 && dp2_margin > 0.0 &&
       evidence.substitution_cost > 0 &&
@@ -501,10 +501,9 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
                           0.499);
   mapq = std::max(0, mapq);
   mapq = std::min(60, mapq);
-  // An aligned hit that beat its rival is never Q0; under the HiFi rule (R4)
-  // the seat must have lost by at least one substitution and x_other < 1.
-  const bool beat_rival =
-      hifi ? (margin_beats_rival && x_other < 1.0) : (dp1 > 0.0 && dp1 > dp2);
+  // An aligned hit that beat its rival on the rescaled pair is never Q0
+  // (minimap2's floor).
+  const bool beat_rival = dp1 > 0.0 && dp1 > dp2;
   if (beat_rival && mapq == 0)
     mapq = 1;
   // The vote cap, only while the vote is below kDnaChainMapqVoteCapMinVote.
