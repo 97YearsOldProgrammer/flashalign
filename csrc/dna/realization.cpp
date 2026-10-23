@@ -287,7 +287,7 @@ DpScoringParams dp_scoring_from_opts(const ResolvedDnaOptions& opts) {
   scoring.bw = opts.cigar_dp_bw;
   scoring.bw_long = opts.cigar_dp_bw_long;
   scoring.inversion_zdrop = opts.cigar_dp_inversion_zdrop;
-  scoring.inversion_max_gap = opts.cigar_dp_max_gap;
+  scoring.inversion_max_gap = opts.inversion_gap;
   scoring.inversion_min_chain_score = opts.min_chain_score;
   scoring.inversion_min_dp_max = opts.cigar_dp_min_dp_max;
   return scoring;
@@ -1227,8 +1227,7 @@ std::vector<Region> retain_regions(const DnaContext& context,
   std::vector<Region> regions;
   const float pri_ratio = static_cast<float>(context.opts.pri_ratio);
   const int min_diff = 2 * seed_length;
-  const int min_strand_sc =
-      static_cast<int>(context.opts.cigar_dp_max_gap * 0.8);
+  const int min_strand_sc = static_cast<int>(context.opts.inversion_gap * 0.8);
   int n_2nd = 0;
   const auto valid = [&](const DnaOwnershipRole& role) {
     return role.item >= 0 &&

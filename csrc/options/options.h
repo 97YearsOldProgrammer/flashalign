@@ -214,6 +214,9 @@ struct DnaLongOptions {
   int cigar_dp_bw_long = 20000;
   // minimap2 -g; on a splice preset also the fine chain's query gap.
   int cigar_dp_max_gap = 5000;
+  // The strand floor and the inversion probe and middle bounds; the preset's,
+  // not -g.
+  int inversion_gap = 5000;
   // minimap2 -s: the DP half of the DNA per-record emission floor
   // (mm_filter_regs) and the inversion-segment gate. 0 disables.
   int cigar_dp_min_dp_max = 80;

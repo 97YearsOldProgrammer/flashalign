@@ -556,6 +556,7 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.cigar_dp_gap_open2 = mapping.cigar_dp_gap_open2;
   dctx.opts.cigar_dp_match = mapping.cigar_dp_match;
   dctx.opts.cigar_dp_max_gap = mapping.cigar_dp_max_gap;
+  dctx.opts.inversion_gap = mapping.inversion_gap;
   dctx.opts.cigar_dp_min_dp_max = mapping.cigar_dp_min_dp_max;
   dctx.opts.cigar_dp_inversion_zdrop = mapping.cigar_dp_inversion_zdrop;
   dctx.opts.min_chain_score = mapping.min_chain_score;

@@ -70,6 +70,8 @@ struct ResolvedDnaOptions {
   int cigar_dp_gap_open2 = 24;
   int cigar_dp_match = 2;
   int cigar_dp_max_gap = 5000;
+  // options/options.h inversion_gap.
+  int inversion_gap = 5000;
   // minimap2 -s: the DP half of the per-record emission floor and the
   // local-inversion segment gate. 0 disables both.
   int cigar_dp_min_dp_max = 80;

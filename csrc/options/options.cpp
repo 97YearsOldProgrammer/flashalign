@@ -119,6 +119,7 @@ struct DnaPresetProfile {
   int cigar_dp_bw;
   int cigar_dp_bw_long;
   int cigar_dp_max_gap;
+  int inversion_gap;
   int cigar_dp_min_dp_max;
   // The gap-fill row -A -B -O -E -z --score-N set; the cigar_dp_* row above
   // is the end row, which prices every path. On an Asm row the two are equal
@@ -139,15 +140,16 @@ struct DnaPresetProfile {
 constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
     // End row as minimap2: lr is map-ont (-A2 -B4 -O4,24 -E2,1), lr:hq is
     // map-hifi (-A1 -B4 -O6,26 -E2,1). The fill rows are gentler on gaps.
-    // lr:hq's -g is 5000, under map-hifi's 10000.
+    // lr:hq's -g is 5000, under map-hifi's 10000, which its strand floor and
+    // inversion bounds keep.
     {"lr", DnaPresetKind::Ont, 21, 9, 64, 128, 2048,
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
-     5000, 80,
+     5000, 5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
      kReadPlacement, kNoOverlap},
     {"lr:hq", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048,
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
-     5000, 200,
+     5000, 10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
      kReadPlacement, kNoOverlap},
     // minimap2's asm5, asm10 and asm20 scoring with its -r1k,100k -g10k -s200
@@ -155,17 +157,17 @@ constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
     // width.
     {"asm5", DnaPresetKind::Asm, 21, 9, 64, 128, 2048,
      1, 19, 1, 39, 3, 81, 1, 200, -1, 1000, 100000,
-     10000, 200,
+     10000, 10000, 200,
      1, 19, 1, 39, 3, 81, 1, 200, 200,
      kAssemblyPlacement, kNoOverlap},
     {"asm10", DnaPresetKind::Asm, 21, 9, 64, 128, 2048,
      1, 9, 1, 16, 2, 41, 1, 200, -1, 1000, 100000,
-     10000, 200,
+     10000, 10000, 200,
      1, 9, 1, 16, 2, 41, 1, 200, 200,
      kAssemblyPlacement, kNoOverlap},
     {"asm20", DnaPresetKind::Asm, 21, 9, 64, 128, 2048,
      1, 4, 1, 6, 2, 26, 1, 200, -1, 1000, 100000,
-     10000, 200,
+     10000, 10000, 200,
      1, 4, 1, 6, 2, 26, 1, 200, 200,
      kAssemblyPlacement, kNoOverlap},
     // Experimental all-vs-all read overlap, map-only: lr's row at k17 with
@@ -173,12 +175,12 @@ constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
     // row of their kind, which dna_preset_profile returns.
     {"ava-ont", DnaPresetKind::Ont, 17, 9, 64, 64, 2048,
      2, 4, 1, 4, 2, 24, 1, 400, -1, 500, 20000,
-     5000, 80,
+     5000, 5000, 80,
      4, 8, 2, 8, 4, 48, 1, 800, 200,
      kOntOverlapPlacement, kOntOverlap},
     {"ava-hifi", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048,
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
-     10000, 200,
+     10000, 10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
      kReadPlacement, kHiFiOverlap},
 }};
@@ -260,6 +262,7 @@ static void set_dna_long_platform_fields(
     mapping.cigar_dp_bw = profile.cigar_dp_bw;
     mapping.cigar_dp_bw_long = profile.cigar_dp_bw_long;
     mapping.cigar_dp_max_gap = profile.cigar_dp_max_gap;
+    mapping.inversion_gap = profile.inversion_gap;
     mapping.cigar_dp_min_dp_max = profile.cigar_dp_min_dp_max;
     mapping.fill_dp_match = profile.fill_dp_match;
     mapping.fill_dp_mismatch = profile.fill_dp_mismatch;
