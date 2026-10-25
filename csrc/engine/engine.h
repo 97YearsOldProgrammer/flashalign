@@ -64,9 +64,13 @@ public:
 
   const ::fa::cpu::options::ResolvedOptions& config() const;
   void reconfigure(const ::fa::cpu::options::ResolvedOptions& config);
+  // Builds the index over `genome`. With `packed_reference` (the DNA presets) the bases
+  // are packed into the index as a .faix holds them and the unpacked copy is freed; the
+  // DNA context unpacks each region's window.
   LongReadEngine(std::unordered_map<std::string, std::string> genome,
                  int k = 15, int min_support = 3, int chain_syncmer_s = 9,
-                 int chain_syncmer_downsample = 1, int build_threads = 0);
+                 int chain_syncmer_downsample = 1, int build_threads = 0,
+                 bool packed_reference = false);
 
   // Loads an engine over a prebuilt .faix. The seed length k and syncmer s come from the
   // index, as in minimap2.
@@ -75,13 +79,15 @@ public:
   // uses the default. When `reference_bases_needed` is false (DNA map-only PAF) the
   // reference stays packed and only names and lengths are read from the index.
   // `image_offset` / `image_bytes` select one part of a multi-part index; both 0 means the
-  // whole file.
+  // whole file. `packed_reference` (the DNA presets) keeps the needed bases packed in the
+  // index, for the DNA context to unpack per region; the caller passes it only for an
+  // index that embeds its reference.
   static std::unique_ptr<LongReadEngine>
   from_index(std::unordered_map<std::string, std::string> genome,
              const std::string &index_path, int min_support = 3,
              int chain_syncmer_downsample = 1, int n_threads = 0,
              bool reference_bases_needed = true, uint64_t image_offset = 0,
-             uint64_t image_bytes = 0);
+             uint64_t image_bytes = 0, bool packed_reference = false);
 
   // Builds an engine over an already-loaded index, which may be shared by several engines.
   // The index must embed its reference. Options come only from `config`.
@@ -321,8 +327,11 @@ private:
   ::fa::cpu::options::ResolvedOptions cfg_;
   std::vector<std::string> chr_names_;
   std::vector<std::vector<uint8_t>> chr_encs_;
-  // Always filled; chr_encs_ is empty when the run needs no reference bases.
+  // Always filled; chr_encs_ is empty when the run needs no reference bases or reads them
+  // packed.
   std::vector<int64_t> chr_lengths_;
+  // The constructors' packed_reference: the DNA context reads the bases from the index.
+  bool packed_reference_ = false;
   // bind_dual_order(); read-only while mapping.
   std::vector<int> dual_order_;
   std::vector<int> dual_contig_rank_;

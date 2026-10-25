@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -101,6 +102,12 @@ public:
         std::vector<std::vector<uint8_t>>& out,
         int n_threads = 0
     ) const;
+
+    // Bases [lo, hi) of `contig` into `out`, one base code per byte, as
+    // reference_chromosomes_u8 unpacks them; minimap2's mm_idx_getseq. Needs
+    // has_reference_payload() and lo <= hi <= the contig's length.
+    void reference_bases_u8(uint64_t contig, uint64_t lo, uint64_t hi,
+                            uint8_t* out) const;
 
     // Attaches the contig names and the reference, one base code per byte and contig, in
     // contig order.
@@ -924,6 +931,22 @@ namespace fa {
 namespace cpu {
 namespace engine {
 
+// A view of a contig's bases [lo, hi), addressed in contig coordinates.
+struct ReferenceWindow {
+    const uint8_t* origin = nullptr; // the base at lo
+    int64_t lo = 0;
+    int64_t hi = 0;
+
+    const uint8_t* ptr(int64_t pos) const noexcept {
+        assert(pos >= lo && pos <= hi);
+        return origin + (pos - lo);
+    }
+    uint8_t at(int64_t pos) const noexcept {
+        assert(pos >= lo && pos < hi);
+        return origin[pos - lo];
+    }
+};
+
 struct ReferenceContext {
     const SeedIndex* index = nullptr;
     const std::vector<std::string>* names = nullptr;
@@ -931,16 +954,40 @@ struct ReferenceContext {
     // index's offsets table, so it is present whether or not the bases are.
     const std::vector<int64_t>* lengths = nullptr;
     // The unpacked reference, one byte per base. Empty when the mode reads no bases (DNA
-    // map-only); check has_bases() first, and take contig counts and lengths from
-    // `lengths`.
+    // map-only) or reads them packed; check has_bases() first, and take contig counts and
+    // lengths from `lengths`.
     const std::vector<std::vector<uint8_t>>* encoded = nullptr;
+    // The DNA presets: `encoded` is empty and the bases stay packed in `index`, read
+    // through window().
+    bool packed = false;
 
     bool valid() const noexcept {
         return index != nullptr && names != nullptr && encoded != nullptr;
     }
-    // The reference bases are materialized (CIGAR output, RNA, a FASTA target).
+    // The reference bases can be read: packed (DNA with a CIGAR or a FASTA target) or
+    // materialized (RNA).
     bool has_bases() const noexcept {
-        return encoded != nullptr && !encoded->empty();
+        return packed || (encoded != nullptr && !encoded->empty());
+    }
+    // The bases of `contig` over [lo, hi), clamped to the contig. Unpacked, the view is the
+    // whole contig (lo 0, hi its length) and nothing is copied; packed, [lo, hi) is unpacked
+    // into `buffer`, as minimap2's mm_idx_getseq. Needs has_bases().
+    ReferenceWindow window(int contig, int64_t lo, int64_t hi,
+                           std::vector<uint8_t>& buffer) const {
+        if (!packed) {
+            const std::vector<uint8_t>& bases =
+                (*encoded)[static_cast<size_t>(contig)];
+            return {bases.data(), 0, static_cast<int64_t>(bases.size())};
+        }
+        const int64_t length = contig_length(contig);
+        lo = std::min(std::max<int64_t>(lo, 0), length);
+        hi = std::min(std::max(hi, lo), length);
+        // Never empty, so the origin is never null.
+        buffer.resize(static_cast<size_t>(std::max<int64_t>(hi - lo, 1)));
+        index->reference_bases_u8(static_cast<uint64_t>(contig),
+                                  static_cast<uint64_t>(lo),
+                                  static_cast<uint64_t>(hi), buffer.data());
+        return {buffer.data(), lo, hi};
     }
     int contig_count() const noexcept {
         return lengths == nullptr ? 0 : static_cast<int>(lengths->size());

@@ -773,6 +773,16 @@ bool FaixIndex::reference_chromosomes_u8(
     return true;
 }
 
+void FaixIndex::reference_bases_u8(
+    uint64_t contig,
+    uint64_t lo,
+    uint64_t hi,
+    uint8_t* out
+) const {
+    const uint64_t base = chr_offsets_[contig];
+    unpack_reference_4bit_to(packed_reference_, base + lo, base + hi, out);
+}
+
 bool parse_chrom_names(
     const char* data,
     uint64_t bytes,

@@ -111,20 +111,24 @@ public:
   LongReadAligner(const LongReadAligner &) = delete;
   LongReadAligner &operator=(const LongReadAligner &) = delete;
 
-  // Builds the index over `genome` ({name: sequence}).
+  // Builds the index over `genome` ({name: sequence}). `packed_reference`
+  // keeps the bases packed in that index (LongReadEngine).
   explicit LongReadAligner(std::unordered_map<std::string, std::string> genome,
                            int k = 15, int min_support = 3,
                            int chain_syncmer_s = 9,
                            int chain_syncmer_downsample = 1,
-                           int build_threads = 0);
+                           int build_threads = 0,
+                           bool packed_reference = false);
   // Loads a prebuilt .faix; k and s are taken from the index (LongReadEngine::from_index).
   // `n_threads` <= 0 uses the default. With `reference_bases_needed` false (DNA map-only
   // PAF) the reference is not unpacked. `image` selects one part of a multi-part index.
+  // `packed_reference` keeps the needed bases packed (LongReadEngine::from_index).
   static LongReadAligner
   from_index(std::unordered_map<std::string, std::string> genome,
              const std::string &index_path, int min_support = 3,
              int chain_syncmer_downsample = 1, int n_threads = 0,
-             bool reference_bases_needed = true, IndexImageSpan image = {});
+             bool reference_bases_needed = true, IndexImageSpan image = {},
+             bool packed_reference = false);
   // Aligner over an already-loaded index, which may be shared.
   static LongReadAligner from_shared_index(std::shared_ptr<SeedIndex> index,
                                            const ResolvedOptions& config);

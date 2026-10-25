@@ -542,3 +542,12 @@ AlignResult map_read(const DnaContext& base_dctx,
 
 } // namespace dna
 } // namespace fa::cpu::lr
+
+namespace fa::cpu::lr::dna {
+
+std::vector<std::uint8_t>& ref_window_buffer() {
+  static thread_local std::vector<std::uint8_t> buffer;
+  return buffer;
+}
+
+} // namespace fa::cpu::lr::dna

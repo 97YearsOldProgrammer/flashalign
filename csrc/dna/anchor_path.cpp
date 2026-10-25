@@ -507,7 +507,7 @@ bool GeometryPlanner::advance() {
         continue;
       plan_.gaps.push_back({left.q_end() - origin, right.q - origin});
       if (!certified_gap(certificate_.query + left.q_end(),
-                         certificate_.target + left.r_end(), length,
+                         certificate_.target.ptr(left.r_end()), length,
                          certificate_))
         ++region.failing_gaps;
     }

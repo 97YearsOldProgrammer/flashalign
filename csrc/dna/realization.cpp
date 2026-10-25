@@ -48,29 +48,32 @@ namespace fa::cpu::lr {
 // Replays a fixed CIGAR and fills the record's coordinates and accounting;
 // false if the CIGAR does not replay. `request` asks for cs:Z / MD:Z / =X
 // output (minimap2 --cs / --MD / --eqx), built during the same replay; with
-// --eqx the CIGAR is replaced by its =/X spelling.
+// --eqx the CIGAR is replaced by its =/X spelling. The replay runs in
+// `reference`'s coordinates, which start at its lo.
 static bool commit_fixed_cigar_geometry(
     AlignResult& result, const std::vector<std::uint8_t>& query,
-    const std::vector<std::uint8_t>& reference,
+    const ::fa::cpu::engine::ReferenceWindow& reference,
     const ::fa::cpu::output::CigarReplayRequest& request = {}) {
   if (result.cigar.empty() || result.read_len < 0 ||
       static_cast<int>(query.size()) < result.read_len || result.pos < 0) {
     return false;
   }
   const ::fa::cpu::output::CigarReplay replay = ::fa::cpu::output::replay_cigar(
-      result.cigar, query.data(), result.read_len, reference.data(),
-      static_cast<int>(reference.size()), result.pos, request);
+      result.cigar, query.data(), result.read_len, reference.origin,
+      static_cast<int>(reference.hi - reference.lo),
+      static_cast<int>(result.pos - reference.lo), request);
   const ::fa::cpu::output::ForwardQueryInterval query_interval =
       ::fa::cpu::output::forward_query_interval_from_cigar(
           result.cigar, result.read_len, result.is_reverse);
   if (!replay.valid || replay.query_consumed != result.read_len ||
-      replay.target_start != result.pos || !query_interval.valid) {
+      replay.target_start + reference.lo != result.pos ||
+      !query_interval.valid) {
     return false;
   }
 
   result.query_start = query_interval.q_lo;
   result.query_end = query_interval.q_hi;
-  result.target_end = replay.target_end;
+  result.target_end = static_cast<int>(replay.target_end + reference.lo);
   result.matches = replay.matches;
   result.mismatches = replay.mismatches;
   result.insertions = replay.insertions;
@@ -515,6 +518,25 @@ int unit_forward_end(const Unit& unit, int read_length) {
   return unit.reverse ? read_length - unit.oriented_begin : unit.oriented_end;
 }
 
+// The bases a block reads, [lowest anchor r, highest r + span): every step
+// runs between anchor centres and every gap the certificate tests lies
+// between two anchors on one diagonal.
+::fa::cpu::engine::ReferenceWindow block_window(const DnaContext& context,
+                                                const BlockPlan& plan) {
+  std::int64_t lo = 0;
+  std::int64_t hi = 0;
+  if (context.ref.packed && !plan.path.selected.empty()) {
+    lo = std::numeric_limits<std::int64_t>::max();
+    for (std::size_t i = 0; i < plan.path.selected.size(); ++i) {
+      const chaining::Anchor& anchor = plan.path.selected[i];
+      lo = std::min<std::int64_t>(lo, anchor.r);
+      hi = std::max<std::int64_t>(
+          hi, static_cast<std::int64_t>(anchor.r) + anchor.span);
+    }
+  }
+  return dna::reference_window(context, plan.chromosome, lo, hi);
+}
+
 } // namespace
 
 namespace family_internal {
@@ -533,8 +555,8 @@ bool plan_and_realize_packets(const DnaContext& context,
                               BlockSplit& split) {
   const auto& query =
       plan.reverse ? *request.reverse_query : *request.forward_query;
-  const auto& reference =
-      (*context.ref.encoded)[static_cast<std::size_t>(plan.chromosome)];
+  const ::fa::cpu::engine::ReferenceWindow reference =
+      block_window(context, plan);
   const DpScoringParams scoring = fill_dp_scoring(context.opts);
   ::fa::cpu::DpMapOpt map_opt;
   map_opt.bw = context.opts.cigar_dp_bw;
@@ -545,7 +567,7 @@ bool plan_and_realize_packets(const DnaContext& context,
   // The same matrix the ksw2 executor uses.
   ordered::GapCertificate certificate;
   certificate.query = query.data();
-  certificate.target = reference.data();
+  certificate.target = reference;
   ::fa::cpu::ksw2_simple_mat(certificate.matrix.data(), scoring.match,
                              scoring.mismatch, scoring.ambi);
   certificate.match = scoring.match;
@@ -640,13 +662,13 @@ bool plan_and_realize_packets(const DnaContext& context,
             q_span > 0 ? query.data() + step.query_begin : nullptr, q_span,
             step.query_begin, plan.path.query_length, plan.reverse),
         realization::make_target_slice(
-            r_span > 0 ? reference.data() + step.target_begin : nullptr, r_span,
+            r_span > 0 ? reference.ptr(step.target_begin) : nullptr, r_span,
             step.target_begin),
         two_axis ? step.selected_band : -1, scoring.zdrop, step.long_join, nullptr,
         /*inversion_probe_enabled=*/true, verified_region,
         gated ? &probe_gate : nullptr, exact_first);
     price_fill_path(context.opts, query.data() + step.query_begin, q_span,
-                    reference.data() + step.target_begin, r_span, outcome);
+                    reference.ptr(step.target_begin), r_span, outcome);
     record_kernel_work(outcome, q_span, r_span, result);
     record_inversion_probe(outcome, result);
     // Every fill the ksw2 gap fill took enters the window, capped ones too.
@@ -702,8 +724,6 @@ bool extend_unit_terminals(const DnaContext& context,
                            const ordered::TerminalWindowControl& caps) {
   const auto& query =
       unit.reverse ? *request.reverse_query : *request.forward_query;
-  const auto& reference =
-      (*context.ref.encoded)[static_cast<std::size_t>(unit.chromosome)];
   const DpScoringParams scoring = dp_scoring_from_opts(context.opts);
   ordered::TerminalWindowControl terminal_control{
       std::max(1, context.opts.cigar_dp_max_gap), scoring.match,
@@ -733,14 +753,16 @@ bool extend_unit_terminals(const DnaContext& context,
         terminals.first_adjusted.query - terminals.query_start;
     const int r_span =
         terminals.first_adjusted.target - terminals.target_start;
+    const ::fa::cpu::engine::ReferenceWindow reference =
+        dna::reference_window(context, unit.chromosome, terminals.target_start,
+                              terminals.first_adjusted.target);
     const realization::RealizationOutcome outcome = run_dna_long_realization(
         realization::RealizationRole::DnaLeftExtension, seam_scoring,
         realization::make_query_slice(query.data() + terminals.query_start,
                                       q_span, terminals.query_start,
                                       request.family->read_length,
                                       unit.reverse),
-        realization::make_target_slice(reference.data() +
-                                           terminals.target_start,
+        realization::make_target_slice(reference.ptr(terminals.target_start),
                                        r_span, terminals.target_start),
         context.opts.cigar_dp_bw);
     record_kernel_work(outcome, q_span, r_span, result);
@@ -768,6 +790,10 @@ bool extend_unit_terminals(const DnaContext& context,
         terminals.query_end - terminals.last_adjusted.query;
     const int r_span =
         terminals.target_end - terminals.last_adjusted.target;
+    const ::fa::cpu::engine::ReferenceWindow reference =
+        dna::reference_window(context, unit.chromosome,
+                              terminals.last_adjusted.target,
+                              terminals.target_end);
     const realization::RealizationOutcome outcome = run_dna_long_realization(
         realization::RealizationRole::DnaRightExtension, scoring,
         realization::make_query_slice(
@@ -775,7 +801,7 @@ bool extend_unit_terminals(const DnaContext& context,
             terminals.last_adjusted.query, request.family->read_length,
             unit.reverse),
         realization::make_target_slice(
-            reference.data() + terminals.last_adjusted.target, r_span,
+            reference.ptr(terminals.last_adjusted.target), r_span,
             terminals.last_adjusted.target),
         context.opts.cigar_dp_bw);
     record_kernel_work(outcome, q_span, r_span, result);
@@ -831,8 +857,10 @@ bool validate_and_commit_unit(const DnaContext& context,
   output.cigar = clipped;
   const auto& query =
       unit.reverse ? *request.reverse_query : *request.forward_query;
-  const auto& reference =
-      (*context.ref.encoded)[static_cast<std::size_t>(unit.chromosome)];
+  // The unit's span, which a committed record's CIGAR covers exactly (the
+  // target_end test below).
+  const ::fa::cpu::engine::ReferenceWindow reference = dna::reference_window(
+      context, unit.chromosome, unit.target_begin, unit.target_end);
   return commit_fixed_cigar_geometry(output, query, reference,
                                      context.opts.cigar_replay_request) &&
          output.query_start == forward_begin &&
@@ -874,11 +902,12 @@ bool realize_inversion_middle(const DnaContext& context,
   if (tl < scoring.inversion_min_chain_score || tl > scoring.inversion_max_gap)
     return false;
 
-  const auto& reference =
-      (*context.ref.encoded)[static_cast<std::size_t>(incumbent.chromosome)];
   const int target_origin = incumbent.target_end;
-  if (target_origin < 0 ||
-      target_origin + tl > static_cast<int>(reference.size()))
+  if (target_origin < 0)
+    return false;
+  const ::fa::cpu::engine::ReferenceWindow reference = dna::reference_window(
+      context, incumbent.chromosome, target_origin, target_origin + tl);
+  if (target_origin + tl > reference.hi)
     return false;
   // The middle is on the opposite strand, so its CIGAR is written against the
   // other oriented read.
@@ -902,7 +931,7 @@ bool realize_inversion_middle(const DnaContext& context,
   std::vector<std::uint8_t> target_reversed(static_cast<std::size_t>(tl));
   for (int index = 0; index < tl; ++index) {
     target_reversed[static_cast<std::size_t>(index)] =
-        reference[static_cast<std::size_t>(target_origin + tl - 1 - index)];
+        reference.at(target_origin + tl - 1 - index);
   }
   std::array<std::int8_t, 25> matrix{};
   ::fa::cpu::ksw2_simple_mat(matrix.data(), scoring.match, scoring.mismatch,
@@ -928,11 +957,11 @@ bool realize_inversion_middle(const DnaContext& context,
       realization::make_query_slice(oriented_query.data() + oriented_begin,
                                     query_span, oriented_begin, read_length,
                                     middle_reverse),
-      realization::make_target_slice(reference.data() + target_begin,
+      realization::make_target_slice(reference.ptr(target_begin),
                                      target_span, target_begin),
       static_cast<int>(scoring.bw * 1.5));
   price_fill_path(context.opts, oriented_query.data() + oriented_begin,
-                  query_span, reference.data() + target_begin, target_span,
+                  query_span, reference.ptr(target_begin), target_span,
                   outcome);
   record_kernel_work(outcome, query_span, target_span, result);
   // As mm_align1_inv, any traceback is accepted; a Z-dropped extension still
@@ -1641,7 +1670,8 @@ DnaRegionOutcome realize_dna_regions(
   std::vector<Chain> chains;
   const std::vector<Region> regions =
       retain_selection(context, placement, read_length, seed_length,
-                       context.ref.encoded->size(), chains);
+                       static_cast<std::size_t>(context.ref.contig_count()),
+                       chains);
   result.block_count = static_cast<int>(regions.size());
   if (regions.empty()) {
     result.failure = DnaFamilyFailure::NoSelectedFamily;
@@ -1661,8 +1691,8 @@ DnaRegionOutcome realize_dna_regions(
     const Region& region = regions[r];
     const Chain& chain = chains[static_cast<std::size_t>(region.item)];
     const DnaSelectionItem& item = *chain.item;
-    const std::vector<std::uint8_t>& reference =
-        (*context.ref.encoded)[static_cast<std::size_t>(item.contig)];
+    const int contig_length =
+        static_cast<int>(context.ref.contig_length(item.contig));
     const auto refuse = [&](DnaFamilyFailure failure) {
       if (first_failure == DnaFamilyFailure::None) {
         first_failure = failure;
@@ -1681,11 +1711,11 @@ DnaRegionOutcome realize_dna_regions(
     path.reference_id = item.contig;
     path.reverse_complemented = item.reverse;
     path.query_length = read_length;
-    path.target_length = static_cast<int>(reference.size());
+    path.target_length = contig_length;
     path.query_bound_begin = 0;
     path.query_bound_end = read_length;
     path.target_bound_begin = 0;
-    path.target_bound_end = static_cast<int>(reference.size());
+    path.target_bound_end = contig_length;
     path.minimizer_k = context.ref.index->k();
     path.selected = {anchors.data(), anchors.size()};
     path.realization_end = path.selected.size();

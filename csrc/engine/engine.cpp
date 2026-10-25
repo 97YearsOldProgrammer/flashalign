@@ -29,7 +29,8 @@ void LongReadEngine::reconfigure(const ::fa::cpu::options::ResolvedOptions& conf
 
 LongReadEngine::LongReadEngine(std::unordered_map<std::string, std::string> genome,
                                int k, int min_support, int chain_syncmer_s,
-                               int chain_syncmer_downsample, int build_threads) {
+                               int chain_syncmer_downsample, int build_threads,
+                               bool packed_reference) {
   cfg_.index.k = k;
   cfg_.common.min_support = min_support;
   apply_chain_seed_constructor_config(chain_syncmer_s,
@@ -52,6 +53,12 @@ LongReadEngine::LongReadEngine(std::unordered_map<std::string, std::string> geno
         "failed to build the index: " +
         ::fa::cpu::faix_build_error_message(build_status));
   }
+  if (packed_reference) {
+    if (!index_->set_reference_payload(chr_names_, chr_encs_))
+      throw std::runtime_error("failed to pack the reference into the index");
+    std::vector<std::vector<uint8_t>>().swap(chr_encs_);
+    packed_reference_ = true;
+  }
   cfg_.common.num_threads =
       ::fa::cpu::threading::default_thread_count();
   // Provisional; reconfigure() redoes both with the final options.
@@ -64,7 +71,7 @@ LongReadEngine::from_index(std::unordered_map<std::string, std::string> genome,
                            const std::string &index_path, int min_support,
                            int chain_syncmer_downsample, int n_threads,
                            bool reference_bases_needed, uint64_t image_offset,
-                           uint64_t image_bytes) {
+                           uint64_t image_bytes, bool packed_reference) {
   auto obj = std::make_unique<LongReadEngine>();
   obj->cfg_.common.min_support = min_support;
   // s is set from the index below.
@@ -79,7 +86,12 @@ LongReadEngine::from_index(std::unordered_map<std::string, std::string> genome,
   // Names and lengths come from the index. The bases are unpacked from the index only when
   // needed; an index without them falls back to encoding `genome`.
   bool reference_bound = false;
-  if (reference_bases_needed) {
+  if (reference_bases_needed && packed_reference) {
+    // The DNA context unpacks each region's window from the index.
+    obj->bind_index_reference_metadata();
+    obj->packed_reference_ = true;
+    reference_bound = true;
+  } else if (reference_bases_needed) {
     if (obj->index_->has_reference_payload() &&
         obj->index_->reference_chromosomes_u8(obj->chr_encs_, n_threads)) {
       obj->bind_index_reference_metadata();
@@ -540,6 +552,7 @@ void LongReadEngine::bind_dual_order() {
   ::fa::cpu::lr::DnaContext dctx;
   dctx.ref = ::fa::cpu::engine::ReferenceContext{
       index_.get(), &chr_names_, &chr_lengths_, &chr_encs_};
+  dctx.ref.packed = packed_reference_;
   dctx.opts.cigar_local_interval_anchor_interval_pad =
       mapping.cigar_local_interval_anchor_interval_pad;
   dctx.opts.dna_dense_diag_min_runs = mapping.dna_dense_diag_min_runs;

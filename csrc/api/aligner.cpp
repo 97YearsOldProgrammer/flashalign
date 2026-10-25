@@ -96,11 +96,11 @@ LongReadAligner::~LongReadAligner() = default;
 LongReadAligner::LongReadAligner(
     std::unordered_map<std::string, std::string> genome, int k,
     int min_support, int chain_syncmer_s, int chain_syncmer_downsample,
-    int build_threads)
+    int build_threads, bool packed_reference)
     : impl_(std::make_unique<Impl>()) {
   impl_->a = std::make_unique<::fa::cpu::lr::LongReadEngine>(
       std::move(genome), k, min_support, chain_syncmer_s,
-      chain_syncmer_downsample, build_threads);
+      chain_syncmer_downsample, build_threads, packed_reference);
   impl_->select_backend();
 }
 
@@ -108,13 +108,13 @@ LongReadAligner LongReadAligner::from_index(
     std::unordered_map<std::string, std::string> genome,
     const std::string &index_path, int min_support,
     int chain_syncmer_downsample, int n_threads,
-    bool reference_bases_needed, IndexImageSpan image) {
+    bool reference_bases_needed, IndexImageSpan image, bool packed_reference) {
   LongReadAligner self;
   self.impl_ = std::make_unique<Impl>();
   self.impl_->a = ::fa::cpu::lr::LongReadEngine::from_index(
       std::move(genome), index_path, min_support,
       chain_syncmer_downsample, n_threads, reference_bases_needed,
-      image.offset, image.bytes);
+      image.offset, image.bytes, packed_reference);
   self.impl_->select_backend();
   return self;
 }

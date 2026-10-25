@@ -1483,6 +1483,12 @@ int run_align(const AlignOptions& cli_options) {
   // it; otherwise the resolver takes it from the preset. Every part of a
   // multi-part index has the same seeding.
   std::optional<fa::cpu::api::ResolvedMapOptions> resolved;
+  // The DNA presets keep the reference packed, in the .faix or in the index
+  // built from a FASTA target, and unpack each region's window as minimap2's
+  // mm_idx_getseq; the splice presets read whole contigs, unpacked. A .faix
+  // built with --idx-no-seq has no bases to keep.
+  const bool packed_reference = !fa::cpu::api::is_rna_preset(opt.preset) &&
+                                (!use_index || in.index_has_reference);
   // Loads part `part` (or builds the in-memory index for a FASTA target),
   // installs the resolved options and rebinds align_batch. The caller frees
   // the previous part first.
@@ -1498,7 +1504,8 @@ int run_align(const AlignOptions& cli_options) {
               opt.min_support.value_or(3),
               /*chain_syncmer_downsample=*/1,
               req.user.num_threads.value_or(0),
-              run_needs_reference_bases(opt), part_spans[part]));
+              run_needs_reference_bases(opt), part_spans[part],
+              packed_reference));
       if (!resolved) {
         req.index.has_index = true;
         req.index.k = dna_aligner->config().index.k;
@@ -1531,7 +1538,8 @@ int run_align(const AlignOptions& cli_options) {
       dna_aligner = std::make_unique<fa::cpu::api::LongReadAligner>(
           std::move(genome.sequences), resolved->k(),
           resolved->min_support(), resolved->syncmer_s(),
-          resolved->syncmer_downsample(), req.user.num_threads.value_or(0));
+          resolved->syncmer_downsample(), req.user.num_threads.value_or(0),
+          packed_reference);
     }
     dna_aligner->reconfigure(resolved->resolved());
     backend_mode = resolved->mode();

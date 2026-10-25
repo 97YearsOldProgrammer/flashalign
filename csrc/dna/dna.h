@@ -441,6 +441,31 @@ struct DnaWorkerScratch {
 
 }}} // namespace fa::cpu::lr
 
+namespace fa::cpu::lr::dna {
+
+// The calling thread's buffer for the reference windows of a packed reference
+// (engine::ReferenceContext::window).
+std::vector<std::uint8_t>& ref_window_buffer();
+
+// The window of `contig`'s bases over [lo, hi) on the calling thread; the
+// thread's next window reuses its buffer.
+inline ::fa::cpu::engine::ReferenceWindow reference_window(
+    const DnaContext& context, int contig, std::int64_t lo, std::int64_t hi) {
+  return context.ref.window(contig, lo, hi, ref_window_buffer());
+}
+
+// The reference bases of CIGAR operations (M, D, N, =, X).
+inline std::int64_t cigar_target_bases(
+    const std::vector<std::pair<int, char>>& ops) {
+  std::int64_t bases = 0;
+  for (const auto& [length, op] : ops)
+    if (op == 'M' || op == 'D' || op == 'N' || op == '=' || op == 'X')
+      bases += length;
+  return bases;
+}
+
+} // namespace fa::cpu::lr::dna
+
 /**** placement_family_adapter ****/
 
 namespace fa::cpu::lr {
@@ -1174,7 +1199,8 @@ struct GeometryControl {
 // This allows up to 3 mismatches per gap with map-hifi scoring, 2 with map-ont.
 struct GapCertificate {
   const std::uint8_t* query = nullptr;  // the whole oriented query (anchor.q)
-  const std::uint8_t* target = nullptr; // the whole chromosome (anchor.r)
+  // The chromosome's bases under the block's anchors, at anchor.r.
+  ::fa::cpu::engine::ReferenceWindow target;
   // ksw2_simple_mat(a, b, sc_ambi): N scores sc_ambi, even against N.
   std::array<std::int8_t, 25> matrix{};
   int match = 0;        // a

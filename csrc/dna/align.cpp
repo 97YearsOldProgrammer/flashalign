@@ -1139,14 +1139,18 @@ RecordPrice price_record(const DnaContext& context, const AlignResult& record,
                          const std::vector<std::uint8_t>& rc) {
   RecordPrice price;
   const int contig = record_contig_index(context, record.chromosome);
-  if (context.ref.encoded != nullptr && contig >= 0 &&
-      static_cast<std::size_t>(contig) < context.ref.encoded->size() &&
-      record.pos >= 0 && !record.cigar.empty()) {
-    const std::vector<std::uint8_t>& reference =
-        (*context.ref.encoded)[static_cast<std::size_t>(contig)];
+  if (context.ref.has_bases() && contig >= 0 &&
+      contig < context.ref.contig_count() && record.pos >= 0 &&
+      !record.cigar.empty()) {
+    const std::vector<std::pair<int, char>> ops =
+        ::fa::cpu::output::parse_cigar_ops(record.cigar);
+    // The window: the record's span, from pos over its CIGAR.
+    const std::int64_t span =
+        context.ref.packed ? dna::cigar_target_bases(ops) : 0;
+    const ::fa::cpu::engine::ReferenceWindow reference = dna::reference_window(
+        context, contig, record.pos, record.pos + span);
     const std::vector<std::uint8_t>& query = record.is_reverse ? rc : fwd;
-    price.sweep = dp_max_sweep(::fa::cpu::output::parse_cigar_ops(record.cigar),
-                               query.data(), reference.data() + record.pos,
+    price.sweep = dp_max_sweep(ops, query.data(), reference.ptr(record.pos),
                                context.opts.cigar_dp_match,
                                context.opts.cigar_dp_mismatch,
                                context.opts.cigar_dp_gap_open1,
