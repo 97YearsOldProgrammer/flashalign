@@ -348,10 +348,12 @@ private:
   LongReadSeedContext rna_seed_ctx_;
 };
 
-// Maps a stream of read batches on a BatchWindow, so workers move on to the next batch
-// instead of waiting for the slowest read of the current one. Output does not depend on the
-// window size: results are stored at each read's original index and batches come back in
-// submission order. The calling thread submits and collects; it does not map reads.
+// Maps a stream of read batches on a BatchWindow of threading::kBatchWindow batches, so
+// workers move on to the next batch instead of waiting for the slowest read of the current
+// one; it takes a read of a batch younger than the oldest only while the bases in flight
+// stay within `max_bases`. Results equal align_batch's for the same batch: they are stored
+// at each read's original index and batches come back in submission order. The calling
+// thread submits and collects; it does not map reads.
 template <class Backend>
 class WindowedAlignSession {
 public:
@@ -372,13 +374,13 @@ public:
   // `n_threads` is the number of scratch slots, i.e. threads that may map reads. The window
   // owns tids [0, n_threads - n_helpers); the other `n_helpers` tids belong to threads of
   // another stage that call try_help(). At least one worker is always the window's own.
-  WindowedAlignSession(const LongReadEngine &engine, int n_threads, int window,
-                       int n_helpers = 0)
+  WindowedAlignSession(const LongReadEngine &engine, int n_threads, int n_helpers,
+                       std::uint64_t max_bases)
       : engine_(&engine), n_threads_(n_threads < 1 ? 1 : n_threads),
         n_helpers_(clamp_helpers(n_threads_, n_helpers)),
         worker_scratch_(static_cast<size_t>(n_threads_)),
-        window_(n_threads_ - n_helpers_,
-                static_cast<size_t>(window < 1 ? 1 : window)) {}
+        window_(n_threads_ - n_helpers_, ::fa::cpu::threading::kBatchWindow,
+                max_bases) {}
 
   WindowedAlignSession(const WindowedAlignSession &) = delete;
   WindowedAlignSession &operator=(const WindowedAlignSession &) = delete;
@@ -401,11 +403,17 @@ public:
     // The window holds the Batch until collect(), so the pointer stays valid.
     Batch *state = batch.get();
     const std::int64_t items = static_cast<std::int64_t>(batch->order.size());
-    window_.submit(items,
-                   [this, state](std::int64_t position, int tid) {
-                     map_one(*state, position, tid);
-                   },
-                   std::move(batch));
+    window_.submit(
+        items,
+        [this, state](std::int64_t position, int tid) {
+          map_one(*state, position, tid);
+        },
+        [state](std::int64_t position) {
+          const int i = state->order[static_cast<size_t>(position)];
+          return static_cast<std::uint64_t>(
+              state->reads[static_cast<size_t>(i)].size());
+        },
+        std::move(batch));
   }
 
   // Waits for the oldest batch and returns it, or rethrows its first exception.

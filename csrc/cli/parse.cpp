@@ -262,11 +262,6 @@ const std::vector<OptionSpec>& specs_table() {
         {OptionId::BatchBp, 'K', "--batch-bp", kSize, kStable, A,
          "NUM", SEC_IO,
          "minibatch size for mapping [500M]"},
-        // The preset's value (options/options.h preset_batch_window); -t 1
-        // forces 1. Output is identical for every value.
-        {OptionId::BatchWindow, '\0', "--batch-window", kInt, kStable, A,
-         "INT", SEC_IO,
-         "batches in flight in the compute stage [preset: 1 on asm, 3 otherwise]"},
         {OptionId::ShowConfig, '\0', "--show-config", kNone, kStable, A,
          "", SEC_IO,
          "print the resolved configuration and exit"},
@@ -970,7 +965,6 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
         case OptionId::ShowConfig: opt.show_config = true; break;
         case OptionId::Threads:    opt.threads = parse_int(val, arg); break;
         case OptionId::BatchBp:    opt.batch_bp = parse_size(val, arg); break;
-        case OptionId::BatchWindow: opt.batch_window = parse_int(val, arg); break;
         case OptionId::IoStaging:  opt.io_staging_mib = parse_int(val, arg); break;
         case OptionId::Progress:   opt.progress = true; break;
         case OptionId::Quiet:      opt.quiet = true; break;
@@ -1168,9 +1162,6 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
     }
     if (opt.batch_bp <= 0) {
         throw UsageError("--batch-bp must be positive");
-    }
-    if (opt.batch_window && *opt.batch_window < 1) {
-        throw UsageError("--batch-window must be at least 1");
     }
     if (opt.threads && *opt.threads < 1) {
         throw UsageError("-t must be at least 1");

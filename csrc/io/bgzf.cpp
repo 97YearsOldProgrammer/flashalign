@@ -651,8 +651,6 @@ void BgzfReader::read_exact(void* dst, size_t len, const char* field) {
     if (read(dst, len) != len) throw error(std::string("truncated ") + field);
 }
 
-bool BgzfReader::decode_parallel_active() const { return src_->is_parallel(); }
-
 std::runtime_error BgzfReader::error(const std::string& reason) const {
     const auto status = src_->status();
     std::string text = path_ + ": " + reason;
@@ -720,8 +718,6 @@ BamReader::BamReader(const std::string& path, const IoPlan* plan)
           path, make_byte_source(path, plan, InputPolicy::bam_integrity))) {
     parse_header();
 }
-
-bool BamReader::decode_parallel_active() const { return bgzf_->decode_parallel_active(); }
 
 const std::string& BamReader::sam_header_text() const { return header_text_; }
 

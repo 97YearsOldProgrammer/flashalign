@@ -366,6 +366,44 @@ private:
     bool aborted_ = false;
 };
 
+// A budget of batches alive in the pipeline: the reader takes a token before it reads a batch,
+// the writer returns it once the batch is written. abort() releases a waiting reader.
+class BatchBudget {
+public:
+    explicit BatchBudget(std::size_t tokens) : tokens_(tokens) {}
+
+    // False on abort.
+    bool acquire() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [&] { return aborted_ || tokens_ > 0; });
+        if (aborted_) return false;
+        --tokens_;
+        return true;
+    }
+
+    void release() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ++tokens_;
+        }
+        cv_.notify_one();
+    }
+
+    void abort() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            aborted_ = true;
+        }
+        cv_.notify_all();
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::size_t tokens_;
+    bool aborted_ = false;
+};
+
 namespace detail {
 
 // Default flush for a process stage that holds nothing back.
@@ -375,14 +413,28 @@ struct NoFlush {
 
 }  // namespace detail
 
-// Runs the pipeline to completion. `depth` is each queue's capacity in batches. An exception
-// in any stage aborts both queues and is rethrown on the caller after the threads join.
+// Batches alive from read to written: the reader takes one of these tokens before it reads a
+// batch and the writer returns it once the batch is written. The window's two, the batch being
+// read, the one being written and one ahead, so that a write held up by a slow sink, or a batch
+// that maps slowly, does not leave the window short.
+inline constexpr std::size_t kLiveBatches = 5;
+// Batches the compute stage maps at once (BatchWindow). The stage holds them before it hands
+// one on, so a window above the budget could never fill.
+inline constexpr std::size_t kBatchWindow = 2;
+static_assert(kBatchWindow <= kLiveBatches,
+              "the batch window cannot hold more batches than are alive");
+
+// Runs the pipeline to completion. Each queue holds up to kLiveBatches, so a batch waits on
+// its token, not on a queue. process() may hold back at most kBatchWindow batches. An
+// exception in any stage aborts both queues and is rethrown on the caller after the threads
+// join.
 template <class Item, class Result, class Produce, class Process, class Consume,
           class Flush = detail::NoFlush>
 void run_pipeline(Produce produce, Process process, Consume consume,
-                  std::size_t depth = 2, Flush flush = Flush()) {
-    BoundedQueue<Item> to_process(depth);
-    BoundedQueue<Result> to_consume(depth);
+                  Flush flush = Flush()) {
+    BoundedQueue<Item> to_process(kLiveBatches);
+    BoundedQueue<Result> to_consume(kLiveBatches);
+    BatchBudget budget(kLiveBatches);
 
     std::exception_ptr reader_exc;
     std::exception_ptr writer_exc;
@@ -392,6 +444,7 @@ void run_pipeline(Produce produce, Process process, Consume consume,
         name_current_thread("fa-reader");
         try {
             for (;;) {
+                if (!budget.acquire()) break;  // aborted
                 std::optional<Item> item = produce();
                 if (!item) break;
                 if (!to_process.push(std::move(*item))) break;  // downstream aborted
@@ -401,6 +454,7 @@ void run_pipeline(Produce produce, Process process, Consume consume,
             reader_exc = std::current_exception();
             to_process.abort();
             to_consume.abort();
+            budget.abort();
         }
     });
 
@@ -411,11 +465,13 @@ void run_pipeline(Produce produce, Process process, Consume consume,
                 std::optional<Result> result = to_consume.pop();
                 if (!result) break;
                 consume(std::move(*result));
+                budget.release();
             }
         } catch (...) {
             writer_exc = std::current_exception();
             to_process.abort();
             to_consume.abort();
+            budget.abort();
         }
     });
 
@@ -447,6 +503,7 @@ void run_pipeline(Produce produce, Process process, Consume consume,
         worker_exc = std::current_exception();
         to_process.abort();
         to_consume.abort();
+        budget.abort();
     }
 
     reader.join();
@@ -484,6 +541,12 @@ void run_pipeline_serial(Produce produce, Process process, Consume consume,
 // finds the oldest batch exhausted moves on to the next one instead of waiting at a barrier,
 // so one slow item delays only its own batch. collect() returns batches oldest first.
 //
+// Each item has a weight (its bases). A worker takes an item of a batch younger than the
+// oldest only while the weight in flight over the whole window (items claimed and not yet
+// finished, run_one callers' included) plus that item's stays within `max_weight`; the
+// oldest batch is never held back. A held worker sleeps until an item finishes or its batch
+// becomes the oldest. Claims from the oldest batch take no lock.
+//
 // The window owns `n_threads` workers with stable tids in [0, n_threads); the calling thread
 // only submits and collects. submit(), collect() and the destructor belong to that one
 // thread. Other threads may lend time through run_one(), one item per call.
@@ -500,11 +563,13 @@ class BatchWindow {
 public:
     // body(item, tid): item in [0, n_items), tid the worker's slot.
     using Body = std::function<void(std::int64_t, int)>;
+    // weight(item): the item's share of the bound.
+    using Weight = std::function<std::uint64_t(std::int64_t)>;
 
-    // Both arguments are clamped to at least 1.
-    BatchWindow(int n_threads, std::size_t window)
+    // `n_threads` and `window` are clamped to at least 1.
+    BatchWindow(int n_threads, std::size_t window, std::uint64_t max_weight)
         : n_threads_(n_threads < 1 ? 1 : n_threads),
-          window_(window == 0 ? 1 : window) {
+          window_(window == 0 ? 1 : window), max_weight_(max_weight) {
         workers_.reserve(static_cast<std::size_t>(n_threads_));
         for (int tid = 0; tid < n_threads_; ++tid)
             workers_.emplace_back([this, tid] { worker_loop(tid); });
@@ -530,12 +595,12 @@ public:
         done_.wait(lock, [this] { return helpers_in_flight_ == 0; });
     }
 
-    // Queues a batch of `n_items`. Items are claimed in index order, so items sorted longest
-    // first give LPT scheduling. Throws std::logic_error when the window is full, since only
-    // the calling thread could free a slot.
-    void submit(std::int64_t n_items, Body body, Payload payload) {
-        std::unique_ptr<Batch> batch(new Batch(
-            n_items < 0 ? 0 : n_items, std::move(body), std::move(payload)));
+    // Queues a batch of `n_items`, item i weighing weight(i). Items are claimed in index
+    // order, so items sorted longest first give LPT scheduling. Throws std::logic_error when
+    // the window is full, since only the calling thread could free a slot.
+    void submit(std::int64_t n_items, Body body, Weight weight, Payload payload) {
+        std::unique_ptr<Batch> batch(new Batch(n_items < 0 ? 0 : n_items, std::move(body),
+                                               std::move(weight), std::move(payload)));
         const bool nothing_to_do = batch->n == 0;
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -543,6 +608,8 @@ public:
                 throw std::logic_error(
                     "BatchWindow::submit with the window already full");
             }
+            if (batches_.empty())
+                batch->oldest.store(true, std::memory_order_release);
             batches_.push_back(std::move(batch));
         }
         work_.notify_all();
@@ -563,7 +630,11 @@ public:
             done_.wait(lock, [this] { return quiescent(*batches_.front()); });
             batch = std::move(batches_.front());
             batches_.pop_front();
+            if (!batches_.empty())
+                batches_.front()->oldest.store(true, std::memory_order_release);
         }
+        // Workers held on the new oldest batch may claim now.
+        work_.notify_all();
         if (batch->first_exception)
             std::rethrow_exception(batch->first_exception);
         return std::move(batch->payload);
@@ -576,9 +647,9 @@ public:
     }
 
     // Runs at most one item on a thread the window does not own. Returns false when no batch
-    // has an unclaimed item; true otherwise, even if another thread took the last item first.
-    // `tid` is only passed to the body and need not lie in [0, n_threads). Callers must
-    // stop calling before the window is destroyed.
+    // has an unclaimed item or the bound holds back the next one; true otherwise, even if
+    // another thread took the last item first. `tid` is only passed to the body and need not
+    // lie in [0, n_threads). Callers must stop calling before the window is destroyed.
     bool run_one(int tid) {
         Batch* batch = nullptr;
         {
@@ -591,18 +662,9 @@ public:
             ++batch->workers;      // pins the batch against collection
             ++helpers_in_flight_;  // pins the window against destruction
         }
-        const std::int64_t item =
-            batch->claim.fetch_add(1, std::memory_order_relaxed);
-        if (item < batch->n) {
-            try {
-                batch->body(item, tid);
-            } catch (...) {
-                std::lock_guard<std::mutex> lock(mutex_);
-                if (!batch->first_exception)
-                    batch->first_exception = std::current_exception();
-                batch->claim.store(batch->n, std::memory_order_relaxed);
-            }
-        }
+        const std::int64_t item = claim(*batch, /*wait=*/false);
+        if (item >= 0)
+            run_item(*batch, item, tid);
         bool became_quiescent = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -612,29 +674,38 @@ public:
                 // Notify under the lock: the waiting destructor may destroy done_ as soon as
                 // the mutex is released.
                 done_.notify_all();
-                return true;
+                return item != kHeld;
             }
         }
         // `batch` may already be collected and destroyed.
         if (became_quiescent)
             done_.notify_all();
-        return true;
+        return item != kHeld;
     }
 
     std::size_t window() const { return window_; }
 
 private:
+    // claim()'s answers other than an item.
+    static constexpr std::int64_t kExhausted = -1;
+    static constexpr std::int64_t kHeld = -2;
+    static constexpr std::int64_t kNowOldest = -3;
+
     struct Batch {
-        Batch(std::int64_t items, Body item_body, Payload item_payload)
-            : n(items), body(std::move(item_body)),
+        Batch(std::int64_t items, Body item_body, Weight item_weight, Payload item_payload)
+            : n(items), body(std::move(item_body)), weight(std::move(item_weight)),
               payload(std::move(item_payload)) {}
 
         std::int64_t n = 0;
-        // Next item to hand out; set to `n` to stop claims, and may exceed n.
+        // Next item to hand out; set to `n` to stop claims, and may exceed n. Advanced by
+        // fetch_add once the batch is the oldest, under mutex_ before.
         std::atomic<std::int64_t> claim{0};
+        // Set once, under mutex_, when the batch becomes the front of the window.
+        std::atomic<bool> oldest{false};
         int workers = 0;                        // guarded by mutex_
         std::exception_ptr first_exception;     // guarded by mutex_
         Body body;
+        Weight weight;
         Payload payload;
     };
 
@@ -654,22 +725,79 @@ private:
         return nullptr;
     }
 
+    // The next item of `batch`, which the caller has pinned, with its weight added to the
+    // weight in flight; kExhausted when the batch has none left. A younger batch's item is
+    // claimed under mutex_ against the bound: with `wait` the caller sleeps until it fits,
+    // else it gets kHeld.
+    std::int64_t claim(Batch& batch, bool wait) {
+        if (!batch.oldest.load(std::memory_order_acquire)) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            // Counted before the weight in flight is read, so an item that finishes after
+            // the read sees the count and wakes this thread.
+            held_.fetch_add(1);
+            const std::int64_t answer = claim_younger(batch, wait, lock);
+            held_.fetch_sub(1);
+            if (answer != kNowOldest)
+                return answer;
+        }
+        const std::int64_t item = batch.claim.fetch_add(1, std::memory_order_relaxed);
+        if (item >= batch.n)
+            return kExhausted;
+        weight_in_flight_.fetch_add(batch.weight(item));
+        return item;
+    }
+
+    // claim() on a batch younger than the oldest, with mutex_ held; kNowOldest when the
+    // batch became the oldest meanwhile.
+    std::int64_t claim_younger(Batch& batch, bool wait,
+                               std::unique_lock<std::mutex>& lock) {
+        for (;;) {
+            if (batch.oldest.load(std::memory_order_relaxed))
+                return kNowOldest;
+            const std::int64_t item = batch.claim.load(std::memory_order_relaxed);
+            if (item >= batch.n)
+                return kExhausted;
+            const std::uint64_t item_weight = batch.weight(item);
+            if (weight_in_flight_.load() + item_weight <= max_weight_) {
+                // Only claimers holding mutex_ advance a batch that is not the oldest.
+                batch.claim.store(item + 1, std::memory_order_relaxed);
+                weight_in_flight_.fetch_add(item_weight);
+                return item;
+            }
+            if (!wait)
+                return kHeld;
+            work_.wait(lock);
+        }
+    }
+
+    // Runs a claimed item and takes its weight out of flight. False when it threw: the
+    // exception is latched and the batch's remaining items are dropped.
+    bool run_item(Batch& batch, std::int64_t item, int tid) {
+        bool ok = true;
+        try {
+            batch.body(item, tid);
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!batch.first_exception)
+                batch.first_exception = std::current_exception();
+            batch.claim.store(batch.n, std::memory_order_relaxed);
+            ok = false;
+        }
+        weight_in_flight_.fetch_sub(batch.weight(item));
+        if (held_.load() > 0) {
+            // Taking the lock orders this wake after a held claimer's check of the bound.
+            { std::lock_guard<std::mutex> lock(mutex_); }
+            work_.notify_all();
+        }
+        return ok;
+    }
+
     // Claims and runs items until the batch has none left.
     void drain(Batch& batch, int tid) {
         for (;;) {
-            const std::int64_t item =
-                batch.claim.fetch_add(1, std::memory_order_relaxed);
-            if (item >= batch.n)
+            const std::int64_t item = claim(batch, /*wait=*/true);
+            if (item < 0 || !run_item(batch, item, tid))
                 return;
-            try {
-                batch.body(item, tid);
-            } catch (...) {
-                std::lock_guard<std::mutex> lock(mutex_);
-                if (!batch.first_exception)
-                    batch.first_exception = std::current_exception();
-                batch.claim.store(batch.n, std::memory_order_relaxed);
-                return;
-            }
         }
     }
 
@@ -704,12 +832,19 @@ private:
     }
 
     mutable std::mutex mutex_;      // guards batches_, workers, first_exception
-    std::condition_variable work_;  // a batch was submitted / teardown began
+    // A batch was submitted or became the oldest, an item finished while a claimer was
+    // held, or teardown began.
+    std::condition_variable work_;
     std::condition_variable done_;  // a batch became quiescent
     std::deque<std::unique_ptr<Batch>> batches_;  // oldest at the front
     std::vector<std::thread> workers_;
     int n_threads_;
     std::size_t window_;
+    std::uint64_t max_weight_;
+    // Weight of the items claimed and not yet finished.
+    std::atomic<std::uint64_t> weight_in_flight_{0};
+    // Claimers inside claim()'s locked branch.
+    std::atomic<int> held_{0};
     bool shutdown_ = false;
     // run_one callers inside an item; guarded by mutex_. The destructor waits for zero.
     int helpers_in_flight_ = 0;

@@ -73,9 +73,6 @@ bool is_assembly_preset(std::string_view preset) {
 bool is_overlap_preset(std::string_view preset) {
   return ::fa::cpu::options::is_overlap_preset(preset);
 }
-int preset_batch_window(std::string_view preset) {
-  return ::fa::cpu::options::preset_batch_window(preset);
-}
 bool lane_runs_stage(LaneStage stage, std::string_view preset) {
   return ::fa::cpu::options::lane_runs_stage(stage, preset);
 }
@@ -210,6 +207,7 @@ struct WindowedAlignSession::Impl {
                         std::vector<int> name_ranks) = 0;
     virtual AlignedReadBatch collect() = 0;
     virtual std::size_t in_flight() const = 0;
+    virtual std::size_t window() const = 0;
     virtual bool try_help(int tid) = 0;
   };
 
@@ -217,8 +215,8 @@ struct WindowedAlignSession::Impl {
     ::fa::cpu::lr::WindowedAlignSession<Backend> session;
 
     BackendArm(const ::fa::cpu::lr::LongReadEngine &engine, int n_threads,
-               int window, int n_helpers)
-        : session(engine, n_threads, window, n_helpers) {}
+               int n_helpers, std::uint64_t max_bases)
+        : session(engine, n_threads, n_helpers, max_bases) {}
 
     void submit(std::vector<std::string> reads,
                 std::vector<std::uint32_t> read_name_hashes,
@@ -235,6 +233,7 @@ struct WindowedAlignSession::Impl {
       return out;
     }
     std::size_t in_flight() const override { return session.in_flight(); }
+    std::size_t window() const override { return session.window(); }
     bool try_help(int tid) override { return session.try_help(tid); }
   };
 
@@ -242,7 +241,8 @@ struct WindowedAlignSession::Impl {
 };
 
 WindowedAlignSession::WindowedAlignSession(const LongReadAligner &aligner,
-                                           int window, int helper_threads)
+                                           int helper_threads,
+                                           std::uint64_t max_bases)
     : impl_(std::make_unique<Impl>()) {
   const ::fa::cpu::lr::LongReadEngine &engine = *aligner.impl_->a;
   // The thread count align_batch uses; helper threads are part of it.
@@ -251,7 +251,7 @@ WindowedAlignSession::WindowedAlignSession(const LongReadAligner &aligner,
       [&](auto backend) {
         using Backend = decltype(backend);
         impl_->arm = std::make_unique<Impl::BackendArm<Backend>>(
-            engine, n_threads, window, helper_threads);
+            engine, n_threads, helper_threads, max_bases);
       },
       aligner.impl_->backend);
 }
@@ -272,14 +272,18 @@ AlignedReadBatch WindowedAlignSession::collect() {
 std::size_t WindowedAlignSession::in_flight() const {
   return impl_->arm->in_flight();
 }
+std::size_t WindowedAlignSession::window() const {
+  return impl_->arm->window();
+}
 bool WindowedAlignSession::try_help(int tid) {
   return impl_->arm->try_help(tid);
 }
 
 std::unique_ptr<WindowedAlignSession>
-LongReadAligner::make_windowed_session(int window, int helper_threads) const {
+LongReadAligner::make_windowed_session(int helper_threads,
+                                       std::uint64_t max_bases) const {
   return std::unique_ptr<WindowedAlignSession>(
-      new WindowedAlignSession(*this, window, helper_threads));
+      new WindowedAlignSession(*this, helper_threads, max_bases));
 }
 
 std::vector<std::string> LongReadAligner::chromosome_names() const {

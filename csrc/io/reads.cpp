@@ -320,21 +320,13 @@ make_byte_source(const std::string& path, const IoPlan* plan,
   if (policy == InputPolicy::gzip_compatible &&
       (plan == nullptr || plan->parallel_gz) &&
       gz_member_parallel_eligible(path)) {
-    try {
-      return std::make_unique<MemberParallelGzByteSource>(
-          path, plan == nullptr ? GzMemberSourceOptions() : plan->gz);
-    } catch (const std::exception&) {
-      // Fall back to the serial source, which reports any open error.
-    }
+    return std::make_unique<MemberParallelGzByteSource>(
+        path, plan == nullptr ? GzMemberSourceOptions() : plan->gz);
   }
   if ((plan == nullptr || plan->parallel_bgzf) &&
       bgzf_eligible(path)) {
-    try {
-      return std::make_unique<BgzfByteSource>(
-          path, plan == nullptr ? GzMemberSourceOptions() : plan->gz, policy);
-    } catch (const std::exception&) {
-      // As above.
-    }
+    return std::make_unique<BgzfByteSource>(
+        path, plan == nullptr ? GzMemberSourceOptions() : plan->gz, policy);
   }
   return std::make_unique<ZlibByteSource>(path, policy);
 }
@@ -391,10 +383,6 @@ bool FastxReader::next(FastxRecord& rec) {
         ++idx_;
         open_current();
     }
-}
-
-bool FastxReader::decode_parallel_active() const {
-    return src_ && src_->is_parallel();
 }
 
 const std::string& FastxReader::current_path() const { return paths_[idx_]; }
@@ -455,11 +443,6 @@ bool SequenceReader::next(FastxRecord& rec) {
         if (idx_ >= paths_.size()) return false;
         open_current();
     }
-}
-
-bool SequenceReader::decode_parallel_active() const {
-    if (fx_) return fx_->decode_parallel_active();
-    return bam_ && bam_->decode_parallel_active();
 }
 
 void SequenceReader::open_current() {

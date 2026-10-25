@@ -64,7 +64,7 @@ struct ByteSource {
     virtual ~ByteSource() = default;
     virtual int read(void* buf, int len) = 0;
     // Whether this source decodes with a thread team. The bytes are the same
-    // either way; a caller that lent threads needs to know if they are used.
+    // either way.
     virtual bool is_parallel() const { return false; }
     // Whether the input is a gzip file cut inside its compressed data, rather
     // than only inside the last member's trailer, so the record the cut
@@ -269,6 +269,19 @@ struct IoPlan {
   bool parallel_bgzf = true;
   // The team of either parallel source.
   GzMemberSourceOptions gz;
+};
+
+// The tids that a run's decode team takes from its `threads` mapping threads
+// and lends back through the mapping session: the top `team`. The session's
+// window owns the rest, [0, window()).
+struct DecodeTids {
+  int threads = 0;
+  int team = 0; // 0 when no file decodes in parallel
+
+  // The first of the team's tids.
+  int base() const { return threads - team; }
+  int loan() const { return team; }
+  int window() const { return threads - loan(); }
 };
 
 // True for a regular file of at least `min_bytes` that starts with a deflate
@@ -504,8 +517,8 @@ void uppercase_inplace(std::string& seq);
 
 // Opens one input. A large gzip file that is not BGZF gets the member-parallel
 // source and a large BGZF file the block-parallel one, which return the same
-// bytes; everything else, and any failure to start either, gets
-// ZlibByteSource. `plan` (or null for defaults) sets threads and memory only.
+// bytes; everything else gets ZlibByteSource. `plan` (or null for defaults)
+// sets threads and memory only.
 std::unique_ptr<ByteSource>
 make_byte_source(const std::string& path, const IoPlan* plan = nullptr,
                  InputPolicy policy = InputPolicy::gzip_compatible);
@@ -527,10 +540,6 @@ public:
     FastxReader& operator=(const FastxReader&) = delete;
 
     bool next(FastxRecord& rec);
-
-    // Whether the current input is decoded by a thread team; the parallel
-    // source may have fallen back to serial.
-    bool decode_parallel_active() const;
 
 private:
     const std::string& current_path() const;
@@ -565,8 +574,6 @@ public:
 
     void read_exact(void* dst, size_t len, const char* field);
 
-    bool decode_parallel_active() const;
-
     std::runtime_error error(const std::string& reason) const;
 
     void check_eof_marker();
@@ -600,9 +607,6 @@ public:
     // The blocks are decoded by make_byte_source(path, plan); `plan` is
     // borrowed, and null takes the defaults.
     explicit BamReader(const std::string& path, const IoPlan* plan = nullptr);
-
-    // Whether a thread team decodes the blocks.
-    bool decode_parallel_active() const;
 
     const std::string& sam_header_text() const;
 
@@ -680,9 +684,6 @@ public:
                             bool keep_comment = false);
 
     bool next(FastxRecord& rec);
-
-    // Whether the current input is decoded by a thread team.
-    bool decode_parallel_active() const;
 
 private:
     void open_current();

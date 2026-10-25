@@ -604,10 +604,6 @@ bool preset_is_valid(std::string_view preset);
 struct PresetSeeding { int k; int syncmer_s; };
 PresetSeeding resolve_preset_seeding(std::string_view preset);
 
-// The batches in flight in the compute stage, --batch-window's default: 1 on
-// the assembly presets, one batch at a time as in minimap2, 3 otherwise.
-int preset_batch_window(std::string_view preset);
-
 // Every accepted preset name, for error messages; the experimental ones last.
 std::string accepted_preset_names();
 

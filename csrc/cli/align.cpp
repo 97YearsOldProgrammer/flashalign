@@ -1,5 +1,5 @@
 // The align command: the SAM and PAF output writer; what --stats and --show-config
-// print; the run's plan (threads, the batch window, the decode loan) and run_align, last.
+// print; the run's plan (threads, the decode loan) and run_align, last.
 #include "cli/cli.h"
 
 #include "api/api.h"
@@ -535,8 +535,6 @@ void write_run_footer(int argc, char** argv, double real_seconds) {
 
 namespace {
 
-int resolve_batch_window(const AlignOptions& opt, int num_threads);
-
 // The resolved configuration as text, each value tagged with its source
 // (builtin, preset, index, cli, ...). It needs no aligner, so no reference is
 // opened or indexed.
@@ -592,13 +590,6 @@ std::string resolved_config_text(const AlignOptions& opt,
   row("output_format", opt.format, "cli");
   row("threads", i2s(cfg.common.num_threads),
       src(opt.threads && *opt.threads > 0, "builtin"));
-  // --batch-window, else the preset's; derived where -t 1 forces 1.
-  const int batch_window = resolve_batch_window(opt, cfg.common.num_threads);
-  row("batch_window", i2s(batch_window),
-      batch_window != opt.batch_window.value_or(
-                          fa::cpu::api::preset_batch_window(opt.preset))
-          ? "derived"
-          : src(opt.batch_window.has_value(), "preset"));
 
   row("min_support", i2s(cfg.common.min_support),
       src(opt.min_support.has_value(), "preset"));
@@ -1003,11 +994,11 @@ void show_index_resolved(const fa::cpu::api::LongReadAligner& aligner,
 namespace fa::cpu::cli {
 
 namespace {
-// Lends idle decode-team threads to the compute window. The read source (and
-// its decode team) starts before the compute window exists, so the team calls
+// Lends idle decode-team threads to the mapping session. The read source (and
+// its decode team) starts before the session exists, so the team calls
 // through this hub, which answers "no work" until install() and after
 // revoke(). revoke() waits for loaned threads to leave the target, so the
-// window can be destroyed while the team still runs; it is called only after
+// session can be destroyed while the team still runs; it is called only after
 // the pipeline has joined, so no new work can keep it waiting.
 class HelperHub {
 public:
@@ -1030,8 +1021,7 @@ private:
 };
 
 // The smallest -t at which gzip decoding that is not BGZF borrows mapping
-// threads. BGZF borrows them in every windowed run whose inputs are all
-// eligible.
+// threads. BGZF borrows them from -t 2 whenever the inputs are all eligible.
 constexpr int kDecodeLoanMinThreads = 32;
 
 // Threads the decode team borrows from the -t budget: -t/8, clamped to [1, 8].
@@ -1080,33 +1070,22 @@ int resolve_num_threads(const AlignOptions& opt) {
              : std::max(1, ::fa::cpu::threading::default_thread_count() - 2);
 }
 
-// Batches in flight in the compute stage: --batch-window, else the preset's.
-// Forced to 1 at -t 1, so that run uses a single OS thread
-// (run_pipeline_serial).
-int resolve_batch_window(const AlignOptions& opt, int num_threads) {
-  int window = opt.batch_window
-                   ? *opt.batch_window
-                   : fa::cpu::api::preset_batch_window(opt.preset);
-  if (window < 1)
-    window = 1;
-  if (num_threads == 1)
-    window = 1;
-  return window;
-}
-
 // The input decode plan, minus the loan callback. The parallel decoders
-// borrow threads only with a compute window and inputs that can feed them.
+// borrow mapping threads whenever the inputs can feed them, at any preset.
 // The member-parallel gzip decoder also needs -t >= kDecodeLoanMinThreads:
 // below that, serial decoding on the reader thread hides behind compute and
 // its extra work makes lending threads a net loss; its loan is then at least
 // four threads, so one thread stuck on a long read cannot starve the reader.
 // The BGZF decoder costs no extra work, and its reader inflates the run it
-// needs itself when no worker has claimed it, so it borrows from -t 2.
-fa::cpu::io::IoPlan build_io_plan(const AlignOptions& opt, int num_threads,
-                                  int batch_window) {
+// needs itself when no worker has claimed it, so it borrows from -t 2. -t 1
+// runs on one thread and lends nothing.
+fa::cpu::io::IoPlan build_io_plan(const AlignOptions& opt, int num_threads) {
   fa::cpu::io::IoPlan plan;
-  const bool gz = batch_window >= 2 && num_threads >= kDecodeLoanMinThreads;
-  const bool bgzf = batch_window >= 2;
+  const fa::cpu::io::DecodeTids tids{num_threads,
+                                     decode_loan_threads(num_threads)};
+  const bool room = tids.window() >= 1;
+  const bool gz = room && num_threads >= kDecodeLoanMinThreads;
+  const bool bgzf = room;
   const bool fed = decode_loan_can_be_fed(opt.reads_paths, gz, bgzf);
   plan.parallel_gz = gz && fed;
   plan.parallel_bgzf = bgzf && fed;
@@ -1571,16 +1550,15 @@ int run_align(const AlignOptions& cli_options) {
   AlignmentOutputWriter output(opt.output_path, opt.format, genome,
                                opt.command_line, opt.read_group_line);
 
-  // With a window of 1, each batch is aligned and joined in turn, so it costs
-  // its slowest read. With two or more, a worker that runs out of reads in
-  // batch k starts on k+1; output order is unchanged. Resolved before the
-  // reader, since only a window can borrow decode threads.
+  // -t 1 maps each batch on this thread. From -t 2 the batches go through
+  // one session, whose workers move on to the next batch instead of waiting
+  // for a batch's slowest read; output order is unchanged.
   const int num_threads = dna_aligner->config().common.num_threads;
-  const int batch_window = resolve_batch_window(opt, num_threads);
 
   // State shared across passes over the reads (one pass per index part).
   // The reader is rebound per pass; the output context is bound once, after
-  // the header. batch_bp bounds buffered input, not alignment cost.
+  // the header. batch_bp bounds buffered input and the bases in flight when
+  // a worker reaches past the oldest batch, not alignment cost.
   const int64_t batch_bp = opt.batch_bp;
   std::unique_ptr<fa::cpu::io::BatchReader> batch_reader;
   std::optional<AlignmentOutputContext> output_context;
@@ -1601,7 +1579,7 @@ int run_align(const AlignOptions& cli_options) {
   };
 
   // The records of each in-flight batch, whose sequences were moved into the
-  // window. Between collect_windowed() calls its size equals in_flight(),
+  // session. Between collect_windowed() calls its size equals in_flight(),
   // including after a batch throws. Caller thread only.
   std::deque<std::vector<fa::cpu::io::FastxRecord>> windowed_records;
   // Declared last so its workers are joined first on unwind. One per pass.
@@ -1660,8 +1638,8 @@ int run_align(const AlignOptions& cli_options) {
         return ranks;
       };
 
-  // Window of 1: one barrier per batch.
-  auto process_barrier = [&](ReadBatch in) -> std::optional<AlignedBatch> {
+  // -t 1: the batch mapped on this thread.
+  auto process_serial = [&](ReadBatch in) -> std::optional<AlignedBatch> {
     std::vector<std::string> seqs;
     seqs.reserve(in.records.size());
     for (auto& rec : in.records)
@@ -1676,8 +1654,8 @@ int run_align(const AlignOptions& cli_options) {
     return std::make_optional(std::move(done));
   };
 
-  // Window of two or more: takes the oldest batch from the window and puts
-  // its sequences back into its records. Caller thread only.
+  // Takes the oldest batch from the session and puts its sequences back into
+  // its records. Caller thread only.
   auto collect_windowed = [&]() -> AlignedBatch {
     // Pop before collect(), which drops its batch before rethrowing that
     // batch's exception, so the two queues stay in step.
@@ -1692,7 +1670,7 @@ int run_align(const AlignOptions& cli_options) {
   };
 
   // Submits a batch and collects the oldest once the window is full, so
-  // in_flight() never exceeds the window.
+  // in_flight() never exceeds it.
   auto process_windowed = [&](ReadBatch in) -> std::optional<AlignedBatch> {
     std::vector<std::string> seqs;
     seqs.reserve(in.records.size());
@@ -1704,7 +1682,7 @@ int run_align(const AlignOptions& cli_options) {
     windowed_records.push_back(std::move(in.records));
     session->submit(std::move(seqs), std::move(name_hashes),
                     std::move(self_contigs), std::move(name_ranks));
-    if (session->in_flight() < static_cast<size_t>(batch_window))
+    if (session->in_flight() < session->window())
       return std::nullopt;
     return std::make_optional(collect_windowed());
   };
@@ -1789,30 +1767,26 @@ int run_align(const AlignOptions& cli_options) {
 
     // A parallel decoder borrows some of the -t mapping threads when they are
     // idle rather than adding its own. Its team starts with the reader, before
-    // the window exists, so it reaches the window through the hub, which
+    // the session exists, so it reaches the session through the hub, which
     // must outlive the team.
     HelperHub helper_hub;
-    fa::cpu::io::IoPlan io_plan = build_io_plan(opt, num_threads, batch_window);
-    int decode_loan = io_plan.parallel_gz || io_plan.parallel_bgzf
-                          ? static_cast<int>(io_plan.gz.workers)
-                          : 0;
-    if (decode_loan > 0) {
-      // Helper tids are the top of the compute width, which the window
-      // reserves for them.
-      const int helper_tid_base = num_threads - decode_loan;
+    fa::cpu::io::IoPlan io_plan = build_io_plan(opt, num_threads);
+    // The team calls the session with tids of its own, which the session
+    // reserves for it (DecodeTids).
+    const fa::cpu::io::DecodeTids tids{
+        num_threads, io_plan.parallel_gz || io_plan.parallel_bgzf
+                         ? static_cast<int>(io_plan.gz.workers)
+                         : 0};
+    if (tids.team > 0) {
       HelperHub* hub = &helper_hub;
-      io_plan.gz.helper = [hub, helper_tid_base](unsigned ordinal) {
-        return hub->call(helper_tid_base + static_cast<int>(ordinal));
+      const int tid_base = tids.base();
+      io_plan.gz.helper = [hub, tid_base](unsigned ordinal) {
+        return hub->call(tid_base + static_cast<int>(ordinal));
       };
     }
 
     fa::cpu::io::SequenceReader reader(opt.reads_paths, &io_plan,
                                        /*keep_comment=*/opt.copy_comment);
-    // The source may still have fallen back to serial decoding; then drop
-    // the loan so the window is not left short of workers. Only the first
-    // input is checked.
-    if (decode_loan > 0 && !reader.decode_parallel_active())
-      decode_loan = 0;
     if (part == 0) {
       output.write_header(input_header, opt.no_header);
       output_context.emplace(output.context(
@@ -1823,38 +1797,39 @@ int run_align(const AlignOptions& cli_options) {
     }
     batch_reader = std::make_unique<fa::cpu::io::BatchReader>(reader, batch_bp);
 
-    if (batch_window >= 2)
-      session = dna_aligner->make_windowed_session(batch_window, decode_loan);
+    // A worker takes a read of a batch younger than the oldest only while the
+    // bases in flight stay within -K, so batches of a few whole contigs keep
+    // about one batch's bases in flight.
+    if (num_threads >= 2)
+      session = dna_aligner->make_windowed_session(
+          tids.loan(), static_cast<std::uint64_t>(batch_bp));
     // From here the decode team's idle threads map reads.
-    if (session != nullptr && decode_loan > 0) {
+    if (session != nullptr && tids.loan() > 0) {
       fa::cpu::api::WindowedAlignSession* target = session.get();
       helper_hub.install([target](int tid) { return target->try_help(tid); });
     }
-    // Revokes the loan before the window is torn down, on unwind too.
+    // Revokes the loan before the session is torn down, on unwind too.
     struct HelperLoanGuard {
       HelperHub& hub;
       ~HelperLoanGuard() { hub.revoke(); }
     } helper_loan_guard{helper_hub};
 
     // Release the persistent parallel_for team left over from unpacking the
-    // index. The windowed path never uses it; the barrier path respawns it.
+    // index; the session never uses it.
     fa::cpu::threading::join_persistent_pool();
 
-    // Reader, compute and writer run concurrently with two batches per
-    // hand-off, plus up to the window in the compute stage. Output order is
-    // independent of batching, threads and window. -t 1 runs all three stages
-    // on this thread.
-    if (batch_window >= 2) {
+    // Reader, compute and writer run concurrently, with at most
+    // threading::kLiveBatches batches alive from read to written. Output
+    // order is independent of batching, threads and the window. -t 1 runs all
+    // three stages on this thread.
+    if (num_threads >= 2) {
       fa::cpu::threading::run_pipeline<ReadBatch, AlignedBatch>(
-          produce, process_windowed, consume, /*depth=*/2, flush_windowed);
-    } else if (num_threads == 1) {
-      fa::cpu::threading::run_pipeline_serial<ReadBatch, AlignedBatch>(
-          produce, process_barrier, consume);
+          produce, process_windowed, consume, flush_windowed);
     } else {
-      fa::cpu::threading::run_pipeline<ReadBatch, AlignedBatch>(
-          produce, process_barrier, consume, /*depth=*/2);
+      fa::cpu::threading::run_pipeline_serial<ReadBatch, AlignedBatch>(
+          produce, process_serial, consume);
     }
-    // Revoke the loan before the window goes.
+    // Revoke the loan before the session goes.
     helper_hub.revoke();
     session.reset();
     batch_reader.reset();

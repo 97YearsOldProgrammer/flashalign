@@ -54,7 +54,6 @@ struct PresetSeeding {
 PresetSeeding resolve_preset_seeding(std::string_view preset);
 bool is_assembly_preset(std::string_view preset);
 bool is_overlap_preset(std::string_view preset);
-int preset_batch_window(std::string_view preset);
 bool lane_runs_stage(LaneStage stage, std::string_view preset);
 bool is_rna_preset(std::string_view preset);
 bool preset_is_valid(std::string_view preset);
@@ -157,13 +156,15 @@ public:
               const std::vector<int> *self_contigs = nullptr,
               const std::vector<int> *name_ranks = nullptr) const;
 
-  // Session that maps up to `window` batches at once with the configured thread count.
-  // `helper_threads` of those threads are not started here; the caller's own threads lend
-  // time through WindowedAlignSession::try_help. At least one worker stays the session's.
-  // The session borrows this aligner: destroy it first, and do not reconfigure meanwhile.
-  // Results equal align_batch for any window size.
+  // Session that maps up to threading::kBatchWindow batches at once with the configured
+  // thread count; a worker takes a read of a batch younger than the oldest only while the
+  // bases in flight stay within `max_bases`. `helper_threads` of those threads are not
+  // started here; the caller's own threads lend time through
+  // WindowedAlignSession::try_help. At least one worker stays the session's. The session
+  // borrows this aligner: destroy it first, and do not reconfigure meanwhile. Results equal
+  // align_batch.
   std::unique_ptr<WindowedAlignSession>
-  make_windowed_session(int window, int helper_threads = 0) const;
+  make_windowed_session(int helper_threads, std::uint64_t max_bases) const;
 
   std::vector<std::string> chromosome_names() const;
   std::vector<int64_t> chromosome_lengths() const;
@@ -183,7 +184,7 @@ private:
 
 // Ordered windowed mapping session, owned by one thread. submit() queues a batch and
 // returns; collect() waits for the oldest batch and rethrows its first per-read exception.
-// Keep in_flight() below the window before each submit.
+// Keep in_flight() below window() before each submit.
 class WindowedAlignSession {
 public:
   ~WindowedAlignSession();
@@ -199,6 +200,7 @@ public:
               std::vector<int> name_ranks = {});
   AlignedReadBatch collect();
   std::size_t in_flight() const;
+  std::size_t window() const;
 
   // For helper threads only: maps at most one read and returns whether one was available.
   // `tid` must lie in [thread_count - helper_threads, thread_count) after clamping. Safe to
@@ -207,8 +209,8 @@ public:
 
 private:
   friend class LongReadAligner;
-  WindowedAlignSession(const LongReadAligner &aligner, int window,
-                       int helper_threads);
+  WindowedAlignSession(const LongReadAligner &aligner, int helper_threads,
+                       std::uint64_t max_bases);
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
