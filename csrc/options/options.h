@@ -286,6 +286,11 @@ struct DnaLongOptions {
   // the pass's own band and reach (dna/placement.cpp chain_two_pass). asm5,
   // asm10 and asm20 install it; not settable.
   bool chain_two_pass = false;
+  // The candidates of each target, both lanes, take the whole target as
+  // their window, and one scan of the target fills both lanes' pools
+  // (dna/placement.cpp harvest_target_lanes). asm5, asm10 and asm20 install
+  // it; not settable.
+  bool target_harvest = false;
 };
 
 // The lane bound: the vote's peaks and the catalogue's candidates per strand.

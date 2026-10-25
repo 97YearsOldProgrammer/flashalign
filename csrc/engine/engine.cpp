@@ -605,6 +605,7 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.catalogue_lane_bound =
       ::fa::cpu::lr::dna_chain_max_candidates(mapping);
   dctx.opts.chain_two_pass = mapping.chain_two_pass;
+  dctx.opts.target_harvest = mapping.target_harvest;
   return dctx;
 }
 

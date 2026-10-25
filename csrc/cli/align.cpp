@@ -847,9 +847,11 @@ std::string resolved_config_text(const AlignOptions& opt,
                                       opt.preset))
       row("dna_rival.secondary_max", i2s(mapping.secondary_max),
           src(opt.dna_secondary_max.has_value(), "builtin"));
-    // The asm rows only (options/options.h chain_two_pass).
-    if (assembly)
+    // The asm rows only (options/options.h chain_two_pass, target_harvest).
+    if (assembly) {
       row("dna_chain.two_pass", b2s(mapping.chain_two_pass), "preset");
+      row("dna_chain.target_harvest", b2s(mapping.target_harvest), "preset");
+    }
   } else if (rna != nullptr) {
     row("rna_rival.pri_ratio", f2s(rna->rival_pri_ratio),
         src(opt.pri_ratio.has_value(), "builtin"));

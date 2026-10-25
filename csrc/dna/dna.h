@@ -139,6 +139,9 @@ struct ResolvedDnaOptions {
   // The asm rows (options/options.h chain_two_pass): two chain passes
   // (placement.cpp chain_two_pass).
   bool chain_two_pass = false;
+  // The asm rows (options/options.h target_harvest): one harvest per target
+  // (placement.cpp harvest_target_lanes).
+  bool target_harvest = false;
 };
 
 // Non-owning views, valid for the duration of one stage call.
