@@ -225,7 +225,11 @@ DNA preset two pieces of a read join into one record only across gaps of at most
 .IR NUM .
 Under a DNA preset chaining links anchors across at most the larger of it and
 .BR \-r 's
-second value, so values under that band leave the chain unchanged.
+second value, so values under that band leave the chain unchanged; under the
+assembly presets it is also the reach of the first of two chain passes, the
+larger of it and
+.BR \-r 's
+first value.
 Under a splice preset it bounds base alignment and is also the maximum
 query gap of the fine chain; there
 .B \-G
@@ -257,6 +261,14 @@ within the band across at most the band, or
 where that is larger, whatever the read length. So
 .I NUM2
 acts on placement, and so also on plain PAF output.
+Under the assembly presets each candidate's window is its whole target, and the
+chain runs twice, as in minimap2: first within
+.IR NUM1 ,
+keeping the chains of at least 3 anchors that score at least
+.BR \-m ,
+then within
+.I NUM2
+over their anchors.
 .BR ava\-ont " and " ava\-hifi
 refuse
 .BR \-r ;
