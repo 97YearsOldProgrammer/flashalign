@@ -142,6 +142,9 @@ struct ResolvedDnaOptions {
   // The asm rows (options/options.h target_harvest): one harvest per target
   // (placement.cpp harvest_target_lanes).
   bool target_harvest = false;
+  // Off on the asm rows (options/options.h divergence_contrast): no record
+  // takes the divergence contrast cap (mapq.cpp).
+  bool divergence_contrast = true;
 };
 
 // Non-owning views, valid for the duration of one stage call.

@@ -606,6 +606,7 @@ void LongReadEngine::bind_dual_order() {
       ::fa::cpu::lr::dna_chain_max_candidates(mapping);
   dctx.opts.chain_two_pass = mapping.chain_two_pass;
   dctx.opts.target_harvest = mapping.target_harvest;
+  dctx.opts.divergence_contrast = mapping.divergence_contrast;
   return dctx;
 }
 

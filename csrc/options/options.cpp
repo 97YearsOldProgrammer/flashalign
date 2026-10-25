@@ -96,14 +96,16 @@ constexpr DnaOverlapDefaults kHiFiOverlap{
 constexpr DnaOverlapDefaults kOntOverlap{
     true, ::fa::cpu::voting::kAllChainsLaneBound, 0.0, 100, 2, false};
 
-// The mechanisms of the asm rows (options.h chain_two_pass, target_harvest).
+// The mechanisms of the asm rows (options.h chain_two_pass, target_harvest,
+// divergence_contrast).
 struct DnaAssemblyDefaults {
   bool chain_two_pass;
   bool target_harvest;
+  bool divergence_contrast;
 };
 
-constexpr DnaAssemblyDefaults kNoAssembly{false, false};
-constexpr DnaAssemblyDefaults kAssembly{true, true};
+constexpr DnaAssemblyDefaults kNoAssembly{false, false, true};
+constexpr DnaAssemblyDefaults kAssembly{true, true, false};
 
 struct DnaPresetProfile {
   std::string_view name;
@@ -256,10 +258,12 @@ static void set_dna_long_platform_fields(
     // HiFi only: the late inversion probe's local-chain gate
     // (dna/dna.h).
     mapping.inversion_probe_local_gate = profile.kind == DnaPresetKind::HiFi;
-    // The asm rows only: two chain passes and one harvest per target
-    // (options.h chain_two_pass, target_harvest).
+    // The asm rows only: two chain passes and one harvest per target, and no
+    // divergence contrast cap (options.h chain_two_pass, target_harvest,
+    // divergence_contrast).
     mapping.chain_two_pass = profile.assembly.chain_two_pass;
     mapping.target_harvest = profile.assembly.target_harvest;
+    mapping.divergence_contrast = profile.assembly.divergence_contrast;
     // lr and lr:hq only: a rival region ends at its first split (dna/dna.h).
     mapping.rival_split_ends =
         profile.kind != DnaPresetKind::Asm && !profile.overlap.on;

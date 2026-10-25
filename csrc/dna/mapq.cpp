@@ -43,7 +43,7 @@
 // The formula runs once per block-owning record of the committed family: each
 // record is scored on its own candidate's chain, with its own dp1 and
 // identity. The divergence contrast (kDnaChainMapqDivergentRecord*) is a
-// family-level cap applied beside it.
+// family-level cap applied beside it, on every preset but the asm rows.
 //
 // The rivals are the catalogue candidates that own no block and the candidate
 // dp2 came from, each on its whole-query chain (whole_query_chain). With CIGAR
@@ -1487,13 +1487,15 @@ void price_dna_regions(const DnaContext& dctx,
       record.secondary_chain_score = breakdown.f2;
     }
   }
-  const DnaFamilyDivergence divergence = divergence_contrast(
-      realized, dctx.opts.min_chain_score, dctx.opts.cigar_dp_min_dp_max);
-  for (std::size_t index = 0; index < count; ++index) {
-    if (!divergence.records[index].divergent)
-      continue;
-    const int carried = mapqs[index] >= 0 ? mapqs[index] : mapqs[0];
-    mapqs[index] = std::min(carried, kDnaChainMapqDivergentRecordMapq);
+  if (dctx.opts.divergence_contrast) {
+    const DnaFamilyDivergence divergence = divergence_contrast(
+        realized, dctx.opts.min_chain_score, dctx.opts.cigar_dp_min_dp_max);
+    for (std::size_t index = 0; index < count; ++index) {
+      if (!divergence.records[index].divergent)
+        continue;
+      const int carried = mapqs[index] >= 0 ? mapqs[index] : mapqs[0];
+      mapqs[index] = std::min(carried, kDnaChainMapqDivergentRecordMapq);
+    }
   }
   const int mapq = std::max(0, mapqs[0]);
   mapqs.erase(mapqs.begin());
@@ -1677,19 +1679,22 @@ void price_dna_blocks(const DnaContext& dctx,
   // Divergence contrast cap (dna.h): a record whose event
   // divergence sits far above the family's minimum is the wrong copy,
   // whatever its chain says. The cap applies to the MAPQ each record would
-  // otherwise carry, inherited ones included.
-  const DnaFamilyDivergence divergence =
-      divergence_contrast(realized, dctx.opts.min_chain_score,
-                          dctx.opts.cigar_dp_min_dp_max);
-  if (divergence.records[0].divergent)
-    mapq = std::min(mapq, kDnaChainMapqDivergentRecordMapq);
-  for (std::size_t index = 0; index < supplementary_mapq.size(); ++index) {
-    if (!divergence.records[index + 1].divergent)
-      continue;
-    const int carried =
-        supplementary_mapq[index] >= 0 ? supplementary_mapq[index] : mapq;
-    supplementary_mapq[index] =
-        std::min(carried, kDnaChainMapqDivergentRecordMapq);
+  // otherwise carry, inherited ones included. Not on the asm rows, which
+  // price each record from its own chain, as minimap2 does.
+  if (dctx.opts.divergence_contrast) {
+    const DnaFamilyDivergence divergence =
+        divergence_contrast(realized, dctx.opts.min_chain_score,
+                            dctx.opts.cigar_dp_min_dp_max);
+    if (divergence.records[0].divergent)
+      mapq = std::min(mapq, kDnaChainMapqDivergentRecordMapq);
+    for (std::size_t index = 0; index < supplementary_mapq.size(); ++index) {
+      if (!divergence.records[index + 1].divergent)
+        continue;
+      const int carried =
+          supplementary_mapq[index] >= 0 ? supplementary_mapq[index] : mapq;
+      supplementary_mapq[index] =
+          std::min(carried, kDnaChainMapqDivergentRecordMapq);
+    }
   }
   route_dna_mapq(placement_family, primary_candidate, mapq,
                  supplementary_mapq, realized);

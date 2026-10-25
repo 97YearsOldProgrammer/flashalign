@@ -847,10 +847,13 @@ std::string resolved_config_text(const AlignOptions& opt,
                                       opt.preset))
       row("dna_rival.secondary_max", i2s(mapping.secondary_max),
           src(opt.dna_secondary_max.has_value(), "builtin"));
-    // The asm rows only (options/options.h chain_two_pass, target_harvest).
+    // The asm rows only (options/options.h chain_two_pass, target_harvest,
+    // divergence_contrast).
     if (assembly) {
       row("dna_chain.two_pass", b2s(mapping.chain_two_pass), "preset");
       row("dna_chain.target_harvest", b2s(mapping.target_harvest), "preset");
+      row("dna_chain_mapq.divergence_contrast",
+          b2s(mapping.divergence_contrast), "preset");
     }
   } else if (rna != nullptr) {
     row("rna_rival.pri_ratio", f2s(rna->rival_pri_ratio),

@@ -291,6 +291,11 @@ struct DnaLongOptions {
   // (dna/placement.cpp harvest_target_lanes). asm5, asm10 and asm20 install
   // it; not settable.
   bool target_harvest = false;
+  // A record whose divergence sits far above its family's minimum takes the
+  // divergence contrast cap (dna/mapq.cpp price_dna_regions,
+  // price_dna_blocks). Off on asm5, asm10 and asm20, which price each record
+  // from its own evidence. Not settable.
+  bool divergence_contrast = true;
 };
 
 // The lane bound: the vote's peaks and the catalogue's candidates per strand.
