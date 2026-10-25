@@ -136,6 +136,9 @@ struct ResolvedDnaOptions {
   // The catalogue's candidates per strand (options/options.h
   // dna_chain_max_candidates).
   int catalogue_lane_bound = ::fa::cpu::voting::kCatalogueLaneBound;
+  // The asm rows (options/options.h chain_two_pass): two chain passes
+  // (placement.cpp chain_two_pass).
+  bool chain_two_pass = false;
 };
 
 // Non-owning views, valid for the duration of one stage call.

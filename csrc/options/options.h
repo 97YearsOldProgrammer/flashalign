@@ -280,6 +280,12 @@ struct DnaLongOptions {
   // the matrix cap, ends at the cut: no continuation. lr and lr:hq install it;
   // not settable.
   bool rival_split_ends = false;
+  // Each whole-query pass chains its pool twice, as minimap2's mm_map_frag:
+  // first at cigar_dp_bw and cigar_dp_max_gap, then the anchors of the chains
+  // with at least cigar_dp_split_min_anchors anchors scoring at least -m at
+  // the pass's own band and reach (dna/placement.cpp chain_two_pass). asm5,
+  // asm10 and asm20 install it; not settable.
+  bool chain_two_pass = false;
 };
 
 // The lane bound: the vote's peaks and the catalogue's candidates per strand.

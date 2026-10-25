@@ -473,6 +473,52 @@ struct PassChains {
   chaining::DenseChainParams params;
 };
 
+// The asm rows: minimap2's two chain passes (map.c mm_map_frag), with the
+// exact dense chain in place of its mg_lchain_rmq. Pass 1 chains the pool at
+// cigar_dp_bw as band and cigar_dp_max_gap as reach (raised to the band, as
+// lchain.c raises max_dist); the anchors of its chains with at least min_cnt
+// anchors, counted on the expanded chain, and scoring at least -m are chained
+// again with `params`, the pass's own. Unlike minimap2, pass 2 always runs (no
+// rescue test) and keeps its chains without the floors. `stats` gets pass 2's
+// counters plus pass 1's search counters.
+chaining::ChainResult chain_two_pass(const DnaContext& context,
+                                     std::vector<chaining::Anchor> anchors,
+                                     const chaining::DenseChainParams& params,
+                                     chaining::DenseChainStats& stats) {
+  chaining::DenseChainParams first_params = params;
+  first_params.bw = std::max(1, context.opts.cigar_dp_bw);
+  first_params.max_dist_x = first_params.max_dist_y =
+      std::max(first_params.bw, context.opts.cigar_dp_max_gap);
+  first_params.min_sc = context.opts.min_chain_score;
+  first_params.min_cnt = 1;
+  chaining::DenseChainStats first_stats;
+  const chaining::ChainResult first = chaining::chain_dense_colinear(
+      std::move(anchors), first_params, &first_stats);
+  const std::size_t min_anchors = static_cast<std::size_t>(
+      std::max(1, context.opts.cigar_dp_split_min_anchors));
+  std::vector<std::uint8_t> kept(first.anchors.size(), 0);
+  std::size_t count = 0;
+  for (const chaining::Chain& chain : first.chains) {
+    if (chain.idx.size() < min_anchors ||
+        chain.score < context.opts.min_chain_score)
+      continue;
+    count += chain.idx.size();
+    for (const std::int32_t index : chain.idx)
+      kept[static_cast<std::size_t>(index)] = 1;
+  }
+  // first.anchors keep the pool's order, so the survivors stay sorted.
+  std::vector<chaining::Anchor> survivors;
+  survivors.reserve(count);
+  for (std::size_t at = 0; at < first.anchors.size(); ++at)
+    if (kept[at] != 0) survivors.push_back(first.anchors[at]);
+  chaining::ChainResult chained =
+      chaining::chain_dense_colinear(std::move(survivors), params, &stats);
+  stats.exact_runs += first_stats.exact_runs;
+  stats.exact_nodes += first_stats.exact_nodes;
+  stats.exact_steps += first_stats.exact_steps;
+  return chained;
+}
+
 // The chain half of a pass: sorts and deduplicates the pool, chains it densely,
 // and partitions the chains. Sets the record's run count.
 void chain_pool(const DnaContext& context, const DnaPlacementFamily& family,
@@ -488,8 +534,11 @@ void chain_pool(const DnaContext& context, const DnaPlacementFamily& family,
   out.params = dna_dense_chain_params(chain_params, family.seed_length,
                                       context.opts.dna_dense_diag_min_runs);
   // The dense chain: the pool collapsed to exact diagonal runs.
-  out.chained = chaining::chain_dense_colinear(std::move(anchors), out.params,
-                                              &dense_stats);
+  out.chained = context.opts.chain_two_pass
+                    ? chain_two_pass(context, std::move(anchors), out.params,
+                                     dense_stats)
+                    : chaining::chain_dense_colinear(std::move(anchors),
+                                                     out.params, &dense_stats);
   const chaining::ChainResult& chained = out.chained;
   record.dense_runs = dense_stats.runs;
   out.partition =
