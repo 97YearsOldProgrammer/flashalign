@@ -1815,6 +1815,25 @@ ChainResult chain_dense_colinear(std::vector<Anchor> anchors,
   return result;
 }
 
+std::size_t dense_chain_scratch_bytes() {
+  const DenseChainScratch& s = dense_chain_scratch();
+  std::size_t bytes =
+      capacity_bytes(s.previous_r, s.hot, s.predecessors, s.marks,
+                     s.ranked_ends, s.links, s.exact_tree, s.exact_ids,
+                     s.exact_leaf, s.exact_stack, s.exact_build) +
+      s.open_runs.heap_bytes() + s.exact_diag_last.heap_bytes();
+#if FA_DENSE_EXACT_WIDE
+  bytes += capacity_bytes(s.wide_nodes, s.wide_leaves, s.wide_run_leaf,
+                          s.wide_keys, s.wide_ids, s.wide_tasks, s.wide_cuts,
+                          s.wide_stack);
+#endif
+  return bytes;
+}
+
+void release_dense_chain_scratch() {
+  dense_chain_scratch() = DenseChainScratch{};
+}
+
 } // namespace chaining
 } // namespace cpu
 } // namespace fa

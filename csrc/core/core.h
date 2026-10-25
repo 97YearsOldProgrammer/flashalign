@@ -41,6 +41,13 @@ inline std::vector<uint8_t> encode_sequence_u8(const std::string& seq) {
 using AlignmentOrigin = ::flashalign::AlignmentOrigin;
 using AlignResult = ::flashalign::Alignment;
 
+// The heap bytes of vectors at capacity.
+template <class... Vectors>
+std::size_t capacity_bytes(const Vectors&... vectors) {
+    return (std::size_t{0} + ... +
+            (vectors.capacity() * sizeof(typename Vectors::value_type)));
+}
+
 }}  // namespace fa::cpu
 
 /**** cigar ****/
@@ -463,6 +470,9 @@ public:
     slots_.swap(o.slots_);
     std::swap(generation_, o.generation_);
   }
+
+  // The heap bytes of the entries and the index.
+  size_t heap_bytes() const { return capacity_bytes(entries_, slots_); }
 
 private:
   static size_t pow2_at_least(size_t x) {

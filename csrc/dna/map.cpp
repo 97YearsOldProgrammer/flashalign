@@ -1,7 +1,9 @@
 // The DNA conductor, DnaBackend::map_read: seeds, vote, catalogue, placement, ownership, projection or realization, MAPQ, one read at a time.
 #include "dna.h"
 
+#include "../chain/chain.h" // dense_chain_scratch_bytes (kept_scratch)
 #include "../core/core.h"
+#include "../dp/dp.h"       // thread_arena_bytes (kept_scratch)
 #include "../index/index.h"
 #include "../index/seed.h"
 #include "../seed/scratch.h"
@@ -543,11 +545,42 @@ AlignResult map_read(const DnaContext& base_dctx,
 } // namespace dna
 } // namespace fa::cpu::lr
 
+/**** kept_scratch ****/
+// dna.h kept_scratch: the bytes a mapping thread keeps across reads and their
+// release after a read.
+
 namespace fa::cpu::lr::dna {
 
 std::vector<std::uint8_t>& ref_window_buffer() {
   static thread_local std::vector<std::uint8_t> buffer;
   return buffer;
+}
+
+namespace {
+
+std::size_t kept_scratch_bytes(const DnaWorkerScratch& worker) {
+  return worker.chain.heap_bytes() + worker.seed_density.heap_bytes() +
+         ::fa::cpu::chaining::dense_chain_scratch_bytes() +
+         pool_sort_scratch_bytes() + pass_slices_bytes() +
+         ::fa::cpu::dp::thread_arena_bytes() + ava_read_targets_bytes() +
+         ava_target_scratch_bytes() + capacity_bytes(ref_window_buffer());
+}
+
+void release_kept_scratch(DnaWorkerScratch& worker) {
+  worker.chain = ChainAnchorScratch{};
+  worker.seed_density = RetainedSeedDensity{};
+  ::fa::cpu::chaining::release_dense_chain_scratch();
+  release_placement_scratch();
+  ::fa::cpu::dp::release_thread_arena();
+  release_ava_scratch();
+  ref_window_buffer() = std::vector<std::uint8_t>{};
+}
+
+} // namespace
+
+void settle_kept_scratch(DnaWorkerScratch& worker) {
+  if (kept_scratch_bytes(worker) > kKeptScratchReleaseBytes)
+    release_kept_scratch(worker);
 }
 
 } // namespace fa::cpu::lr::dna

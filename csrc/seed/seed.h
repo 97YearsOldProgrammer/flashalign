@@ -118,6 +118,10 @@ struct DnaLongSeedBundle {
     exact_refine_views.clear();
     views_ready = false;
   }
+
+  std::size_t heap_bytes() const {
+    return capacity_bytes(seeds, selected_views, exact_refine_views);
+  }
 };
 
 struct ChainSyncmerOccCandidate {

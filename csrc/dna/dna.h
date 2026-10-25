@@ -266,6 +266,11 @@ class RetainedSeedDensity {
   // Frees buffers a much longer read left; build() reuses the rest.
   void release_excess_for_read(std::size_t read_len);
 
+  std::size_t heap_bytes() const {
+    return capacity_bytes(entries_, fine_entry_, forward_, reverse_,
+                          fine_forward_, fine_reverse_);
+  }
+
   // Entries use capture IDs when available; absent views have no refs.
   std::size_t entry_count() const { return entries_.size(); }
 
@@ -441,7 +446,28 @@ struct DnaWorkerScratch {
 
 }}} // namespace fa::cpu::lr
 
+/**** kept_scratch ****/
+// What a mapping thread keeps across reads: its worker scratch and the
+// thread_local buffers of the dense chain, the harvest, the ksw arena and the
+// overlap lane. The thread frees all of it after a read that leaves more than
+// kKeptScratchReleaseBytes, as minimap2 rebuilds a thread's kalloc arena past
+// its cap_kalloc (map.c, km_stat); the next read regrows it.
+
 namespace fa::cpu::lr::dna {
+
+// minimap2's cap_kalloc.
+inline constexpr std::size_t kKeptScratchReleaseBytes = 500000000;
+
+// Called after each DNA read on the thread that mapped it.
+void settle_kept_scratch(DnaWorkerScratch& worker);
+
+// The thread_local buffers of placement and the overlap lane.
+std::size_t pool_sort_scratch_bytes();
+std::size_t pass_slices_bytes();
+void release_placement_scratch();
+std::size_t ava_read_targets_bytes();
+std::size_t ava_target_scratch_bytes();
+void release_ava_scratch();
 
 // The calling thread's buffer for the reference windows of a packed reference
 // (engine::ReferenceContext::window).

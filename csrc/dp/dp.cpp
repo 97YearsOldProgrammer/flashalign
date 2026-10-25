@@ -43,19 +43,35 @@ namespace cpu {
 namespace dp {
 namespace detail {
 
+struct ArenaHolder {
+  ksw_arena_t* arena = ksw_arena_create();
+  ~ArenaHolder() { ksw_arena_destroy(arena); }
+  ArenaHolder() = default;
+  ArenaHolder(const ArenaHolder&) = delete;
+  ArenaHolder& operator=(const ArenaHolder&) = delete;
+};
+
+static ArenaHolder& thread_arena_holder() {
+  static thread_local ArenaHolder holder;
+  return holder;
+}
+
 static ksw_arena_t* thread_arena() {
-  struct Holder {
-    ksw_arena_t* arena = ksw_arena_create();
-    ~Holder() { ksw_arena_destroy(arena); }
-    Holder() = default;
-    Holder(const Holder&) = delete;
-    Holder& operator=(const Holder&) = delete;
-  };
-  static thread_local Holder holder;
-  return holder.arena; // may be NULL: the system allocator is used
+  return thread_arena_holder().arena; // may be NULL: the system allocator is used
 }
 
 } // namespace detail
+
+std::size_t thread_arena_bytes() {
+  return ksw_arena_capacity(detail::thread_arena());
+}
+
+void release_thread_arena() {
+  detail::ArenaHolder& holder = detail::thread_arena_holder();
+  ksw_arena_destroy(holder.arena);
+  holder.arena = ksw_arena_create();
+}
+
 } // namespace dp
 } // namespace cpu
 } // namespace fa

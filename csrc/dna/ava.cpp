@@ -585,3 +585,26 @@ std::vector<DnaPlacementCandidateChain> build_dna_target_chains(
 }
 
 }  // namespace fa::cpu::lr
+
+namespace fa::cpu::lr::dna {
+
+std::size_t ava_read_targets_bytes() {
+  const ReadTargets& t = read_targets();
+  return capacity_bytes(t.target_of, t.target_cells, t.candidate_target,
+                        t.entries, t.runs_begin, t.runs_end, t.runs,
+                        t.hits_begin, t.cursor, t.hits);
+}
+
+std::size_t ava_target_scratch_bytes() {
+  const TargetScratch& s = target_scratch();
+  return capacity_bytes(s.member_begin, s.member_cursor, s.members,
+                        s.windowed, s.plain, s.plain_expected, s.wide,
+                        s.order);
+}
+
+void release_ava_scratch() {
+  read_targets() = ReadTargets{};
+  target_scratch() = TargetScratch{};
+}
+
+}  // namespace fa::cpu::lr::dna

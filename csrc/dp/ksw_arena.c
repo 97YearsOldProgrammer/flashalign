@@ -56,6 +56,10 @@ void ksw_arena_reset(ksw_arena_t* arena) {
   arena->wanted = 0;
 }
 
+size_t ksw_arena_capacity(const ksw_arena_t* arena) {
+  return arena ? arena->capacity : 0;
+}
+
 static int ksw_arena_owns(const ksw_arena_t* arena, const void* ptr) {
   const unsigned char* p = (const unsigned char*)ptr;
   return arena->base != 0 && p >= arena->base + KSW_ARENA_HEADER &&

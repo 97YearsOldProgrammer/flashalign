@@ -73,6 +73,13 @@ struct ChainWindowPeakScratch {
             ChainWindowVoteTable().swap(buckets);
         }
     }
+
+    size_t heap_bytes() const {
+        return capacity_bytes(seeds, extracted_seeds, seed_views, seed_used,
+                              retained_seeds, pending_exact_refine_views,
+                              ranked, ref_starts, occurrence_values) +
+               seed_bundle.heap_bytes() + buckets.heap_bytes();
+    }
 };
 
 struct ChainSeedLookupCache {
@@ -258,6 +265,10 @@ struct ChainSeedLookupCache {
         view = views[entry];
         return true;
     }
+
+    size_t heap_bytes() const {
+        return capacity_bytes(buckets, stamps, keys, views, warm_slots_scratch);
+    }
 };
 
 struct ChainAnchorScratch {
@@ -329,6 +340,17 @@ struct ChainAnchorScratch {
         fwd.release_excess_for_read(seed_retain);
         rc.release_excess_for_read(seed_retain);
         shadow_rc.release_excess_for_read(seed_retain);
+    }
+
+    size_t heap_bytes() const {
+        return capacity_bytes(raw, full_syncmer_rc_seeds, query_occ_keys,
+                              query_occ_seeds, readmitted,
+                              shared_window_fwd_seeds, shared_window_rc_seeds,
+                              captured_fwd_views, captured_fwd_slots,
+                              captured_rc_views, captured_rc_slots,
+                              slope_refine_views[0], slope_refine_views[1]) +
+               fwd.heap_bytes() + rc.heap_bytes() + shadow_rc.heap_bytes() +
+               lookup_cache.heap_bytes();
     }
 };
 

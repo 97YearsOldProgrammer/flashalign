@@ -370,6 +370,11 @@ ChainResult chain_dense_colinear(std::vector<Anchor> anchors,
                                  DenseChainParams params,
                                  DenseChainStats* stats = nullptr);
 
+// The heap bytes of the calling thread's dense chain scratch, which calls keep
+// at capacity, and its release; the next call regrows it.
+std::size_t dense_chain_scratch_bytes();
+void release_dense_chain_scratch();
+
 } // namespace chaining
 } // namespace cpu
 } // namespace fa

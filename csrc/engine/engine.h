@@ -300,8 +300,12 @@ private:
       LongReadSeedContext seed_ctx = make_seed_context();
       if (cfg_.long_read().skip_self)
         seed_ctx.self_contig = self_contig;
-      return Backend::map_read(dctx, seed_ctx, worker_scratch, read, fwd_enc,
-                               rc_enc, shared_fwd_syncmer_seeds);
+      AlignResult alignment = Backend::map_read(
+          dctx, seed_ctx, worker_scratch, read, fwd_enc, rc_enc,
+          shared_fwd_syncmer_seeds);
+      // Every DNA read passes here, on the thread that mapped it.
+      ::fa::cpu::lr::dna::settle_kept_scratch(worker_scratch);
+      return alignment;
     }
   }
 

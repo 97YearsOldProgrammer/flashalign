@@ -100,8 +100,12 @@ struct PassSlices {
   std::vector<KmerPostingIntervalView> interval;
   std::uint32_t pass = 0;
 };
-PassSlices& pass_slices(std::size_t entries) {
+PassSlices& thread_pass_slices() {
   static thread_local PassSlices slices;
+  return slices;
+}
+PassSlices& pass_slices(std::size_t entries) {
+  PassSlices& slices = thread_pass_slices();
   if (slices.stamp.size() < entries) {
     slices.stamp.resize(entries, 0);
     slices.interval.resize(entries);
@@ -1043,3 +1047,22 @@ DnaPlacementChainingResult build_dna_placement_chains(
 }
 
 }  // namespace fa::cpu::lr
+
+namespace fa::cpu::lr::dna {
+
+std::size_t pool_sort_scratch_bytes() {
+  const auto& scratch = pool_sort_scratch();
+  return capacity_bytes(scratch.tmp, scratch.count);
+}
+
+std::size_t pass_slices_bytes() {
+  const PassSlices& slices = thread_pass_slices();
+  return capacity_bytes(slices.stamp, slices.interval);
+}
+
+void release_placement_scratch() {
+  pool_sort_scratch() = {};
+  thread_pass_slices() = PassSlices{};
+}
+
+}  // namespace fa::cpu::lr::dna

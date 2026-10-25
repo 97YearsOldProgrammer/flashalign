@@ -218,6 +218,11 @@ GotohCigarResult dp_to_gotoh(const DpAlnResult& r, const uint8_t* qseq,
                              int qlen, const uint8_t* tseq, int tlen,
                              bool global, bool render_text = true);
 
+// The calling thread's ksw arena: its capacity in bytes, and its release; the
+// next kernel call starts a new one.
+std::size_t thread_arena_bytes();
+void release_thread_arena();
+
 } // namespace dp
 } // namespace cpu
 } // namespace fa
