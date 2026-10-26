@@ -273,8 +273,7 @@ Minimap2 chains a read's anchors colinearly, treating every anchor alike, and ot
 weight their seeds. FlashAlign instead samples the read's seeds and compresses them into votes for
 approximate diagonals; the vote peaks are the candidate placements. Each candidate is then
 decompressed in one pass of exact chaining over all of its anchors, organised by a tree, where
-minimap2 chains twice, its second pass with a range-maximum query (RMQ); the assembly presets
-chain twice as minimap2 does, both passes exact.
+minimap2 chains twice, its second pass with a range-maximum query (RMQ).
 
 1. Read **-I** [=*no split*] reference bases, extract (**-k**,**-s**)-closed syncmers
    [=*21*,*9*] and index them. A closed syncmer is a k-mer whose minimal s-mer sits at one of its
@@ -307,11 +306,8 @@ chain twice as minimap2 does, both passes exact.
    into gap-free diagonal runs whose best predecessors are found exactly, through a k-d tree over
    the runs when the pool is large. The chain links anchors within the band of the second value of **-r**
    [=*500,20000*], across at most that band or **-g** [=*5000*] where that is larger, and a chain
-   scoring below **-m** [=*40*] is discarded. Under the assembly presets every candidate's window
-   is its whole target, one scan of the index fills both strands' pools, and the chain runs twice
-   as in minimap2: first within the first value of **-r**, keeping the chains of at least 3 anchors
-   that score at least **-m**, then within the second value over their anchors. Under a splice
-   preset the fine chain takes introns up to **-G** [=*200k*] and query gaps up to **-g** [=*2000*].
+   scoring below **-m** [=*40*] is discarded. Under a splice preset the fine chain takes introns
+   up to **-G** [=*200k*] and query gaps up to **-g** [=*2000*].
 
 7. Choose the owner chains as minimap2's `mm_set_parent` does: taking the chains best score
    first, attach each to the first owner whose query span overlaps its own by more than half of
