@@ -137,9 +137,10 @@ flashalign align -ax lr ref.fa ont.fq.gz > aln.sam       # Oxford Nanopore reads
 flashalign align -ax lr:hq ref.fa hifi.fq.gz > aln.sam   # PacBio HiFi reads
 ```
 
-`lr` is for noisy long reads of ~10% error rate. `lr:hq` is for accurate long reads with an
-error rate below 1%, such as PacBio HiFi reads. The two differ in seeding (`-s9` and `-s5`)
-and in scoring.
+`lr` is for Oxford Nanopore reads of any chemistry, from ~10% error to the ~99%-accurate v14
+reads that minimap2 maps with `lr:hq`. `lr:hq` is for PacBio HiFi reads; its scoring is
+minimap2's `map-hifi`, so it is not minimap2's `lr:hq`. The two differ in seeding (`-s9` and
+`-s5`) and in scoring.
 
 #### Map long mRNA/cDNA reads
 
@@ -202,8 +203,8 @@ flashalign align -a -x lr:hq ref.fa hifi.fq.gz | samtools sort -o aln.bam
 
 Unmapped reads are written to SAM unless `--sam-hit-only` is given, and to PAF only with
 `--paf-no-hit`. Secondary alignments are written only with `--secondary=yes`. `--cs`, `--MD` and
-`--eqx` add the `cs` tag, the `MD` tag and `=`/`X` CIGAR operators. The PAF columns, the tags and
-the `cs` operations are listed under [OUTPUT FORMAT](https://97yearsoldprogrammer.github.io/flashalign/#OUTPUT_FORMAT) in the manual.
+`--eqx` add the `cs` tag, the `MD` tag and `=`/`X` CIGAR operators. Indels sit at the leftmost position of a repeat, as in
+minimap2. The PAF columns, the tags and the `cs` operations are listed under [OUTPUT FORMAT](https://97yearsoldprogrammer.github.io/flashalign/#OUTPUT_FORMAT) in the manual.
 
 ### Advanced features
 

@@ -657,7 +657,8 @@ Output alignments to
 [stdout].
 .TP
 .B \-c
-Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag. PAF
+Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag. Indels
+sit at the leftmost position of a repeat, as in minimap2. PAF
 without
 .B \-c
 is placement-only: it runs no base-level dynamic programming, so its
@@ -840,15 +841,15 @@ are:
 .TP 10
 .B lr
 Align noisy long reads of ~10% error rate to a reference genome. This is the
-default mode.
+default mode, and the preset for Oxford Nanopore reads of any chemistry,
+including v14 reads at ~99% accuracy, which minimap2 maps with lr:hq.
 .RB ( \-k21
 .B \-s9 \-\-min\-support 3 \-A4 \-B8 \-O8,48 \-E4,1
 .B \-z800,200 \-\-score\-N 2 \-r500,20000 \-m40 \-p0.8
 .BR \-S80 ).
 .TP
 .B lr:hq
-Align accurate long reads (error rate <1%), such as PacBio HiFi reads, to a
-reference genome
+Align PacBio high-fidelity (HiFi) reads to a reference genome
 .RB ( \-k21
 .B \-s5 \-\-min\-support 3 \-A3 \-B12 \-O18,78 \-E6,1
 .B \-z1200,600 \-\-score\-N 3 \-r500,20000 \-g5000 \-m40 \-p0.8 \-W48,64
@@ -856,6 +857,7 @@ reference genome
 Its alignments are scored with minimap2's map-hifi scoring
 .RB ( \-A1 " " \-B4 " " \-O6,26 " " \-E2,1 ,
 .BR \-S200 ).
+Unlike minimap2's lr:hq, it is not meant for Oxford Nanopore reads: those take lr.
 .TP
 .B splice
 Long-read spliced alignment
