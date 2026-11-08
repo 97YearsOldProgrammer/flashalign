@@ -84,6 +84,24 @@ void append_packed_cigar(PackedCigar& cigar, const PackedCigar& suffix);
 // run can merge; the rest is copied as is.
 void prepend_packed_cigar(PackedCigar& cigar, PackedCigar prefix);
 
+// minimap2's mm_fix_cigar on an M/I/D/N CIGAR over the aligned slices `query` and
+// `reference`: each I or D between two M runs moves left while the bases repeat, a run of
+// adjacent I and D runs becomes one I and one D, zero runs go and equal neighbours merge,
+// then a leading I advances `projected_query_begin` (`projected_query_end` back when
+// `mapping_reverse`) and a leading D advances `reference_begin`, by `query_shift` or
+// `reference_shift`. A one-run CIGAR is left as is. False on another op, or when the runs
+// do not consume exactly `query_span` and `reference_span`.
+bool normalize_cigar(std::vector<std::uint32_t>& cigar,
+                     const std::uint8_t* query,
+                     const std::uint8_t* reference,
+                     int query_span, int reference_span,
+                     bool mapping_reverse,
+                     int& projected_query_begin,
+                     int& projected_query_end,
+                     int& reference_begin,
+                     int& query_shift,
+                     int& reference_shift);
+
 // Query bases consumed (M/I/S/=/X), or -1 when a run has a zero count.
 int packed_cigar_query_consumed(const PackedCigar& cigar);
 

@@ -2,6 +2,7 @@
 #include "core.h"
 
 #include <algorithm>
+#include <array>
 
 /**** cigar ****/
 
@@ -66,6 +67,185 @@ void prepend_packed_cigar(PackedCigar& cigar, PackedCigar prefix) {
                       packed_run_op(cigar.front()));
     prefix.insert(prefix.end(), cigar.begin() + 1, cigar.end());
     cigar = std::move(prefix);
+}
+
+namespace {
+
+constexpr int kCigarMatch = 0;
+constexpr int kCigarInsertion = 1;
+constexpr int kCigarDeletion = 2;
+constexpr int kCigarReferenceSkip = 3;
+constexpr std::uint32_t kMaximumCigarRun = UINT32_MAX >> 4;
+
+bool valid_span(int begin, int count, std::size_t length) noexcept {
+  return count >= 0 && mapping::checked_count_range(
+      begin, static_cast<std::uint64_t>(count),
+      static_cast<std::uint64_t>(length));
+}
+
+} // namespace
+
+bool normalize_cigar(std::vector<std::uint32_t>& cigar,
+                     const std::uint8_t* query,
+                     const std::uint8_t* reference,
+                     int query_span, int reference_span,
+                     bool mapping_reverse,
+                     int& projected_query_begin,
+                     int& projected_query_end,
+                     int& reference_begin,
+                     int& query_shift,
+                     int& reference_shift) {
+  query_shift = reference_shift = 0;
+  if (cigar.empty()) return false;
+  // As in minimap2, a single-operation CIGAR skips normalization, including the
+  // leading-gap rule.
+  if (cigar.size() <= 1) return true;
+  {
+    int reference_offset = 0;
+    int query_offset = 0;
+    bool shrink = false;
+    for (std::size_t index = 0; index < cigar.size(); ++index) {
+      const int operation = static_cast<int>(cigar[index] & 0xfu);
+      const int length = static_cast<int>(cigar[index] >> 4);
+      if (length == 0) shrink = true;
+      if (operation == kCigarMatch) {
+        if (!valid_span(query_offset, length,
+                        static_cast<std::size_t>(query_span)) ||
+            !valid_span(reference_offset, length,
+                        static_cast<std::size_t>(reference_span)))
+          return false;
+        reference_offset += length;
+        query_offset += length;
+      } else if (operation == kCigarInsertion ||
+                 operation == kCigarDeletion) {
+        if (index > 0 && index + 1 < cigar.size() &&
+            (cigar[index - 1] & 0xfu) == kCigarMatch &&
+            (cigar[index + 1] & 0xfu) == kCigarMatch) {
+          const int previous_length =
+              static_cast<int>(cigar[index - 1] >> 4);
+          int shift = 0;
+          if (operation == kCigarInsertion) {
+            if (!valid_span(query_offset, length,
+                            static_cast<std::size_t>(query_span)))
+              return false;
+            for (; shift < previous_length; ++shift) {
+              if (query[query_offset - 1 - shift] !=
+                  query[query_offset + length - 1 - shift])
+                break;
+            }
+          } else {
+            if (!valid_span(reference_offset, length,
+                            static_cast<std::size_t>(reference_span)))
+              return false;
+            for (; shift < previous_length; ++shift) {
+              if (reference[reference_offset - 1 - shift] !=
+                  reference[reference_offset + length - 1 - shift])
+                break;
+            }
+          }
+          const std::uint32_t next_length = cigar[index + 1] >> 4;
+          if (shift > 0 && static_cast<std::uint32_t>(shift) <=
+                  kMaximumCigarRun - next_length) {
+            cigar[index - 1] -= static_cast<std::uint32_t>(shift) << 4;
+            cigar[index + 1] += static_cast<std::uint32_t>(shift) << 4;
+            query_offset -= shift;
+            reference_offset -= shift;
+          }
+          if (shift == previous_length && static_cast<std::uint32_t>(shift) <=
+                  kMaximumCigarRun - next_length) shrink = true;
+        }
+        if (operation == kCigarInsertion) {
+          if (!valid_span(query_offset, length,
+                          static_cast<std::size_t>(query_span))) return false;
+          query_offset += length;
+        } else {
+          if (!valid_span(reference_offset, length,
+                          static_cast<std::size_t>(reference_span))) return false;
+          reference_offset += length;
+        }
+      } else if (operation == kCigarReferenceSkip) {
+        if (!valid_span(reference_offset, length,
+                        static_cast<std::size_t>(reference_span))) return false;
+        reference_offset += length;
+      } else {
+        return false;
+      }
+      if (query_offset > query_span || reference_offset > reference_span)
+        return false;
+    }
+    if (query_offset != query_span || reference_offset != reference_span)
+      return false;
+
+    for (std::size_t index = 0; index + 2 < cigar.size();) {
+      const int operation = static_cast<int>(cigar[index] & 0xfu);
+      const int next_operation = static_cast<int>(cigar[index + 1] & 0xfu);
+      if (operation > 0 && operation + next_operation == 3) {
+        std::array<std::uint32_t, 3> totals{};
+        std::size_t limit = index;
+        for (; limit < cigar.size(); ++limit) {
+          const int gap_operation = static_cast<int>(cigar[limit] & 0xfu);
+          const std::uint32_t length = cigar[limit] >> 4;
+          if (gap_operation == kCigarInsertion ||
+              gap_operation == kCigarDeletion || length == 0) {
+            if (gap_operation > kCigarDeletion) return false;
+            totals[static_cast<std::size_t>(gap_operation)] += length;
+          } else {
+            break;
+          }
+        }
+        if (totals[kCigarInsertion] > 0 && totals[kCigarDeletion] > 0 &&
+            totals[kCigarInsertion] <= kMaximumCigarRun &&
+            totals[kCigarDeletion] <= kMaximumCigarRun &&
+            limit - index > 2) {
+          cigar[index] = totals[kCigarInsertion] << 4 | kCigarInsertion;
+          cigar[index + 1] = totals[kCigarDeletion] << 4 | kCigarDeletion;
+          for (std::size_t zero = index + 2; zero < limit; ++zero)
+            cigar[zero] &= 0xfu;
+          shrink = true;
+        }
+        index = limit + 1;
+      } else {
+        ++index;
+      }
+    }
+    if (shrink) {
+      cigar.erase(std::remove_if(cigar.begin(), cigar.end(),
+                                 [](std::uint32_t encoded) {
+                                   return (encoded >> 4) == 0;
+                                 }),
+                  cigar.end());
+      std::vector<std::uint32_t> merged;
+      merged.reserve(cigar.size());
+      for (std::uint32_t encoded : cigar) {
+        const std::uint32_t encoded_length = encoded >> 4;
+        const std::uint32_t merged_length = merged.empty()
+            ? 0 : merged.back() >> 4;
+        if (!merged.empty() &&
+            (merged.back() & 0xfu) == (encoded & 0xfu) &&
+            encoded_length <= kMaximumCigarRun - merged_length)
+          merged.back() += encoded_length << 4;
+        else
+          merged.push_back(encoded);
+      }
+      cigar.swap(merged);
+    }
+  }
+  if (cigar.empty()) return false;
+  const int leading_operation = static_cast<int>(cigar.front() & 0xfu);
+  if (leading_operation == kCigarInsertion ||
+      leading_operation == kCigarDeletion) {
+    const int length = static_cast<int>(cigar.front() >> 4);
+    if (leading_operation == kCigarInsertion) {
+      if (mapping_reverse) projected_query_end -= length;
+      else projected_query_begin += length;
+      query_shift = length;
+    } else {
+      reference_begin += length;
+      reference_shift = length;
+    }
+    cigar.erase(cigar.begin());
+  }
+  return !cigar.empty();
 }
 
 int packed_cigar_query_consumed(const PackedCigar& cigar) {

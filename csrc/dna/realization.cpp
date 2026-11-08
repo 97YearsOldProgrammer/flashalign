@@ -827,10 +827,32 @@ bool extend_unit_terminals(const DnaContext& context,
 bool validate_and_commit_unit(const DnaContext& context,
                               const DnaFamilyRealizationRequest& request,
                               Unit& unit, AlignResult& output) {
+  const auto& query =
+      unit.reverse ? *request.reverse_query : *request.forward_query;
   if (unit.core_cigar.empty() || unit.oriented_begin < 0 ||
-      unit.oriented_end <= unit.oriented_begin || unit.target_begin < 0 ||
-      unit.target_end <= unit.target_begin)
+      unit.oriented_end <= unit.oriented_begin ||
+      unit.oriented_end > static_cast<int>(query.size()) ||
+      unit.target_begin < 0 || unit.target_end <= unit.target_begin ||
+      unit.target_end > context.ref.contig_length(unit.chromosome))
     return false;
+  // As minimap2's mm_update_extra, the stitched CIGAR goes through
+  // mm_fix_cigar first: indels left-aligned, a leading I or D dropped. The
+  // score stays the realized one. The window shares the thread's buffer with
+  // the replay's below, which is taken over the unit's span once it has moved.
+  {
+    const ::fa::cpu::engine::ReferenceWindow span = dna::reference_window(
+        context, unit.chromosome, unit.target_begin, unit.target_end);
+    int query_shift = 0;
+    int reference_shift = 0;
+    if (!::fa::cpu::output::normalize_cigar(
+            unit.core_cigar, query.data() + unit.oriented_begin,
+            span.ptr(unit.target_begin),
+            unit.oriented_end - unit.oriented_begin,
+            unit.target_end - unit.target_begin, false, unit.oriented_begin,
+            unit.oriented_end, unit.target_begin, query_shift,
+            reference_shift))
+      return false;
+  }
   const int forward_begin =
       unit.reverse ? request.family->read_length - unit.oriented_end
                    : unit.oriented_begin;
@@ -855,8 +877,6 @@ bool validate_and_commit_unit(const DnaContext& context,
   output.origin = AlignmentOrigin::DnaCigarFamily;
   output.score = unit.score;
   output.cigar = clipped;
-  const auto& query =
-      unit.reverse ? *request.reverse_query : *request.forward_query;
   // The unit's span, which a committed record's CIGAR covers exactly (the
   // target_end test below).
   const ::fa::cpu::engine::ReferenceWindow reference = dna::reference_window(
