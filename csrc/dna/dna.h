@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -139,12 +140,12 @@ struct ResolvedDnaOptions {
   // The asm rows (options/options.h chain_two_pass): two chain passes
   // (placement.cpp chain_two_pass).
   bool chain_two_pass = false;
-  // The asm rows (options/options.h target_harvest): one harvest per target
-  // (placement.cpp harvest_target_lanes).
-  bool target_harvest = false;
   // Off on the asm rows (options/options.h divergence_contrast): no record
   // takes the divergence contrast cap (mapq.cpp).
   bool divergence_contrast = true;
+  // The asm rows (options/options.h vote_stretch): the vote per stretch of
+  // this many bp (map.cpp query_stretches); 0 the whole query.
+  int vote_stretch = 0;
 };
 
 // Non-owning views, valid for the duration of one stage call.
@@ -381,11 +382,14 @@ public:
   bool capture_posting_views(DnaQuerySeedStrand strand);
 
   // Selects the representative vote seeds of the whole read, once per strand;
-  // a second call returns false.
+  // a second call returns false. After allow_windows(), of any window
+  // [start, end) of the strand's stream, any number of times (the vote per
+  // stretch).
   bool prepare_representatives(
       DnaQuerySeedStrand strand, int start, int end, int downsample,
       std::vector<QuerySeed>& rebased_seeds, DnaLongSeedBundle& bundle,
       ChainWindowPeakScratch& selection_scratch);
+  void allow_windows() noexcept { windows_ = true; }
 
 private:
   const std::vector<QuerySeed>* stream(DnaQuerySeedStrand strand) const {
@@ -422,6 +426,7 @@ private:
   bool reverse_prepared_ = false;
   bool forward_captured_ = false;
   bool reverse_captured_ = false;
+  bool windows_ = false;
   std::vector<KmerPostingView>* forward_views_ = nullptr;
   std::vector<std::uint32_t>* forward_slots_ = nullptr;
   std::vector<KmerPostingView>* reverse_views_ = nullptr;
@@ -564,12 +569,42 @@ int dna_forward_query_tile(
 
 // Builds the candidate catalogue from the whole-read vote peaks. A candidate's
 // support is the set of forward query tiles holding a retained seed with a
-// posting compatible with its geometry.
+// posting compatible with its geometry. With frame_length > 0
+// (a vote per stretch) ratio admission compares the masks on the tile grid
+// of the forward stretch [frame_begin, frame_begin + frame_length) instead of
+// the read's.
 DnaPlacementFamily build_dna_placement_family(
     const DnaContext& context, const std::vector<std::uint8_t>& forward_query,
     const std::vector<VotePeak>& whole_read_peaks,
     const ChainWindowPeakScratch& forward_scratch,
-    const ChainWindowPeakScratch& reverse_scratch);
+    const ChainWindowPeakScratch& reverse_scratch, int frame_begin = 0,
+    int frame_length = 0);
+
+// The vote per stretch: appends the family of one stretch, built by
+// build_dna_placement_family from that stretch's peaks of both strands, to
+// the contig's `family`.
+void append_stretch_family(DnaPlacementFamily& family,
+                           DnaPlacementFamily stretch);
+
+// The refusal of a query contig whose catalogue per stretch needs more
+// candidates than a CandidateId (vote/vote.h) names. Workers see the contig
+// only by its name hash (seed/seed.h tie_name_hash); the CLI names it.
+class CandidateIdOverflow : public std::length_error {
+public:
+  CandidateIdOverflow(std::uint32_t contig_name_hash, int contig_length,
+                      std::size_t contig_candidates, int bound)
+      : std::length_error(refusal(nullptr, contig_length, contig_candidates,
+                                  bound)),
+        name_hash(contig_name_hash), length(contig_length),
+        candidates(contig_candidates), lane_bound(bound) {}
+  // The message, naming the contig `name`, or none when null.
+  static std::string refusal(const std::string* name, int length,
+                             std::size_t candidates, int lane_bound);
+  std::uint32_t name_hash;
+  int length;
+  std::size_t candidates;
+  int lane_bound;
+};
 
 }  // namespace fa::cpu::lr
 

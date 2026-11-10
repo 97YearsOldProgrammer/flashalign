@@ -261,8 +261,12 @@ within the band across at most the band, or
 where that is larger, whatever the read length. So
 .I NUM2
 acts on placement, and so also on plain PAF output.
-Under the assembly presets each candidate's window is its whole target, and the
-chain runs twice, as in minimap2: first within
+Under the assembly presets each candidate comes from the vote of one 1 Mb
+stretch of the query, and its window is that stretch on its diagonal, widened by
+.I NUM2
+and 512 bases on both sides, harvested from the seeds within
+.I NUM2
+of the stretch; the chain runs twice, as in minimap2: first within
 .IR NUM1 ,
 keeping the chains of at least 3 anchors that score at least
 .BR \-m ,
@@ -430,7 +434,14 @@ admission by
 compares at most 2048; under
 .B lr:hq
 the blocks of a split read are also measured in these tiles when their
-mapping-quality rivals are chosen. A single value sets
+mapping-quality rivals are chosen. Under the assembly presets the query is voted
+per 1 Mb stretch, each stretch with its own
+.I NUM1
+seeds per strand, its own
+.I NUM2
+tiles and the bin width of
+.B \-W
+at its own length. A single value sets
 .I NUM1
 only. Neither
 .B \-\-min\-support
@@ -483,7 +494,9 @@ which chain each contig and strand of the read once. Elsewhere, unset, it is
 .RB ( \-\-vote\-ratio ),
 where it only bounds the cost, and 4 when
 .B \-\-vote\-ratio
-is 0, where it selects; a value replaces whichever applies. With a CIGAR the secondary alignments come from these
+is 0, where it selects; a value replaces whichever applies. Under the assembly
+presets the bound is per strand of each 1 Mb stretch, and a query contig whose
+candidates exceed 32767 is refused. With a CIGAR the secondary alignments come from these
 candidates' chains, so a wider bound can add secondaries.
 DNA presets only.
 .SS Alignment options
@@ -892,6 +905,11 @@ Experimental. Long assembly to reference mapping
 .RB ( \-k21
 .B \-s9 \-A1 \-B19 \-O39,81 \-E3,1 \-z200,200 \-\-score\-N 1 \-r1000,100000
 .BR "\-S200 \-v4096,2048" ).
+The query is voted, catalogued and harvested per 1 Mb stretch (see
+.B \-v
+and
+.BR \-r ),
+as are asm10's and asm20's.
 Use this preset if the average divergence is not much higher than 0.1%.
 .TP
 .B asm10

@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <stdexcept>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -261,11 +260,42 @@ internal::HarvestWindow pass_window(const DnaContext& context,
 }
 
 // A member of a group's pass: its candidate's index in the family and its
-// pass window.
+// pass window; under the vote per stretch also the oriented read positions
+// [query_low, query_high) of the seeds it harvests from.
 struct PassMember {
   std::size_t index = 0;
   internal::HarvestWindow window;
+  int query_low = std::numeric_limits<int>::min();
+  int query_high = std::numeric_limits<int>::max();
 };
+
+// The vote per stretch: a candidate's member. Its window is
+// [d + lo - band - pad, d + hi + band + pad) clamped to its contig, for d its
+// diagonal, [lo, hi) its query range (its stretch, VotePeak::read_lo /
+// read_hi), band the pass band and pad the interval pad: no harvest_window,
+// no L / 8 widening and no winner line. Its seeds are those within the band of
+// [lo, hi).
+PassMember stretch_member(const DnaContext& context,
+                          const DnaPlacementFamily& family, std::size_t index,
+                          int chromosome_length) {
+  const VotePeak& peak = family.candidates[index].peak;
+  const std::int64_t band = internal::pass_diagonal_band(context);
+  const std::int64_t reach =
+      band + context.opts.cigar_local_interval_anchor_interval_pad;
+  PassMember member;
+  member.index = index;
+  member.window.low = std::max<std::int64_t>(
+      0, peak.raw_ref_start + peak.read_lo - reach);
+  member.window.high = std::min<std::int64_t>(
+      chromosome_length, peak.raw_ref_start + peak.read_hi + reach);
+  member.query_low = static_cast<int>(
+      std::max<std::int64_t>(std::numeric_limits<int>::min(),
+                             peak.read_lo - band));
+  member.query_high = static_cast<int>(
+      std::min<std::int64_t>(std::numeric_limits<int>::max(),
+                             peak.read_hi + band));
+  return member;
+}
 
 // Appends to `anchors` the harvest of a (contig, strand) group's `members`
 // from `seeds`, its lane's fine seeds. The members' windows are merged into
@@ -278,7 +308,10 @@ struct PassMember {
 // that some member admits gives one anchor, flagged ANCHOR_TANDEM when its
 // seed is (RetainedSeedRef::tandem). Each member's interval_hits,
 // filtered_hits, deferred_anchors and rescued_anchors are those of a harvest
-// over its window alone.
+// over its window alone. Under the vote per stretch a member admits only from
+// the seeds of its query range, and an interval slices only the seeds of its
+// members' ranges; a seed is tested only against the members whose range
+// holds it (MemberSweep).
 void harvest_group_anchors(
     const DnaContext& context, const DnaPlacementFamily& family,
     const std::vector<PassMember>& members,
@@ -304,17 +337,72 @@ void harvest_group_anchors(
     std::uint64_t low = 0;
     std::uint64_t high = 0;
     DnaPlacementCandidateChain* record = nullptr;
+    int query_low = 0;
+    int query_high = 0;
   };
+  const bool ranged = context.opts.vote_stretch > 0;
   std::vector<Admitter> admitters;
   admitters.reserve(members.size());
   for (const PassMember& member : members)
     admitters.push_back({static_cast<std::uint64_t>(member.window.low),
                          static_cast<std::uint64_t>(member.window.high),
-                         &result.candidates[member.index]});
+                         &result.candidates[member.index], member.query_low,
+                         member.query_high});
   std::stable_sort(admitters.begin(), admitters.end(),
                    [](const Admitter& left, const Admitter& right) {
                      return left.low < right.low;
                    });
+  // The members of an interval that can admit from a seed at query position
+  // q, in window-low order: every member, or under the vote per stretch those
+  // whose query range [query_low, query_high) holds q. The seeds come in
+  // ascending q, so a member joins once q reaches its query_low and leaves
+  // once q reaches its query_high; nothing assumes the ranges' highs, or the
+  // windows' highs, ascend with their lows. The admitters are contiguous in
+  // window-low order, so pointer order is that order.
+  struct MemberSweep {
+    std::vector<Admitter*> by_query;
+    std::size_t next = 0;
+    std::vector<Admitter*> active;
+    int leave = std::numeric_limits<int>::max();
+    bool ranged = false;
+    void reset(Admitter* first, Admitter* last, bool by_range) {
+      ranged = by_range;
+      active.clear();
+      by_query.clear();
+      next = 0;
+      leave = std::numeric_limits<int>::max();
+      for (Admitter* admitter = first; admitter != last; ++admitter)
+        (ranged ? by_query : active).push_back(admitter);
+      std::stable_sort(by_query.begin(), by_query.end(),
+                       [](const Admitter* left, const Admitter* right) {
+                         return left->query_low < right->query_low;
+                       });
+    }
+    const std::vector<Admitter*>& at(int q) {
+      if (!ranged) return active;
+      bool joined = false;
+      for (; next < by_query.size() && by_query[next]->query_low <= q;
+           ++next) {
+        Admitter* const admitter = by_query[next];
+        active.insert(
+            std::upper_bound(active.begin(), active.end(), admitter),
+            admitter);
+        joined = true;
+      }
+      if (joined || q >= leave) {
+        active.erase(std::remove_if(active.begin(), active.end(),
+                                    [q](const Admitter* admitter) {
+                                      return admitter->query_high <= q;
+                                    }),
+                     active.end());
+        leave = std::numeric_limits<int>::max();
+        for (const Admitter* admitter : active)
+          leave = std::min(leave, admitter->query_high);
+      }
+      return active;
+    }
+  };
+  MemberSweep sweep;
   // The merged intervals, each over admitters [first, last).
   struct Interval {
     std::uint64_t low = 0;
@@ -340,21 +428,52 @@ void harvest_group_anchors(
   constexpr std::size_t kSliceBlock = RetainedSeedDensity::kSliceBatch;
   std::uint32_t block_entries[kSliceBlock];
   KmerPostingIntervalView block_intervals[kSliceBlock];
+  // The seed index ranges an interval slices: every seed, or under
+  // the vote per stretch the union of its members' query ranges, found by
+  // binary search on the read positions, which ascend.
+  std::vector<std::pair<std::size_t, std::size_t>> seed_ranges;
+  const auto seed_at = [&seeds](int position) {
+    return static_cast<std::size_t>(
+        std::lower_bound(seeds.begin(), seeds.end(), position,
+                         [](const RetainedSeedRef& seed, int pos) {
+                           return seed.seed.read_pos < pos;
+                         }) -
+        seeds.begin());
+  };
   for (const Interval& bounds : intervals) {
     Admitter* const first_admitter = admitters.data() + bounds.first;
     Admitter* const last_admitter = admitters.data() + bounds.last;
+    seed_ranges.clear();
+    if (!ranged) {
+      seed_ranges.emplace_back(0, seeds.size());
+    } else {
+      std::vector<std::pair<int, int>> query;
+      for (Admitter* admitter = first_admitter; admitter != last_admitter;
+           ++admitter)
+        query.emplace_back(admitter->query_low, admitter->query_high);
+      std::sort(query.begin(), query.end());
+      for (std::size_t at = 0; at < query.size();) {
+        const int low = query[at].first;
+        int high = query[at].second;
+        for (++at; at < query.size() && query[at].first <= high; ++at)
+          high = std::max(high, query[at].second);
+        seed_ranges.emplace_back(seed_at(low), seed_at(high));
+      }
+    }
     // Every seed resolves against the same (chr, low, high) interval, so each
     // distinct entry is sliced once, in batches through slice_batch; seeds are
     // still processed in order.
     PassSlices& slices = pass_slices(seed_index.entry_count());
     deferred.clear();
-    for (std::size_t next = 0; next < seeds.size();) {
+    sweep.reset(first_admitter, last_admitter, ranged);
+    for (const auto& [range_begin, range_end] : seed_ranges)
+    for (std::size_t next = range_begin; next < range_end;) {
       // Take seeds until kSliceBlock entries new to this interval are
       // collected. A skipped entry gets an interval that is not found, which
       // the loop below drops as it drops the gated slice.
       const std::size_t first = next;
       std::size_t block_size = 0;
-      for (; next < seeds.size(); ++next) {
+      for (; next < range_end; ++next) {
         const std::uint32_t entry = seeds[next].entry;
         std::uint32_t& stamp = slices.stamp[entry];
         if (stamp == slices.pass) continue;
@@ -384,20 +503,21 @@ void harvest_group_anchors(
         if (!interval.found() || interval.count == 0) continue;
         if (over_pool_gate) {
           // Each member counts the gated postings inside its window.
-          for (Admitter* admitter = first_admitter;
-               admitter != last_admitter; ++admitter)
+          for (Admitter* admitter : sweep.at(seed.seed.read_pos)) {
             admitter->record->filtered_hits += static_cast<int>(
                 interval.positions.lower_bound(chromosome_base +
                                                admitter->high) -
                 interval.positions.lower_bound(chromosome_base +
                                                admitter->low));
+          }
           continue;
         }
         deferred.push_back({seed, interval});
       }
     }
 
-    // Restore every deferred slice, in order.
+    // Restore every deferred slice, in order: the seeds' order again.
+    sweep.reset(first_admitter, last_admitter, ranged);
     for (std::size_t slot = 0; slot < deferred.size(); ++slot) {
       // Prefetch the next slice's first postings, which the binary search
       // that bounded it never touched.
@@ -412,6 +532,7 @@ void harvest_group_anchors(
       const int query_position = seed.seed.read_pos;
       const bool query_ok = query_position >= 0 &&
                             query_position + seed_length <= query_length;
+      const std::vector<Admitter*>& seed_admitters = sweep.at(query_position);
       for (std::uint32_t posting = 0; posting < interval.count; ++posting) {
         // Inside the interval, so inside some member's window and the contig.
         const std::uint64_t local =
@@ -424,8 +545,7 @@ void harvest_group_anchors(
         // The orientation test, run once per posting: -1 until then.
         int verified = -1;
         bool admitted = false;
-        for (Admitter* admitter = first_admitter; admitter != last_admitter;
-             ++admitter) {
+        for (Admitter* const admitter : seed_admitters) {
           // The windows ascend by low: no later one holds the posting.
           if (local < admitter->low) break;
           if (local >= admitter->high) continue;
@@ -463,225 +583,6 @@ void harvest_group_anchors(
       }
     }
   }
-}
-
-// The asm rows: one harvest per target. A lane's members all take the whole
-// target as their window, so each of them admits every posting, and
-// harvest_group_anchors over that lane would slice each key over the whole
-// target. Here one scan slices each key once and gives each posting to both
-// live lanes: a forward seed to the forward lane, its reverse twin (the
-// reverse fine seeds mirror the forward ones, dna.h) to the reverse lane, each
-// with its own query position, rescue, tandem flag and orientation test, so a
-// posting is an anchor in at most one lane. Each pool is that harvest's pool,
-// in its order; each lane's counters are those every one of its members would
-// get. Both lanes' pools are alive together.
-struct TargetLane {
-  bool live = false;
-  std::vector<chaining::Anchor> anchors;
-  std::int64_t interval_hits = 0;
-  std::int64_t filtered_hits = 0;
-  std::int64_t deferred_anchors = 0;
-  std::int64_t rescued_anchors = 0;
-};
-
-// Fills the pools of the live lanes of `lanes` (0 forward, 1 reverse) over
-// [0, length) of `contig`.
-void harvest_target_lanes(const DnaContext& context,
-                          const DnaPlacementFamily& family, int contig,
-                          RetainedSeedDensity& seed_index,
-                          TargetLane (&lanes)[2]) {
-  const std::vector<RetainedSeedRef>& forward = seed_index.fine_forward();
-  const std::vector<RetainedSeedRef>& reverse = seed_index.fine_reverse();
-  const std::size_t count = forward.size();
-  const auto unmirrored = [] {
-    return std::logic_error(
-        "the target harvest: the reverse fine seeds do not mirror the "
-        "forward ones");
-  };
-  if (reverse.size() != count) throw unmirrored();
-  const int seed_length = family.seed_length;
-  const int query_length = family.read_length;
-  const int chromosome_length =
-      static_cast<int>(context.ref.contig_length(contig));
-  const std::uint64_t chromosome_base =
-      context.ref.index
-          ->chrom_offsets_data()[static_cast<std::size_t>(contig)];
-  const internal::PoolGate gate = internal::pool_gate(context);
-  const bool skip_own_diagonal =
-      internal::skips_own_diagonal(context, contig, false);
-
-  // A sliced forward seed and the lanes that build from its postings.
-  struct Routed {
-    std::size_t seed = 0;
-    KmerPostingIntervalView interval;
-    bool live[2] = {false, false};
-  };
-  std::vector<Routed> deferred;
-  deferred.reserve(count);
-  // Where each reverse seed's anchors start in the reverse pool.
-  std::vector<std::size_t> reverse_blocks;
-  constexpr std::size_t kSliceBlock = RetainedSeedDensity::kSliceBatch;
-  std::uint32_t block_entries[kSliceBlock];
-  KmerPostingIntervalView block_intervals[kSliceBlock];
-  PassSlices& slices = pass_slices(seed_index.entry_count());
-  for (std::size_t next = 0; next < count;) {
-    const std::size_t first = next;
-    std::size_t block_size = 0;
-    for (; next < count; ++next) {
-      const std::uint32_t entry = forward[next].entry;
-      std::uint32_t& stamp = slices.stamp[entry];
-      if (stamp == slices.pass) continue;
-      if (gate.skips(seed_index, entry)) {
-        stamp = slices.pass;
-        slices.interval[entry] = {};
-        continue;
-      }
-      if (block_size == kSliceBlock) break;
-      stamp = slices.pass;
-      block_entries[block_size++] = entry;
-    }
-    seed_index.slice_batch(*context.ref.index, block_entries, block_size,
-                           contig, 0u,
-                           static_cast<std::uint32_t>(chromosome_length),
-                           block_intervals);
-    for (std::size_t lane = 0; lane < block_size; ++lane)
-      slices.interval[block_entries[lane]] = block_intervals[lane];
-    for (std::size_t at = first; at < next; ++at) {
-      const RetainedSeedRef* const seeds[2] = {&forward[at],
-                                               &reverse[count - 1 - at]};
-      if (seeds[1]->entry != seeds[0]->entry) throw unmirrored();
-      const KmerPostingIntervalView& interval =
-          slices.interval[seeds[0]->entry];
-      if (!interval.found() || interval.count == 0) continue;
-      Routed routed;
-      routed.seed = at;
-      routed.interval = interval;
-      for (int lane = 0; lane < 2; ++lane) {
-        if (!lanes[lane].live) continue;
-        if (gate.drops(interval.global_count, seeds[lane]->rescued)) {
-          lanes[lane].filtered_hits += interval.count;
-          continue;
-        }
-        routed.live[lane] = true;
-      }
-      if (routed.live[0] || routed.live[1]) deferred.push_back(routed);
-    }
-  }
-
-  for (std::size_t slot = 0; slot < deferred.size(); ++slot) {
-    if (slot + 1 < deferred.size()) {
-      const KmerPostingIntervalView& next = deferred[slot + 1].interval;
-      __builtin_prefetch(next.positions.data(), 0, 1);
-      if (next.count > 8)
-        __builtin_prefetch(next.positions.data() + 8, 0, 1);
-    }
-    const Routed& routed = deferred[slot];
-    const KmerPostingIntervalView& interval = routed.interval;
-    const RetainedSeedRef* const seeds[2] = {
-        &forward[routed.seed], &reverse[count - 1 - routed.seed]};
-    int query_position[2];
-    bool query_ok[2];
-    for (int lane = 0; lane < 2; ++lane) {
-      query_position[lane] = seeds[lane]->seed.read_pos;
-      query_ok[lane] = query_position[lane] >= 0 &&
-                       query_position[lane] + seed_length <= query_length;
-    }
-    if (routed.live[1]) reverse_blocks.push_back(lanes[1].anchors.size());
-    for (std::uint32_t posting = 0; posting < interval.count; ++posting) {
-      const std::uint64_t local =
-          interval.positions[posting] - chromosome_base;
-      const int reference_position = static_cast<int>(local);
-      const bool inside = reference_position + seed_length <= chromosome_length;
-      for (int lane = 0; lane < 2; ++lane) {
-        if (!routed.live[lane]) continue;
-        TargetLane& target = lanes[lane];
-        ++target.interval_hits;
-        ++target.deferred_anchors;
-        const bool geometry_ok =
-            query_ok[lane] && inside &&
-            !(lane == 0 && skip_own_diagonal &&
-              reference_position == query_position[0]);
-        if (!geometry_ok ||
-            !packed_ref_orientation_compatible(
-                seeds[lane]->seed.z, interval.positions.packed_at(posting),
-                lane == 1)) {
-          ++target.filtered_hits;
-          continue;
-        }
-        ++target.rescued_anchors;
-        target.anchors.push_back(
-            {reference_position, query_position[lane], seed_length,
-             static_cast<std::int32_t>(target.anchors.size()),
-             seeds[lane]->tandem
-                 ? static_cast<std::uint32_t>(chaining::ANCHOR_TANDEM)
-                 : 0u});
-      }
-    }
-  }
-  // The reverse seeds came in forward order: put their blocks in their own
-  // stream's order, renumbering the anchors.
-  if (reverse_blocks.size() > 1) {
-    std::vector<chaining::Anchor>& pool = lanes[1].anchors;
-    std::vector<chaining::Anchor> ordered;
-    ordered.reserve(pool.size());
-    std::size_t end = pool.size();
-    for (std::size_t block = reverse_blocks.size(); block-- > 0;) {
-      for (std::size_t at = reverse_blocks[block]; at < end; ++at) {
-        ordered.push_back(pool[at]);
-        ordered.back().id = static_cast<std::int32_t>(ordered.size() - 1);
-      }
-      end = reverse_blocks[block];
-    }
-    pool.swap(ordered);
-  }
-}
-
-// The asm rows: the pool of lane group `at` and its members' harvest
-// counters. The first lane of a target harvests both lanes when the next group
-// is its other lane and would harvest, and keeps that lane's pool for its turn
-// (`stashed_group`).
-void target_lane_pool(const DnaContext& context,
-                      const DnaPlacementFamily& family,
-                      const std::vector<std::vector<std::size_t>>& groups,
-                      std::size_t at,
-                      const std::vector<std::uint8_t>& forward_query,
-                      const std::vector<std::uint8_t>& reverse_query,
-                      RetainedSeedDensity& seed_index,
-                      const std::vector<PassMember>& members,
-                      DnaPlacementChainingResult& result,
-                      TargetLane (&lanes)[2], std::size_t& stashed_group,
-                      std::vector<chaining::Anchor>& anchors) {
-  const VotePeak& lead = family.candidates[groups[at].front()].peak;
-  const int lane = lead.is_rc ? 1 : 0;
-  if (stashed_group == at) {
-    stashed_group = groups.size();
-  } else {
-    for (TargetLane& target : lanes) target = TargetLane{};
-    lanes[lane].live = true;
-    if (at + 1 < groups.size()) {
-      const VotePeak& partner = family.candidates[groups[at + 1].front()].peak;
-      if (partner.chr == lead.chr &&
-          internal::contig_lane_refusal(
-              context, partner.chr,
-              partner.is_rc ? seed_index.fine_reverse()
-                            : seed_index.fine_forward(),
-              partner.is_rc ? reverse_query : forward_query,
-              family.read_length) == DnaPlacementChainStatus::Accepted) {
-        lanes[1 - lane].live = true;
-        stashed_group = at + 1;
-      }
-    }
-    harvest_target_lanes(context, family, lead.chr, seed_index, lanes);
-  }
-  TargetLane& own = lanes[lane];
-  for (const PassMember& member : members) {
-    DnaPlacementCandidateChain& record = result.candidates[member.index];
-    record.interval_hits += static_cast<int>(own.interval_hits);
-    record.filtered_hits += static_cast<int>(own.filtered_hits);
-    record.deferred_anchors += static_cast<int>(own.deferred_anchors);
-    record.rescued_anchors += static_cast<int>(own.rescued_anchors);
-  }
-  anchors = std::move(own.anchors);
 }
 
 // One pass's chains over its pool: the chain call's result, its partition, and
@@ -799,30 +700,12 @@ void chain_pooled_groups(const DnaContext& context,
       groups[static_cast<std::size_t>(found - keys.begin())].push_back(index);
     }
   }
-  // The asm rows (target_lane_pool): a target's two lanes run back to back,
-  // targets in catalogue order of their first member.
-  const bool target_harvest = context.opts.target_harvest;
-  if (target_harvest) {
-    std::vector<std::vector<std::size_t>> by_target;
-    std::vector<std::uint8_t> placed(groups.size(), 0);
-    for (std::size_t at = 0; at < groups.size(); ++at) {
-      if (placed[at] != 0) continue;
-      const int contig = family.candidates[groups[at].front()].peak.chr;
-      for (std::size_t other = at; other < groups.size(); ++other)
-        if (placed[other] == 0 &&
-            family.candidates[groups[other].front()].peak.chr == contig) {
-          placed[other] = 1;
-          by_target.push_back(std::move(groups[other]));
-        }
-    }
-    groups.swap(by_target);
-  }
-  TargetLane target_lanes[2];
-  std::size_t stashed_group = groups.size();
+  // The asm rows vote per stretch: each member is windowed around its own
+  // stretch (stretch_member).
+  const bool stretched = context.opts.vote_stretch > 0;
   std::vector<PassMember> windowed;
   std::vector<std::vector<std::size_t>> owned;
-  for (std::size_t group_at = 0; group_at < groups.size(); ++group_at) {
-    const std::vector<std::size_t>& group = groups[group_at];
+  for (const std::vector<std::size_t>& group : groups) {
     const VotePeak& lead = family.candidates[group.front()].peak;
     const bool reverse = lead.is_rc;
     const std::vector<std::uint8_t>& query =
@@ -846,28 +729,23 @@ void chain_pooled_groups(const DnaContext& context,
         static_cast<int>(context.ref.contig_length(lead.chr));
     windowed.clear();
     for (const std::size_t index : group) {
-      const internal::HarvestWindow member_window =
-          target_harvest
-              ? internal::HarvestWindow{0, chromosome_length}
-              : pass_window(context, family, family.candidates[index],
-                            chromosome_length);
-      if (member_window.high <= member_window.low) {
+      const PassMember member =
+          stretched
+              ? stretch_member(context, family, index, chromosome_length)
+              : PassMember{index, pass_window(context, family,
+                                              family.candidates[index],
+                                              chromosome_length)};
+      if (member.window.high <= member.window.low) {
         result.candidates[index].status =
             DnaPlacementChainStatus::InvalidReference;
         continue;
       }
-      windowed.push_back({index, member_window});
+      windowed.push_back(member);
     }
     std::vector<chaining::Anchor> anchors;
-    if (!windowed.empty()) {
-      if (target_harvest)
-        target_lane_pool(context, family, groups, group_at, forward_query,
-                         reverse_query, seed_index, windowed, result,
-                         target_lanes, stashed_group, anchors);
-      else
-        harvest_group_anchors(context, family, windowed, seed_index, seeds,
-                              result, anchors);
-    }
+    if (!windowed.empty())
+      harvest_group_anchors(context, family, windowed, seed_index, seeds,
+                            result, anchors);
     // A member's own pass with no chain: no interval hit, or no chain.
     const auto chainless = [&result](std::size_t index) {
       DnaPlacementCandidateChain& record = result.candidates[index];
@@ -906,8 +784,12 @@ void chain_pooled_groups(const DnaContext& context,
             peak.line_gate
                 ? peak.line_a + vote_slope_stretch(median.q, peak.line_b_q20)
                 : peak.raw_ref_start;
+        // Under the vote per stretch a member holds the anchor when it would
+        // admit it: inside its window, from a seed of its query range.
         const std::pair<bool, std::int64_t> key{
-            median.r < bounds.low || median.r >= bounds.high,
+            median.r < bounds.low || median.r >= bounds.high ||
+                (stretched && (median.q < windowed[at].query_low ||
+                               median.q >= windowed[at].query_high)),
             diagonal > expected ? diagonal - expected : expected - diagonal};
         if (at == 0 || key < best_key) {
           best = at;

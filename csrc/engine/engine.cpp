@@ -605,8 +605,8 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.catalogue_lane_bound =
       ::fa::cpu::lr::dna_chain_max_candidates(mapping);
   dctx.opts.chain_two_pass = mapping.chain_two_pass;
-  dctx.opts.target_harvest = mapping.target_harvest;
   dctx.opts.divergence_contrast = mapping.divergence_contrast;
+  dctx.opts.vote_stretch = mapping.vote_stretch;
   return dctx;
 }
 

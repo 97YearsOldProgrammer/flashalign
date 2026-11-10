@@ -8,6 +8,7 @@
 #include <cstring>
 #include <limits>
 #include <numeric>
+#include <stdexcept>
 #include <tuple>
 #include <vector>
 
@@ -130,11 +131,30 @@ bool peak_posting_run(const DnaContext& context, const VotePeak& peak,
   return true;
 }
 
+// The forward stretch [begin, begin + length) of the read whose tile grid a
+// mask is on: the whole read, or under a vote per stretch one stretch's
+// window.
+struct TileFrame {
+  int begin = 0;
+  int length = 0;
+};
+
+// dna_forward_query_tile on `frame`'s grid; on the whole read, the same.
+int frame_tile(const TileFrame& frame, int oriented_seed_position,
+               bool reverse, int read_length, int seed_length,
+               int tile_count) noexcept {
+  const int forward_position =
+      reverse ? read_length - seed_length - oriented_seed_position
+              : oriented_seed_position;
+  return ::fa::cpu::voting::query_tile_for_position(
+      forward_position - frame.begin, frame.length, seed_length, tile_count);
+}
+
 QueryTileMask factual_forward_support(
     const DnaContext& context,
     const std::vector<std::uint8_t>& forward_query,
     const VotePeak& peak, const ChainWindowPeakScratch& scratch,
-    std::uint64_t& posting_tests, int tile_count) {
+    std::uint64_t& posting_tests, int tile_count, const TileFrame& frame) {
   QueryTileMask support;
   const int read_length = static_cast<int>(forward_query.size());
   const int seed_length = std::max(1, context.opts.k);
@@ -161,8 +181,8 @@ QueryTileMask factual_forward_support(
     }
     posting_tests += contributed ? posting + 1 : view.view.count;
     if (contributed) {
-      support.set(dna_forward_query_tile(view.seed.read_pos, peak.is_rc,
-                                         read_length, seed_length, tile_count));
+      support.set(frame_tile(frame, view.seed.read_pos, peak.is_rc,
+                             read_length, seed_length, tile_count));
     }
   };
   if (!scratch.retained_seeds.empty()) {
@@ -192,7 +212,8 @@ class RankedPeakMaskSource final
                        const std::vector<VotePeak>& ranked,
                        const ChainWindowPeakScratch& forward_scratch,
                        const ChainWindowPeakScratch& reverse_scratch,
-                       std::uint64_t& posting_tests, int tile_count)
+                       std::uint64_t& posting_tests, int tile_count,
+                       const TileFrame& frame)
       : context_(context),
         forward_query_(forward_query),
         ranked_(ranked),
@@ -200,6 +221,7 @@ class RankedPeakMaskSource final
         reverse_scratch_(reverse_scratch),
         posting_tests_(posting_tests),
         tile_count_(tile_count),
+        frame_(frame),
         masks_(ranked.size()),
         ready_(ranked.size(), 0) {}
 
@@ -210,7 +232,7 @@ class RankedPeakMaskSource final
       masks_[index] = factual_forward_support(
           context_, forward_query_, peak,
           peak.is_rc ? reverse_scratch_ : forward_scratch_, posting_tests_,
-          tile_count_);
+          tile_count_, frame_);
       ready_[index] = 1;
     }
     return masks_[index];
@@ -224,6 +246,7 @@ class RankedPeakMaskSource final
   const ChainWindowPeakScratch& reverse_scratch_;
   std::uint64_t& posting_tests_;
   int tile_count_;
+  TileFrame frame_;
   std::vector<QueryTileMask> masks_;
   std::vector<char> ready_;
 };
@@ -275,15 +298,21 @@ DnaPlacementFamily build_dna_placement_family(
     const DnaContext& context, const std::vector<std::uint8_t>& forward_query,
     const std::vector<VotePeak>& whole_read_peaks,
     const ChainWindowPeakScratch& forward_scratch,
-    const ChainWindowPeakScratch& reverse_scratch) {
+    const ChainWindowPeakScratch& reverse_scratch, int frame_begin,
+    int frame_length) {
   DnaPlacementFamily family;
   family.read_length = static_cast<int>(forward_query.size());
   family.seed_length = std::max(1, context.opts.k);
   family.tile_count = context.opts.query_tiles;
+  // The grid the admission compares masks on; candidates keep the family's.
+  const TileFrame whole{0, family.read_length};
+  const bool framed = frame_length > 0;
+  const TileFrame frame = framed ? TileFrame{frame_begin, frame_length} : whole;
   std::vector<VotePeak> ranked = whole_read_peaks;
   // Peaks tied on every evidence key are ordered by a read-seeded hash of
-  // their locus, as minimap2 breaks ties. Catalogue ranks and ids follow this
-  // order, so every later tie-break on rank or id inherits it.
+  // their locus, as minimap2 breaks ties; under the vote per stretch by their
+  // read_lo first (map.cpp stretch_to_contig). Catalogue ranks and ids follow
+  // this order, so every later tie-break on rank or id inherits it.
   const std::uint32_t seed = context.vote_tie_seed;
   std::stable_sort(ranked.begin(), ranked.end(),
                    [seed](const VotePeak& left, const VotePeak& right) {
@@ -322,11 +351,11 @@ DnaPlacementFamily build_dna_placement_family(
     if (ratio_admission) {
       input.mask_slot = static_cast<int>(peak_index);
       if (peak.evidence_read_lo <= peak.evidence_read_hi) {
-        const int tile_a = dna_forward_query_tile(
-            peak.evidence_read_lo, peak.is_rc, family.read_length,
+        const int tile_a = frame_tile(
+            frame, peak.evidence_read_lo, peak.is_rc, family.read_length,
             family.seed_length, admission_tiles);
-        const int tile_b = dna_forward_query_tile(
-            peak.evidence_read_hi, peak.is_rc, family.read_length,
+        const int tile_b = frame_tile(
+            frame, peak.evidence_read_hi, peak.is_rc, family.read_length,
             family.seed_length, admission_tiles);
         input.coarse_tile_lo = std::min(tile_a, tile_b);
         input.coarse_tile_hi = std::max(tile_a, tile_b);
@@ -335,7 +364,7 @@ DnaPlacementFamily build_dna_placement_family(
       input.support = factual_forward_support(
           context, forward_query, peak,
           peak.is_rc ? reverse_scratch : forward_scratch,
-          family.exact_posting_tests, family.tile_count);
+          family.exact_posting_tests, family.tile_count, frame);
     }
     inputs.push_back(input);
   }
@@ -345,22 +374,22 @@ DnaPlacementFamily build_dna_placement_family(
   RankedPeakMaskSource mask_source(context, forward_query, ranked,
                                    forward_scratch, reverse_scratch,
                                    family.exact_posting_tests,
-                                   admission_tiles);
+                                   admission_tiles, frame);
   CandidateCatalogue catalogue = ::fa::cpu::voting::build_candidate_catalogue(
       std::move(inputs), context.opts.catalogue_lane_bound,
       ratio_admission ? context.opts.vote_admission_ratio : 0.0,
       ratio_admission ? &mask_source : nullptr, admission_tiles,
       context.opts.all_chains);
-  // Admitted on the coarser grid, a candidate's support is rebuilt on the
-  // family's.
-  if (ratio_admission && admission_tiles != family.tile_count) {
+  // Admitted on the coarser grid, or on a stretch's, a candidate's support is
+  // rebuilt on the family's.
+  if (framed || (ratio_admission && admission_tiles != family.tile_count)) {
     for (auto& generic : catalogue.candidates) {
       const VotePeak& peak =
           key_peaks[static_cast<std::size_t>(generic.equivalence_key - 1)];
       generic.support = factual_forward_support(
           context, forward_query, peak,
           peak.is_rc ? reverse_scratch : forward_scratch,
-          family.exact_posting_tests, family.tile_count);
+          family.exact_posting_tests, family.tile_count, whole);
     }
   }
   for (const auto& generic : catalogue.candidates) {
@@ -383,6 +412,49 @@ DnaPlacementFamily build_dna_placement_family(
   }
   family.valid = !family.candidates.empty();
   return family;
+}
+
+// Each stretch's catalogue is its own: its ratio admission, lane bound and
+// key dedup see only its peaks, and a place named in two stretches stays two
+// candidates. Ids, catalogue ranks and keys continue the contig's, so a tie
+// on rank breaks in stretch order.
+void append_stretch_family(DnaPlacementFamily& family,
+                           DnaPlacementFamily stretch) {
+  if (family.read_length == 0) {
+    family.read_length = stretch.read_length;
+    family.seed_length = stretch.seed_length;
+    family.tile_count = stretch.tile_count;
+  }
+  int rank_base = 0;
+  std::uint64_t key_base = 0;
+  for (const DnaPlacementCandidate& candidate : family.candidates) {
+    rank_base = std::max(rank_base, candidate.catalogue_rank + 1);
+    key_base = std::max(key_base, candidate.equivalence_key);
+  }
+  for (DnaPlacementCandidate& candidate : stretch.candidates) {
+    candidate.id = static_cast<CandidateId>(family.candidates.size());
+    candidate.catalogue_rank += rank_base;
+    candidate.equivalence_key += key_base;
+    family.candidates.push_back(std::move(candidate));
+  }
+  family.forward_candidates += stretch.forward_candidates;
+  family.reverse_candidates += stretch.reverse_candidates;
+  family.exact_posting_tests += stretch.exact_posting_tests;
+  family.valid = !family.candidates.empty();
+}
+
+std::string CandidateIdOverflow::refusal(const std::string* name, int length,
+                                         std::size_t candidates,
+                                         int lane_bound) {
+  return (name ? "query contig '" + *name + "'"
+               : std::string("a query contig")) +
+         " (" + std::to_string(length) + " bp) has " +
+         std::to_string(candidates) +
+         " candidates in its catalogue per stretch, more than a candidate id "
+         "holds (" +
+         std::to_string(std::numeric_limits<CandidateId>::max()) +
+         "); lower --max-cands (" + std::to_string(lane_bound) +
+         " per strand here) to map it";
 }
 
 }  // namespace fa::cpu::lr

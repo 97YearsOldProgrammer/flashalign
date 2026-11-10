@@ -847,13 +847,13 @@ std::string resolved_config_text(const AlignOptions& opt,
                                       opt.preset))
       row("dna_rival.secondary_max", i2s(mapping.secondary_max),
           src(opt.dna_secondary_max.has_value(), "builtin"));
-    // The asm rows only (options/options.h chain_two_pass, target_harvest,
-    // divergence_contrast).
+    // The asm rows only (options/options.h chain_two_pass,
+    // divergence_contrast, vote_stretch).
     if (assembly) {
       row("dna_chain.two_pass", b2s(mapping.chain_two_pass), "preset");
-      row("dna_chain.target_harvest", b2s(mapping.target_harvest), "preset");
       row("dna_chain_mapq.divergence_contrast",
           b2s(mapping.divergence_contrast), "preset");
+      row("dna_vote.stretch", i2s(mapping.vote_stretch), "preset");
     }
   } else if (rna != nullptr) {
     row("rna_rival.pri_ratio", f2s(rna->rival_pri_ratio),
@@ -1646,6 +1646,19 @@ int run_align(const AlignOptions& cli_options) {
         return ranks;
       };
 
+  // A contig refused for its candidates (dna/dna.h CandidateIdOverflow) is
+  // named here, by the first read of its batch with its name hash.
+  const auto name_refused_contig =
+      [](const std::vector<fa::cpu::io::FastxRecord>& records,
+         const fa::cpu::lr::CandidateIdOverflow& refused) {
+        for (const fa::cpu::io::FastxRecord& record : records)
+          if (fa::cpu::lr::tie_name_hash(record.name) == refused.name_hash)
+            return std::runtime_error(fa::cpu::lr::CandidateIdOverflow::refusal(
+                &record.name, refused.length, refused.candidates,
+                refused.lane_bound));
+        return std::runtime_error(refused.what());
+      };
+
   // -t 1: the batch mapped on this thread.
   auto process_serial = [&](ReadBatch in) -> std::optional<AlignedBatch> {
     std::vector<std::string> seqs;
@@ -1653,9 +1666,13 @@ int run_align(const AlignOptions& cli_options) {
     for (auto& rec : in.records)
       seqs.push_back(std::move(rec.seq));
     AlignedBatch done;
-    done.results = align_batch(seqs, read_name_hashes(in.records),
-                               read_self_contigs(in.records),
-                               read_name_ranks(in.records, seqs));
+    try {
+      done.results = align_batch(seqs, read_name_hashes(in.records),
+                                 read_self_contigs(in.records),
+                                 read_name_ranks(in.records, seqs));
+    } catch (const fa::cpu::lr::CandidateIdOverflow& refused) {
+      throw name_refused_contig(in.records, refused);
+    }
     for (size_t i = 0; i < seqs.size(); ++i)
       in.records[i].seq = std::move(seqs[i]);
     done.records = std::move(in.records);
@@ -1670,7 +1687,12 @@ int run_align(const AlignOptions& cli_options) {
     AlignedBatch out;
     out.records = std::move(windowed_records.front());
     windowed_records.pop_front();
-    fa::cpu::api::AlignedReadBatch done = session->collect();
+    fa::cpu::api::AlignedReadBatch done;
+    try {
+      done = session->collect();
+    } catch (const fa::cpu::lr::CandidateIdOverflow& refused) {
+      throw name_refused_contig(out.records, refused);
+    }
     for (size_t i = 0; i < done.reads.size(); ++i)
       out.records[i].seq = std::move(done.reads[i]);
     out.results = std::move(done.results);

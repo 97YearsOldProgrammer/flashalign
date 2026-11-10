@@ -198,6 +198,57 @@ static void apply_dna_min_chain_score(
   realized.secondary.clear();
 }
 
+// The forward [begin, end) of each stretch of a query of `length`, `stretch`
+// bp each; the last takes the remainder, and a remainder under stretch / 2
+// joins the previous one.
+static std::vector<std::pair<int, int>> query_stretches(int length,
+                                                        int stretch) {
+  int count = std::max(1, length / stretch);
+  if (length > count * stretch &&
+      2 * (length - count * stretch) >= stretch)
+    ++count;
+  std::vector<std::pair<int, int>> stretches;
+  stretches.reserve(static_cast<std::size_t>(count));
+  for (int at = 0; at < count; ++at)
+    stretches.emplace_back(at * stretch,
+                           at + 1 == count ? length : (at + 1) * stretch);
+  return stretches;
+}
+
+// A stretch's vote ran on its window's rebased stream, `offset` the window's
+// start on its lane's stream and `span` its length: its peaks and the seeds
+// it retained move to the lane's oriented read coordinates. A diagonal
+// d = r - q there is d + offset in the window's, so raw_ref_start loses the
+// offset and the bin is taken again from it at the vote's width; read_lo /
+// read_hi become the window's bounds, and ref_pos is clamped as the
+// whole-read vote clamps it. The bin is floor(raw_ref_start / W) at offset 0
+// too, not the whole-read vote's bucket bin. read_lo is the stretch's begin
+// forward and L minus the window's end reverse, so within a stretch a forward
+// and a reverse peak tied on vote_score, support and center_support go by
+// read_lo in chain_peak_better_seeded before the locus hash.
+static void stretch_to_contig(const DnaContext& dctx, int read_len,
+                              int offset, int span,
+                              std::vector<VotePeak>& peaks,
+                              std::vector<ChainWindowRetainedSeed>& retained) {
+  for (VotePeak& peak : peaks) {
+    peak.raw_ref_start -= offset;
+    const int width = std::max(1, peak.anchor.ref_start_bin_width);
+    peak.anchor.ref_start_bin =
+        vote_floor_div(static_cast<int>(peak.raw_ref_start), width);
+    peak.read_lo = offset;
+    peak.read_hi = offset + span;
+    if (peak.evidence_read_lo <= peak.evidence_read_hi) {
+      peak.evidence_read_lo += offset;
+      peak.evidence_read_hi += offset;
+    }
+    const std::int64_t chromosome_length = dctx.ref.contig_length(peak.chr);
+    peak.ref_pos = static_cast<int>(std::clamp<std::int64_t>(
+        peak.raw_ref_start, 0,
+        std::max<std::int64_t>(0, chromosome_length - read_len)));
+  }
+  for (ChainWindowRetainedSeed& seed : retained) seed.seed.read_pos += offset;
+}
+
 } // namespace dna
 } // namespace fa::cpu::lr
 
@@ -309,6 +360,8 @@ AlignResult map_read(const DnaContext& base_dctx,
       return nullptr;
     return &scratch.full_syncmer_rc_seeds;
   };
+  // `seed_start` is the window's start on the strand's stream, where its
+  // rebased read positions begin.
   auto prepare_shared_window_views =
       [&](DnaQuerySeedStrand strand, int seed_start, int seed_end,
           int downsample, std::vector<QuerySeed>& window_seeds,
@@ -326,10 +379,11 @@ AlignResult map_read(const DnaContext& base_dctx,
     // so the flag moves no vote.
     if (dctx.readmitted != nullptr)
       for (DnaLongSeedView& view : bundle.selected_views) {
+        const int stream_position = seed_start + view.seed.read_pos;
         const int forward_position =
             strand == DnaQuerySeedStrand::Forward
-                ? view.seed.read_pos
-                : read_len - dctx.opts.k - view.seed.read_pos;
+                ? stream_position
+                : read_len - dctx.opts.k - stream_position;
         if ((*dctx.readmitted)[static_cast<std::size_t>(forward_position)])
           view.rescued = true;
       }
@@ -338,8 +392,92 @@ AlignResult map_read(const DnaContext& base_dctx,
                              : &bundle.exact_refine_views;
     return bundle.views_ready ? &bundle.selected_views : nullptr;
   };
-  // The vote runs over one whole-read window [0, read_len).
-  if (read_len >= dctx.opts.k) {
+  // The asm rows (options/options.h vote_stretch): the vote below, per
+  // stretch and strand. A stretch's seeds are those starting in
+  // its [begin, end), so its window reaches k - 1 bases further; the reverse
+  // window mirrors the forward one. Each vote's peaks and retained seeds move
+  // to contig coordinates (stretch_to_contig), each stretch's catalogue is
+  // built from its own peaks and seeds (append_stretch_family), and each
+  // lane's retained seeds become their union, in read order. No peak gets the
+  // winner's line.
+  const int stretch = dctx.opts.vote_stretch;
+  DnaPlacementFamily stretch_family;
+  if (stretch > 0 && read_len >= dctx.opts.k) {
+    const int actual_downsample =
+        std::max(1, dctx.opts.chain_syncmer_downsample);
+    shared_rc_syncmer_seeds = ensure_shared_rc_stream();
+    if (!shared_rc_syncmer_seeds)
+      return finish(std::move(out));
+    query_seed_pool.allow_windows();
+    std::vector<ChainWindowRetainedSeed> retained[2];
+    std::vector<VotePeak> stretch_peaks;
+    const std::vector<std::pair<int, int>> stretches =
+        query_stretches(read_len, stretch);
+    for (const auto& [begin, end] : stretches) {
+      const int window_end = std::min(read_len, end + dctx.opts.k - 1);
+      const int span = window_end - begin;
+      stretch_peaks.clear();
+      for (int lane = 0; lane < 2; ++lane) {
+        const bool reverse = lane == 1;
+        const int offset = reverse ? read_len - window_end : begin;
+        ChainWindowPeakScratch& lane_scratch =
+            reverse ? scratch.rc : scratch.fwd;
+        const std::vector<DnaLongSeedView>* refine_views = nullptr;
+        const std::vector<DnaLongSeedView>* views =
+            prepare_shared_window_views(
+                reverse ? DnaQuerySeedStrand::Reverse
+                        : DnaQuerySeedStrand::Forward,
+                offset, offset + span, actual_downsample,
+                reverse ? scratch.shared_window_rc_seeds
+                        : scratch.shared_window_fwd_seeds,
+                refine_views);
+        // A window with no voter votes nothing.
+        if (!views) {
+          lane_scratch.retained_seeds.clear();
+          continue;
+        }
+        lane_scratch.pending_exact_refine_views =
+            refine_views ? *refine_views : std::vector<DnaLongSeedView>{};
+        WindowAnchorPeakParams params;
+        params.lookup_cache = lookup_cache;
+        params.seed_view_override = views;
+        params.tie_seed = dctx.vote_tie_seed;
+        std::vector<VotePeak> peaks = window_anchor_peaks(
+            seed_ctx, reverse ? nullptr : fwd_enc.data() + begin, span,
+            reverse, lane_scratch, params);
+        stretch_to_contig(dctx, read_len, offset, span, peaks,
+                          lane_scratch.retained_seeds);
+        stretch_peaks.insert(stretch_peaks.end(), peaks.begin(), peaks.end());
+        retained[lane].insert(retained[lane].end(),
+                              lane_scratch.retained_seeds.begin(),
+                              lane_scratch.retained_seeds.end());
+      }
+      if (stretch_peaks.empty()) continue;
+      raw.insert(raw.end(), stretch_peaks.begin(), stretch_peaks.end());
+      // Its admission compares masks on the stretch's own tile grid.
+      DnaPlacementFamily one =
+          build_dna_placement_family(dctx, fwd_enc, stretch_peaks,
+                                     scratch.fwd, scratch.rc, begin, span);
+      // Its candidates take the contig's next ids: a contig they outgrow is
+      // refused.
+      const std::size_t candidates =
+          stretch_family.candidates.size() + one.candidates.size();
+      if (candidates > static_cast<std::size_t>(std::numeric_limits<
+                           ::fa::cpu::voting::CandidateId>::max()))
+        throw CandidateIdOverflow(dctx.read_name_hash, read_len, candidates,
+                                  dctx.opts.catalogue_lane_bound);
+      append_stretch_family(stretch_family, std::move(one));
+    }
+    // The reverse windows come in descending read order.
+    std::stable_sort(retained[1].begin(), retained[1].end(),
+                     [](const ChainWindowRetainedSeed& left,
+                        const ChainWindowRetainedSeed& right) {
+                       return left.seed.read_pos < right.seed.read_pos;
+                     });
+    scratch.fwd.retained_seeds.swap(retained[0]);
+    scratch.rc.retained_seeds.swap(retained[1]);
+  } else if (read_len >= dctx.opts.k) {
+    // The vote runs over one whole-read window [0, read_len).
     const int start = 0;
     const int end = read_len;
     const int span = read_len;
@@ -407,8 +545,11 @@ AlignResult map_read(const DnaContext& base_dctx,
   DnaPlacementChainingResult placement_chaining;
   bool placement_chaining_ran = false;
   if (best) {
+    // Under a vote per stretch the stretches' catalogues, built above.
     placement_family =
-        build_dna_placement_family(dctx, fwd_enc, raw, scratch.fwd, scratch.rc);
+        stretch > 0 ? std::move(stretch_family)
+                    : build_dna_placement_family(dctx, fwd_enc, raw,
+                                                 scratch.fwd, scratch.rc);
     // The all-chains lane: the catalogue's chains are the records, and nothing
     // below runs.
     if (dctx.opts.all_chains) {

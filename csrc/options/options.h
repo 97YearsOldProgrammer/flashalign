@@ -286,16 +286,22 @@ struct DnaLongOptions {
   // the pass's own band and reach (dna/placement.cpp chain_two_pass). asm5,
   // asm10 and asm20 install it; not settable.
   bool chain_two_pass = false;
-  // The candidates of each target, both lanes, take the whole target as
-  // their window, and one scan of the target fills both lanes' pools
-  // (dna/placement.cpp harvest_target_lanes). asm5, asm10 and asm20 install
-  // it; not settable.
-  bool target_harvest = false;
   // A record whose divergence sits far above its family's minimum takes the
   // divergence contrast cap (dna/mapq.cpp price_dna_regions,
   // price_dna_blocks). Off on asm5, asm10 and asm20, which price each record
   // from its own evidence. Not settable.
   bool divergence_contrast = true;
+  // The read vote runs per stretch of the query: stretches of vote_stretch
+  // bp, the last taking the remainder (one under half a stretch joins the
+  // previous), each voted per strand in its own window, its peaks moved to
+  // the query's coordinates (dna/map.cpp query_stretches, stretch_to_contig).
+  // Each stretch has its own catalogue, its ratio admission on the stretch's
+  // own tile grid (dna/catalogue.cpp append_stretch_family), and each
+  // candidate is harvested in a window around its diagonal over its stretch
+  // from the seeds of its stretch (dna/placement.cpp stretch_member). 0 votes
+  // the whole query as one window. asm5, asm10 and asm20 install 1,000,000; not
+  // settable.
+  int vote_stretch = 0;
 };
 
 // The lane bound: the vote's peaks and the catalogue's candidates per strand.

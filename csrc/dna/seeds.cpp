@@ -578,7 +578,8 @@ bool DnaQuerySeedPool::prepare_representatives(
     ChainWindowPeakScratch& selection_scratch) {
   const std::vector<QuerySeed>* seeds = stream(strand);
   bool& prepared = prepared_slot(strand);
-  if (prepared || seeds == nullptr || start != 0 || end != read_length_)
+  if (seeds == nullptr ||
+      (!windows_ && (prepared || start != 0 || end != read_length_)))
     return false;
   prepared = true;
   const int window_downsample = std::max(1, downsample);
@@ -593,13 +594,20 @@ bool DnaQuerySeedPool::prepare_representatives(
                                  window_downsample, rebased_seeds);
   }
   // Captured views are positional, so they apply only to the stream in
-  // place.
-  const std::vector<KmerPostingView>* views =
-      identity ? captured_views(strand) : nullptr;
+  // place, or, at downsample 1, to the contiguous slice a window takes.
+  const std::vector<KmerPostingView>* captured = captured_views(strand);
+  const KmerPostingView* views = nullptr;
+  if (captured != nullptr && identity) {
+    views = captured->data();
+  } else if (captured != nullptr && windows_ && window_downsample == 1) {
+    const auto first = std::lower_bound(
+        seeds->begin(), seeds->end(), start,
+        [](const QuerySeed& seed, int pos) { return seed.read_pos < pos; });
+    views = captured->data() + (first - seeds->begin());
+  }
   return select_chain_closed_syncmer_occ_aware_seed_bundle_from_seeds_into(
       context_, identity ? *seeds : rebased_seeds, std::max(0, end - start),
-      &lookup_cache_, bundle, selection_scratch,
-      views != nullptr ? views->data() : nullptr);
+      &lookup_cache_, bundle, selection_scratch, views);
 }
 
 } // namespace dna
