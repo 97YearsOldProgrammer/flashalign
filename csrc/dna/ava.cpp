@@ -177,7 +177,7 @@ void split_key_runs(const DnaContext& context,
           seed_index.view(out.entries[at + kPrefetchAhead]).positions.data(),
           0, 1);
     const std::uint32_t entry = out.entries[at];
-    const RefPosSpan& positions = seed_index.view(entry).positions;
+    const RefPosSpan positions = seed_index.view(entry).positions;
     const PackedRefPos* postings = positions.data();
     const std::uint32_t count = positions.size();
     std::uint32_t posting =
@@ -334,9 +334,9 @@ void build_target_pool(const DnaContext& context,
       pack_ref_pos(contig, static_cast<std::uint32_t>(target_high));
   for (const TargetHit* hit = hits.begin; hit != hits.end; ++hit) {
     const RetainedSeedRef& seed = seeds[hit->seed];
-    const KmerPostingView& full = seed_index.view(seed.entry);
+    const KmerPostingView full = seed_index.view(seed.entry);
     if (gate.drops(full.occurrence, seed.rescued)) continue;
-    const int query_position = seed.seed.read_pos;
+    const int query_position = seed.read_pos;
     if (query_position < 0 || query_position + seed_length > read_length)
       continue;
     const PackedRefPos* postings = full.positions.data();
@@ -349,7 +349,7 @@ void build_target_pool(const DnaContext& context,
       const std::int64_t reference_position = packed_ref_local(*at);
       if (skip_own_diagonal && reference_position == query_position) continue;
       if (reference_position + seed_length > chromosome_length) continue;
-      if (!packed_ref_orientation_compatible(seed.seed.z, *at, reverse))
+      if (!packed_ref_orientation_compatible(seed.z, *at, reverse))
         continue;
       const std::int64_t diagonal = reference_position - query_position;
       // The members admitting the posting, and the widest of their windows.

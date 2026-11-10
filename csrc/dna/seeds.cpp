@@ -114,7 +114,7 @@ bool RetainedSeedDensity::build(
     entries_.reserve(lookup_cache->entry_count() + input_seed_records);
     for (std::size_t entry = 0; entry < lookup_cache->entry_count(); ++entry)
       entries_.push_back(RetainedSeedDensityEntry{
-          lookup_cache->key_at(entry), lookup_cache->view_at(entry)});
+          posting_handle(lookup_cache->view_at(entry))});
   } else {
     by_key.reserve(input_seed_records + 1);
   }
@@ -160,19 +160,20 @@ bool RetainedSeedDensity::build(
         entry_index = static_cast<std::uint32_t>(entries_.size());
         remember(retained.seed.key, slot, entry_index);
         entries_.push_back(
-            RetainedSeedDensityEntry{retained.seed.key, retained.view});
+            RetainedSeedDensityEntry{posting_handle(retained.view)});
       } else {
         entry_index = static_cast<std::uint32_t>(held);
         if (entries_[entry_index].retained) {
-          if (!compatible_views(entries_[entry_index].view, retained.view))
+          if (!compatible_views(view(entry_index), retained.view))
             valid = false;
         } else {
-          entries_[entry_index].view = retained.view;
+          entries_[entry_index].view = posting_handle(retained.view);
         }
       }
       entries_[entry_index].retained = true;
       output.push_back(
-          RetainedSeedRef{retained.seed, entry_index, retained.rescued});
+          RetainedSeedRef{retained.seed.read_pos, entry_index,
+                          retained.seed.z, retained.rescued});
       if (retained.rescued) entries_[entry_index].rescued = true;
     }
   };
@@ -231,7 +232,7 @@ bool RetainedSeedDensity::build(
       }
       const auto entry_index = static_cast<std::uint32_t>(entries_.size());
       remember(seed.key, slot, entry_index);
-      entries_.push_back(RetainedSeedDensityEntry{seed.key, view});
+      entries_.push_back(RetainedSeedDensityEntry{posting_handle(view)});
       return entry_index;
     };
     // The reverse stream holds the forward stream's keys in reverse order
@@ -283,7 +284,8 @@ bool RetainedSeedDensity::build(
                                 seed.read_pos)] != 0;
       const bool tandem = query_seed_has_tandem_neighbor(*input, position);
       output.push_back(
-          RetainedSeedRef{seed, entry_index, twin || marked, tandem});
+          RetainedSeedRef{seed.read_pos, entry_index, seed.z, twin || marked,
+                          tandem});
       if (twin || marked) entries_[entry_index].rescued = true;
       if (tandem) tandem_seeds[strand].emplace_back(seed.read_pos, seed.key);
     }
@@ -297,10 +299,13 @@ bool RetainedSeedDensity::build(
     std::vector<std::pair<int, std::uint64_t>>& tandem = tandem_seeds[strand];
     if (tandem.empty()) continue;
     std::sort(tandem.begin(), tandem.end());
-    for (RetainedSeedRef& ref : *vote_refs[strand])
-      ref.tandem = std::binary_search(
+    // A vote seed's ref is at its input's place (a skipped one fails the
+    // build), whose key it reads.
+    std::vector<RetainedSeedRef>& refs = *vote_refs[strand];
+    for (std::size_t at = 0; at < refs.size(); ++at)
+      refs[at].tandem = std::binary_search(
           tandem.begin(), tandem.end(),
-          std::make_pair(ref.seed.read_pos, ref.seed.key));
+          std::make_pair(refs[at].read_pos, (*votes[strand])[at].seed.key));
   }
 
   return true;
@@ -334,7 +339,7 @@ KmerPostingIntervalView RetainedSeedDensity::slice(
        index.chrom_count() != validated_chrom_count_) &&
       !posting_density_boundaries_valid(offsets, index.chrom_count()))
     return {};
-  const KmerPostingView full = entries_[entry_index].view;
+  const KmerPostingView full = view(entry_index);
   if (!full.found()) return {};
 
   const std::uint64_t chromosome_base =
@@ -400,6 +405,8 @@ void RetainedSeedDensity::slice_batch(const SeedIndex& index,
     }
   }
 
+  // Each lane's view, rebuilt from its entry.
+  KmerPostingView lane_views[kSliceBatch];
   const KmerPostingView* views[kSliceBatch];
   const PackedRefPos* range_data[kSliceBatch];
   std::uint32_t range_count[kSliceBatch];
@@ -419,7 +426,8 @@ void RetainedSeedDensity::slice_batch(const SeedIndex& index,
       if (!window_valid) continue;
       const std::uint32_t entry_index = entry_indices[block + lane];
       if (entry_index >= entries_.size()) continue;
-      const KmerPostingView& full = entries_[entry_index].view;
+      lane_views[lane] = view(entry_index);
+      const KmerPostingView& full = lane_views[lane];
       if (!full.found()) continue;
       if (empty_window) {
         out[block + lane] = {full.positions, 0, full.occurrence};

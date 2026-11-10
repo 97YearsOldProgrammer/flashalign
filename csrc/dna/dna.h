@@ -148,6 +148,22 @@ struct ResolvedDnaOptions {
   int vote_stretch = 0;
 };
 
+// A read's stage boundaries past the vote: placement has built the read's
+// seed density, placement has chained the MAPQ's rivals, the regions are
+// retained (the -c controller's retain_selection, or map-only's
+// secondaries).
+enum class DnaStagePoint : unsigned char { Density, Rivals, Retained };
+
+// Told of the stage boundaries of the read it is set for
+// (DnaContext::stage_listener).
+class DnaStageListener {
+ public:
+  virtual void at(DnaStagePoint point) = 0;
+
+ protected:
+  ~DnaStageListener() = default;
+};
+
 // Non-owning views, valid for the duration of one stage call.
 struct DnaContext {
   engine::ReferenceContext ref;
@@ -177,6 +193,12 @@ struct DnaContext {
   // map_read when opts.occ_dist > 0, null otherwise. The vote and every pool
   // gate admit them as rescued seeds (RetainedSeedRef::rescued).
   const std::vector<std::uint8_t>* readmitted = nullptr;
+  // Told of the read's stage boundaries (map.cpp StageRelease), set by
+  // map_read for every read.
+  DnaStageListener* stage_listener = nullptr;
+  // The forward seed stream the engine gives map_read, which the engine reads
+  // no more once map_read returns, set by the engine; null otherwise.
+  std::vector<QuerySeed>* stage_free_fwd_stream = nullptr;
 };
 
 } // namespace lr
@@ -230,17 +252,60 @@ struct RegionGap {
 
 namespace fa::cpu::lr {
 
+// A posting view of one index as stored: its first posting, its count and its
+// key's genome-wide occurrence (a KmerPostingIntervalView's global_count).
+// The chromosome directory a view repeats is its index's, so the reader gives
+// it back; null postings is the view that is not found.
+struct PostingHandle {
+  const PackedRefPos* postings = nullptr;
+  std::uint32_t count = 0;
+  std::uint32_t occurrence = 0;
+
+  bool found() const noexcept { return postings != nullptr; }
+};
+static_assert(sizeof(PostingHandle) == 16, "PostingHandle is 16 bytes");
+
+// An index's views have count == positions.size() (format.h
+// directory_bucket_view).
+inline PostingHandle posting_handle(const KmerPostingView& view) noexcept {
+  return {view.positions.data(), view.count, view.occurrence};
+}
+// An interval of count 0 keeps its key's whole span, which no reader of a
+// count-0 interval reads; its handle holds none.
+inline PostingHandle posting_handle(
+    const KmerPostingIntervalView& interval) noexcept {
+  return {interval.positions.data(), interval.count, interval.global_count};
+}
+
+inline KmerPostingView posting_view(const PostingHandle& handle,
+                                    const std::uint64_t* chromosome_offsets,
+                                    std::uint64_t chromosome_count) noexcept {
+  if (!handle.found()) return {};
+  return {RefPosSpan(handle.postings, handle.count, chromosome_offsets,
+                     chromosome_count),
+          handle.count, handle.occurrence};
+}
+inline KmerPostingIntervalView posting_interval(
+    const PostingHandle& handle, const std::uint64_t* chromosome_offsets,
+    std::uint64_t chromosome_count) noexcept {
+  if (!handle.found()) return {};
+  return {RefPosSpan(handle.postings, handle.count, chromosome_offsets,
+                     chromosome_count),
+          handle.count, handle.occurrence};
+}
+
 struct RetainedSeedDensityEntry {
-  std::uint64_t key = 0;
-  KmerPostingView view;
+  PostingHandle view;
   // Some RetainedSeedRef of this key is rescued.
   bool rescued = false;
   bool retained = false;
 };
 
+// A seed of the density: its read_pos and z (QuerySeed), its key its entry's.
 struct RetainedSeedRef {
-  QuerySeed seed;
+  int read_pos = 0;
   std::uint32_t entry = 0;
+  std::uint8_t z = 0;
   // A vote seed the empty-tile rescue admitted past the cap
   // (options/options.h kDnaTileRescueOcc), or its fine twin, which
   // placement's harvest gate admits too.
@@ -248,6 +313,7 @@ struct RetainedSeedRef {
   // minimap2's seed tandem: a seed whose query neighbour has the same key (seed.c), on every hit.
   bool tandem = false;
 };
+static_assert(sizeof(RetainedSeedRef) == 12, "RetainedSeedRef is 12 bytes");
 
 class RetainedSeedDensity {
  public:
@@ -281,6 +347,17 @@ class RetainedSeedDensity {
                           fine_forward_, fine_reverse_);
   }
 
+  // The buffers only build() reads: the forward fine seeds' entries and the
+  // vote seeds' refs. Freeing them leaves every reader's view intact.
+  std::size_t build_scratch_bytes() const {
+    return capacity_bytes(fine_entry_, forward_, reverse_);
+  }
+  void release_build_scratch() {
+    std::vector<std::int64_t>().swap(fine_entry_);
+    std::vector<RetainedSeedRef>().swap(forward_);
+    std::vector<RetainedSeedRef>().swap(reverse_);
+  }
+
   // Entries use capture IDs when available; absent views have no refs.
   std::size_t entry_count() const { return entries_.size(); }
 
@@ -295,9 +372,11 @@ class RetainedSeedDensity {
     return entries_[entry_index].rescued;
   }
 
-  // The entry's whole posting list.
-  const KmerPostingView& view(std::uint32_t entry_index) const {
-    return entries_[entry_index].view;
+  // The entry's whole posting list. Every view build() stores came from the
+  // index it validated, so the directory is that index's.
+  KmerPostingView view(std::uint32_t entry_index) const {
+    return posting_view(entries_[entry_index].view, validated_offsets_,
+                        validated_chrom_count_);
   }
 
   // Intervals resolved per lock-step round of slice_batch, which accepts any
@@ -330,8 +409,8 @@ class RetainedSeedDensity {
   std::vector<RetainedSeedRef> reverse_;
   std::vector<RetainedSeedRef> fine_forward_;
   std::vector<RetainedSeedRef> fine_reverse_;
-  // The chromosome directory build() validated; slicing with the same
-  // directory skips re-validation.
+  // The chromosome directory build() validated, every stored view's; slicing
+  // with the same directory skips re-validation.
   const std::uint64_t* validated_offsets_ = nullptr;
   std::uint64_t validated_chrom_count_ = 0;
 };

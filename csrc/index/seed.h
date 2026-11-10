@@ -362,6 +362,19 @@ inline bool emit_closed_syncmer_reference_seeds(
 
 namespace fa { namespace cpu {
 
+// What a read's closed-syncmer stream is reserved for: its expected count, 2 in
+// every k - s + 1 k-mers and one in cfg.downsample of those, and an eighth
+// more, so a read up to that much denser fills it without a reallocation.
+inline size_t closed_syncmer_stream_reserve(int read_len,
+                                            const ClosedSyncmerConfig& cfg,
+                                            int s) {
+    const size_t window = static_cast<size_t>(std::max(1, cfg.k - s + 1));
+    const size_t thinning = static_cast<size_t>(std::max(1, cfg.downsample));
+    const size_t expected =
+        2 * static_cast<size_t>(std::max(0, read_len)) / (window * thinning);
+    return std::max<size_t>(1, expected + expected / 8);
+}
+
 // Query closed-syncmer seeds in read order, thinned by key hash when cfg.downsample > 1.
 template <class BaseT, class Emit>
 inline void for_each_closed_syncmer_query_seed(
@@ -455,8 +468,7 @@ inline void extract_closed_syncmer_query_seeds_into(
         read_len < cfg.k) {
         return;
     }
-    out.reserve(static_cast<size_t>(
-        std::max(1, read_len / std::max(1, cfg.k - s + 1))));
+    out.reserve(closed_syncmer_stream_reserve(read_len, cfg, s));
     for_each_closed_syncmer_query_seed(
         enc,
         read_len,
@@ -554,8 +566,7 @@ inline void encode_and_extract_closed_syncmer_query_seeds_into(
     const int s = effective_closed_syncmer_s(cfg.k, cfg.s);
     if (seq && read_len >= cfg.k && htable_valid_k(cfg.k) &&
         htable_valid_k(s) && s <= cfg.k) {
-        out.reserve(static_cast<size_t>(
-            std::max(1, read_len / std::max(1, cfg.k - s + 1))));
+        out.reserve(closed_syncmer_stream_reserve(read_len, cfg, s));
     }
     encode_and_for_each_closed_syncmer_query_seed(
         seq,

@@ -252,6 +252,159 @@ static void stretch_to_contig(const DnaContext& dctx, int read_len,
 } // namespace dna
 } // namespace fa::cpu::lr
 
+/**** stage_release ****/
+// A read's dead buffers, freed at their last reader once their group holds
+// more than kKeptScratchReleaseBytes (dna.h kept_scratch).
+
+namespace fa::cpu::lr {
+namespace dna {
+namespace {
+
+template <class T>
+void free_vector(std::vector<T>& buffer) {
+  std::vector<T>().swap(buffer);
+}
+
+// Frees a read's buffers at their last reader once their group holds more
+// than kKeptScratchReleaseBytes: the seed side, and the placement side (the
+// chain scratch and the seed density). A group once due stays due for the
+// read, and each of its points also frees what its earlier points free.
+class StageRelease final : public DnaStageListener {
+ public:
+  StageRelease(const DnaContext& context, DnaWorkerScratch& worker,
+               const std::vector<QuerySeed>* forward_stream)
+      : worker_(worker),
+        forward_stream_(context.stage_free_fwd_stream == forward_stream
+                            ? context.stage_free_fwd_stream
+                            : nullptr),
+        // The inversion probe's gate reads the density during realization.
+        keep_density_(context.opts.inversion_probe_local_gate &&
+                      context.opts.enable_full_read_cigar) {}
+
+  // After drop_query_repeats, which left `in_use` for the stages below.
+  void after_query_repeats(const std::vector<QuerySeed>* in_use) {
+    in_use_ = in_use;
+    if (seed_due())
+      free_query_repeats();
+  }
+
+  // After the read's last prepare_representatives, the captured views' last
+  // reader: the whole-read vote's reverse prepare, or under the vote per
+  // stretch the last stretch's.
+  void after_last_prepare() {
+    if (!seed_due())
+      return;
+    free_query_repeats();
+    free_captured_views();
+  }
+
+  void at(DnaStagePoint point) override {
+    switch (point) {
+      case DnaStagePoint::Density:
+        if (!seed_due())
+          return;
+        free_query_repeats();
+        free_captured_views();
+        free_density_inputs();
+        return;
+      case DnaStagePoint::Rivals:
+        if (placement_due())
+          free_chain_scratch();
+        return;
+      case DnaStagePoint::Retained:
+        if (!placement_due())
+          return;
+        free_chain_scratch();
+        if (!keep_density_)
+          worker_.seed_density = RetainedSeedDensity{};
+        return;
+    }
+  }
+
+ private:
+  std::size_t seed_bytes() const {
+    const ChainAnchorScratch& chain = worker_.chain;
+    std::size_t bytes =
+        capacity_bytes(chain.query_occ_keys, chain.query_occ_seeds,
+                       chain.captured_fwd_views, chain.captured_rc_views,
+                       chain.captured_fwd_slots, chain.captured_rc_slots,
+                       chain.full_syncmer_rc_seeds,
+                       chain.shared_window_fwd_seeds,
+                       chain.shared_window_rc_seeds) +
+        chain.lookup_cache.heap_bytes() +
+        worker_.seed_density.build_scratch_bytes();
+    if (forward_stream_ != nullptr)
+      bytes += capacity_bytes(*forward_stream_);
+    return bytes;
+  }
+
+  std::size_t placement_bytes() const {
+    return ::fa::cpu::chaining::dense_chain_scratch_bytes() +
+           pass_slices_bytes() + pool_sort_scratch_bytes() +
+           worker_.seed_density.heap_bytes();
+  }
+
+  bool seed_due() {
+    if (!seed_fired_ && seed_bytes() > kKeptScratchReleaseBytes)
+      seed_fired_ = true;
+    return seed_fired_;
+  }
+
+  bool placement_due() {
+    if (!placement_fired_ && placement_bytes() > kKeptScratchReleaseBytes)
+      placement_fired_ = true;
+    return placement_fired_;
+  }
+
+  // The keys are dead once the repeats are dropped; the kept seeds unless
+  // they are the stream in use.
+  void free_query_repeats() {
+    ChainAnchorScratch& chain = worker_.chain;
+    free_vector(chain.query_occ_keys);
+    if (in_use_ != &chain.query_occ_seeds)
+      free_vector(chain.query_occ_seeds);
+  }
+
+  void free_captured_views() {
+    free_vector(worker_.chain.captured_fwd_views);
+    free_vector(worker_.chain.captured_rc_views);
+  }
+
+  // What the density's build read last: the cache, the captured slots, the
+  // seed streams and its own build scratch.
+  void free_density_inputs() {
+    ChainAnchorScratch& chain = worker_.chain;
+    free_vector(chain.query_occ_seeds);
+    free_vector(chain.captured_fwd_slots);
+    free_vector(chain.captured_rc_slots);
+    free_vector(chain.full_syncmer_rc_seeds);
+    free_vector(chain.shared_window_fwd_seeds);
+    free_vector(chain.shared_window_rc_seeds);
+    worker_.seed_density.release_build_scratch();
+    chain.lookup_cache = ChainSeedLookupCache{};
+    if (forward_stream_ != nullptr)
+      free_vector(*forward_stream_);
+  }
+
+  // Nothing chains after placement's groups (placement.cpp
+  // chain_and_own_every_candidate).
+  void free_chain_scratch() {
+    ::fa::cpu::chaining::release_dense_chain_scratch();
+    release_placement_scratch();
+  }
+
+  DnaWorkerScratch& worker_;
+  std::vector<QuerySeed>* const forward_stream_;
+  const std::vector<QuerySeed>* in_use_ = nullptr;
+  const bool keep_density_;
+  bool seed_fired_ = false;
+  bool placement_fired_ = false;
+};
+
+} // namespace
+} // namespace dna
+} // namespace fa::cpu::lr
+
 /**** map_read ****/
 
 namespace fa::cpu::lr {
@@ -264,6 +417,8 @@ AlignResult map_read(const DnaContext& base_dctx,
                      std::vector<uint8_t>& rc_enc,
                      const std::vector<QuerySeed>* shared_fwd_syncmer_seeds) {
   DnaContext dctx = base_dctx;
+  StageRelease stage_release(dctx, worker_scratch, shared_fwd_syncmer_seeds);
+  dctx.stage_listener = &stage_release;
   auto effective_chain_segment_len = [&](int rl) {
     return ::fa::cpu::lr::effective_chain_segment_len(dctx, rl);
   };
@@ -320,6 +475,7 @@ AlignResult map_read(const DnaContext& base_dctx,
         dctx.opts.dna_query_occ_frac, scratch.query_occ_keys,
         scratch.query_occ_seeds, dropped);
   }
+  stage_release.after_query_repeats(shared_fwd_syncmer_seeds);
   if (shared_fwd_syncmer_seeds == nullptr ||
       shared_fwd_syncmer_seeds->empty()) {
     return finish(std::move(out));
@@ -476,6 +632,7 @@ AlignResult map_read(const DnaContext& base_dctx,
                      });
     scratch.fwd.retained_seeds.swap(retained[0]);
     scratch.rc.retained_seeds.swap(retained[1]);
+    stage_release.after_last_prepare();
   } else if (read_len >= dctx.opts.k) {
     // The vote runs over one whole-read window [0, read_len).
     const int start = 0;
@@ -514,6 +671,7 @@ AlignResult map_read(const DnaContext& base_dctx,
         DnaQuerySeedStrand::Reverse, rc_start, rc_start + span,
         actual_downsample, scratch.shared_window_rc_seeds,
         rc_exact_refine_views);
+    stage_release.after_last_prepare();
     if (!rc_seed_views)
       return finish(std::move(out));
     scratch.rc.pending_exact_refine_views =
@@ -643,6 +801,7 @@ AlignResult map_read(const DnaContext& base_dctx,
                        realized);
       // The secondaries, after the MAPQ, which they do not enter.
       dna_project_map_only_secondaries(dctx, placement_chaining, realized);
+      stage_release.at(DnaStagePoint::Retained);
     }
   }
   // The emitted family is final here, MAPQ included; the -c lane's emission

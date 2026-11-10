@@ -323,9 +323,9 @@ dense_collapse_runs_stream(const std::vector<Anchor>& pool, int32_t span,
   DenseChainScratch& scratch = dense_chain_scratch();
   ::fa::cpu::lr::FlatInt64Map<int32_t>& open = scratch.open_runs;
   open.clear();
-  // At most one slot per anchor; reserve twice that to keep probe chains short when
-  // every run is a single anchor.
-  open.reserve(pool.size() * 2);
+  // At most one open run per anchor, held at load <= 0.5. The map is read only by key,
+  // so its capacity moves no run.
+  open.reserve(pool.size());
   std::vector<int32_t>& previous_r = scratch.previous_r; // parallel to `runs`
   previous_r.clear();
   runs.reserve(pool.size() / 4 + 1);

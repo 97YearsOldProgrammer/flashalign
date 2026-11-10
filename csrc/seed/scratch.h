@@ -16,8 +16,9 @@
 namespace fa { namespace cpu { namespace lr {
 
 // Diagonal-bin vote table. The vote comparators are total orders over the (chr, bin)
-// buckets, so output does not depend on the table's iteration order.
-using ChainWindowVoteTable = FlatInt64Map<ChainWindowBucketVote>;
+// buckets, so output does not depend on the table's iteration order. Keys are
+// (chr << 32) | bin; on an index of many records the fold hash piles them into few slots.
+using ChainWindowVoteTable = FlatInt64Map<ChainWindowBucketVote, MixInt64Hash>;
 
 struct ChainWindowPeakScratch {
     std::vector<QuerySeed> seeds;

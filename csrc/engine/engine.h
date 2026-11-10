@@ -300,6 +300,10 @@ private:
       LongReadSeedContext seed_ctx = make_seed_context();
       if (cfg_.long_read().skip_self)
         seed_ctx.self_contig = self_contig;
+      // The stream is align()'s or align_encoded()'s own, neither of which
+      // reads it after this call.
+      dctx.stage_free_fwd_stream =
+          const_cast<std::vector<QuerySeed> *>(shared_fwd_syncmer_seeds);
       AlignResult alignment = Backend::map_read(
           dctx, seed_ctx, worker_scratch, read, fwd_enc, rc_enc,
           shared_fwd_syncmer_seeds);

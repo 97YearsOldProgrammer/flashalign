@@ -74,9 +74,12 @@ DnaPlacementChainStatus contig_lane_refusal(
 namespace fa::cpu::lr {
 namespace {
 
+// An admissible slice of the harvest: its postings and its seed's place in
+// the lane's fine seeds.
 struct DeferredSlice {
-  RetainedSeedRef seed;
-  KmerPostingIntervalView interval;
+  const PackedRefPos* postings = nullptr;
+  std::uint32_t count = 0;
+  std::uint32_t seed = 0;
 };
 
 int selected_tiles(
@@ -94,10 +97,11 @@ int selected_tiles(
 
 // Per-thread slices of one merged interval of a group's harvest
 // (harvest_group_anchors), by density entry: an entry's interval is this
-// interval's while its stamp equals `pass`.
+// interval's while its stamp equals `pass`. An interval is held by its handle,
+// rebuilt over the index's directory where it is read.
 struct PassSlices {
   std::vector<std::uint32_t> stamp;
-  std::vector<KmerPostingIntervalView> interval;
+  std::vector<PostingHandle> interval;
   std::uint32_t pass = 0;
 };
 PassSlices& thread_pass_slices() {
@@ -325,9 +329,11 @@ void harvest_group_anchors(
   const int query_length = family.read_length;
   const int chromosome_length =
       static_cast<int>(context.ref.contig_length(contig));
+  const std::uint64_t* const chromosome_offsets =
+      context.ref.index->chrom_offsets_data();
+  const std::uint64_t chromosome_count = context.ref.index->chrom_count();
   const std::uint64_t chromosome_base =
-      context.ref.index
-          ->chrom_offsets_data()[static_cast<std::size_t>(contig)];
+      chromosome_offsets[static_cast<std::size_t>(contig)];
   const internal::PoolGate gate = internal::pool_gate(context);
   const bool skip_own_diagonal =
       internal::skips_own_diagonal(context, contig, reverse);
@@ -436,7 +442,7 @@ void harvest_group_anchors(
     return static_cast<std::size_t>(
         std::lower_bound(seeds.begin(), seeds.end(), position,
                          [](const RetainedSeedRef& seed, int pos) {
-                           return seed.seed.read_pos < pos;
+                           return seed.read_pos < pos;
                          }) -
         seeds.begin());
   };
@@ -491,10 +497,13 @@ void harvest_group_anchors(
                              static_cast<std::uint32_t>(bounds.high),
                              block_intervals);
       for (std::size_t lane = 0; lane < block_size; ++lane)
-        slices.interval[block_entries[lane]] = block_intervals[lane];
+        slices.interval[block_entries[lane]] =
+            posting_handle(block_intervals[lane]);
       for (std::size_t at = first; at < next; ++at) {
         const RetainedSeedRef& seed = seeds[at];
-        const KmerPostingIntervalView& interval = slices.interval[seed.entry];
+        const KmerPostingIntervalView interval =
+            posting_interval(slices.interval[seed.entry], chromosome_offsets,
+                             chromosome_count);
         // A rescued seed's fine twin passes the gate
         // (RetainedSeedRef::rescued). Its key's interval is shared with the
         // seeds that do not.
@@ -503,7 +512,7 @@ void harvest_group_anchors(
         if (!interval.found() || interval.count == 0) continue;
         if (over_pool_gate) {
           // Each member counts the gated postings inside its window.
-          for (Admitter* admitter : sweep.at(seed.seed.read_pos)) {
+          for (Admitter* admitter : sweep.at(seed.read_pos)) {
             admitter->record->filtered_hits += static_cast<int>(
                 interval.positions.lower_bound(chromosome_base +
                                                admitter->high) -
@@ -512,7 +521,8 @@ void harvest_group_anchors(
           }
           continue;
         }
-        deferred.push_back({seed, interval});
+        deferred.push_back({interval.positions.data(), interval.count,
+                            static_cast<std::uint32_t>(at)});
       }
     }
 
@@ -522,21 +532,20 @@ void harvest_group_anchors(
       // Prefetch the next slice's first postings, which the binary search
       // that bounded it never touched.
       if (slot + 1 < deferred.size()) {
-        const KmerPostingIntervalView& next = deferred[slot + 1].interval;
-        __builtin_prefetch(next.positions.data(), 0, 1);
-        if (next.count > 8)
-          __builtin_prefetch(next.positions.data() + 8, 0, 1);
+        const DeferredSlice& next = deferred[slot + 1];
+        __builtin_prefetch(next.postings, 0, 1);
+        if (next.count > 8) __builtin_prefetch(next.postings + 8, 0, 1);
       }
-      const KmerPostingIntervalView& interval = deferred[slot].interval;
-      const RetainedSeedRef& seed = deferred[slot].seed;
-      const int query_position = seed.seed.read_pos;
+      const RefPosSpan positions(deferred[slot].postings, deferred[slot].count,
+                                 chromosome_offsets, chromosome_count);
+      const RetainedSeedRef& seed = seeds[deferred[slot].seed];
+      const int query_position = seed.read_pos;
       const bool query_ok = query_position >= 0 &&
                             query_position + seed_length <= query_length;
       const std::vector<Admitter*>& seed_admitters = sweep.at(query_position);
-      for (std::uint32_t posting = 0; posting < interval.count; ++posting) {
+      for (std::uint32_t posting = 0; posting < positions.size(); ++posting) {
         // Inside the interval, so inside some member's window and the contig.
-        const std::uint64_t local =
-            interval.positions[posting] - chromosome_base;
+        const std::uint64_t local = positions[posting] - chromosome_base;
         const int reference_position = static_cast<int>(local);
         const bool geometry_ok =
             query_ok &&
@@ -561,8 +570,7 @@ void harvest_group_anchors(
             // k-mers match exactly when the orientation bits agree with the
             // lane.
             verified = packed_ref_orientation_compatible(
-                           seed.seed.z, interval.positions.packed_at(posting),
-                           reverse)
+                           seed.z, positions.packed_at(posting), reverse)
                            ? 1
                            : 0;
           }
@@ -1093,6 +1101,14 @@ void chain_and_own_every_candidate(
   result.strand_filter_seeds = &seed_index;
   chain_pooled_groups(context, family, result, seed_index, forward_query,
                       reverse_query);
+  // The read chains no more: its chain scratch goes past the kept-scratch
+  // threshold (dna.h kept_scratch) before ownership builds its table.
+  if (::fa::cpu::chaining::dense_chain_scratch_bytes() +
+          dna::pool_sort_scratch_bytes() + dna::pass_slices_bytes() >
+      dna::kKeptScratchReleaseBytes) {
+    ::fa::cpu::chaining::release_dense_chain_scratch();
+    dna::release_placement_scratch();
+  }
   for (const DnaPlacementCandidateChain& record : result.candidates) {
     if (record.status == DnaPlacementChainStatus::Accepted)
       result.accepted = true;
@@ -1106,6 +1122,7 @@ void chain_and_own_every_candidate(
     record.final_selected_tiles =
         selected_tiles(family.partition.selected, record.candidate);
   chain_mapq_rivals(context, family, result);
+  context.stage_listener->at(DnaStagePoint::Rivals);
 }
 
 }  // namespace
@@ -1215,6 +1232,7 @@ DnaPlacementChainingResult build_dna_placement_chains(
     result.family = std::move(family);
     return result;
   }
+  context.stage_listener->at(DnaStagePoint::Density);
   // Realization reads the density when it gates the late inversion probe
   // (dna.h).
   if (context.opts.inversion_probe_local_gate &&

@@ -214,10 +214,10 @@ int dna_inv_local_chain(const void* opaque, int query_begin, int query_end,
   auto seed = std::lower_bound(
       lane.begin(), lane.end(), lane_begin,
       [](const RetainedSeedRef& ref, int position) {
-        return ref.seed.read_pos < position;
+        return ref.read_pos < position;
       });
   std::vector<std::pair<int, int>> anchors;  // (q', r)
-  for (; seed != lane.end() && seed->seed.read_pos <= lane_end - k; ++seed) {
+  for (; seed != lane.end() && seed->read_pos <= lane_end - k; ++seed) {
     // Postings starting in [reference_begin, reference_end - k].
     const KmerPostingIntervalView interval = source.seeds->slice(
         *source.index, seed->entry, source.chromosome,
@@ -229,10 +229,9 @@ int dna_inv_local_chain(const void* opaque, int query_begin, int query_end,
       continue;
     for (std::uint32_t posting = 0; posting < interval.count; ++posting) {
       const PackedRefPos packed = interval.positions.packed_at(posting);
-      if (!packed_ref_orientation_compatible(seed->seed.z, packed,
-                                             lane_reverse))
+      if (!packed_ref_orientation_compatible(seed->z, packed, lane_reverse))
         continue;
-      anchors.emplace_back(seed->seed.read_pos,
+      anchors.emplace_back(seed->read_pos,
                            static_cast<int>(packed_ref_local(packed)));
     }
   }
@@ -1199,10 +1198,10 @@ std::vector<int> admitted_seed_starts(const DnaContext& context,
   starts.reserve(seeds.fine_forward().size() + seeds.fine_reverse().size());
   for (const RetainedSeedRef& seed : seeds.fine_forward())
     if (!gate.drops(seeds.occurrence(seed.entry), seed.rescued))
-      starts.push_back(seed.seed.read_pos);
+      starts.push_back(seed.read_pos);
   for (const RetainedSeedRef& seed : seeds.fine_reverse())
     if (!gate.drops(seeds.occurrence(seed.entry), seed.rescued))
-      starts.push_back(read_length - seed.seed.read_pos - seed_length);
+      starts.push_back(read_length - seed.read_pos - seed_length);
   std::sort(starts.begin(), starts.end());
   starts.erase(std::unique(starts.begin(), starts.end()), starts.end());
   return starts;
@@ -1692,6 +1691,7 @@ DnaRegionOutcome realize_dna_regions(
       retain_selection(context, placement, read_length, seed_length,
                        static_cast<std::size_t>(context.ref.contig_count()),
                        chains);
+  context.stage_listener->at(DnaStagePoint::Retained);
   result.block_count = static_cast<int>(regions.size());
   if (regions.empty()) {
     result.failure = DnaFamilyFailure::NoSelectedFamily;

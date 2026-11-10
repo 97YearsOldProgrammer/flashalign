@@ -402,15 +402,31 @@ inline int truncate_to_int(double value) noexcept {
 }  // namespace fa::cpu::lr
 
 /**** flat_int64_map ****/
-// Open-addressed int64 -> Value map for the diagonal-bin vote, covering the subset of
-// std::unordered_map it uses. Entries sit in a dense array in insertion order; the index
-// holds generation-tagged entry numbers, so clear() is O(1). Iteration is in insertion order.
+// Open-addressed int64 -> Value map covering the subset of std::unordered_map its users need.
+// Entries sit in a dense array in insertion order; the index holds generation-tagged entry
+// numbers, so clear() is O(1). Iteration is in insertion order, so the hash moves no output.
 
 namespace fa {
 namespace cpu {
 namespace lr {
 
-template <class Value> class FlatInt64Map {
+// Folds the high word into the low one: keys that differ in the low word only keep their
+// order in consecutive slots.
+struct FoldInt64Hash {
+  static uint64_t hash(int64_t key) {
+    const uint64_t k = static_cast<uint64_t>(key);
+    return k ^ (k >> 32);
+  }
+};
+
+// splitmix64: for keys (hi << 32) | lo whose high words are many, where the fold collides.
+struct MixInt64Hash {
+  static uint64_t hash(int64_t key) {
+    return fa::cpu::detail::splitmix64(static_cast<uint64_t>(key));
+  }
+};
+
+template <class Value, class Hash = FoldInt64Hash> class FlatInt64Map {
 public:
   struct value_type {
     int64_t first;
@@ -499,22 +515,7 @@ private:
       c <<= 1;
     return c;
   }
-  // Keys are (chr << 32) | bin. The default hash folds chr into the low bits, so contiguous
-  // bins land in consecutive slots while equal bins on different chromosomes do not all
-  // collide. FA_DNA_LONG_VOTE_HASH selects splitmix64 (0) or the identity (2) instead.
-#ifndef FA_DNA_LONG_VOTE_HASH
-#define FA_DNA_LONG_VOTE_HASH 1
-#endif
-  static uint64_t hash(int64_t key) {
-#if FA_DNA_LONG_VOTE_HASH == 0
-    return fa::cpu::detail::splitmix64(static_cast<uint64_t>(key));
-#elif FA_DNA_LONG_VOTE_HASH == 2
-    return static_cast<uint64_t>(key);
-#else
-    const uint64_t k = static_cast<uint64_t>(key);
-    return k ^ (k >> 32);
-#endif
-  }
+  static uint64_t hash(int64_t key) { return Hash::hash(key); }
   static uint64_t pack(uint32_t gen, uint32_t idx) {
     return (static_cast<uint64_t>(gen) << 32) | idx;
   }
@@ -564,8 +565,8 @@ private:
   uint32_t generation_ = 1;
 };
 
-template <class Value>
-inline void swap(FlatInt64Map<Value> &a, FlatInt64Map<Value> &b) {
+template <class Value, class Hash>
+inline void swap(FlatInt64Map<Value, Hash> &a, FlatInt64Map<Value, Hash> &b) {
   a.swap(b);
 }
 
