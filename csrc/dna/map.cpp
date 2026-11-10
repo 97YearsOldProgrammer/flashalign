@@ -417,6 +417,7 @@ AlignResult map_read(const DnaContext& base_dctx,
                      std::vector<uint8_t>& rc_enc,
                      const std::vector<QuerySeed>* shared_fwd_syncmer_seeds) {
   DnaContext dctx = base_dctx;
+  forget_region_window();
   StageRelease stage_release(dctx, worker_scratch, shared_fwd_syncmer_seeds);
   dctx.stage_listener = &stage_release;
   auto effective_chain_segment_len = [&](int rl) {
@@ -858,12 +859,67 @@ std::vector<std::uint8_t>& ref_window_buffer() {
 
 namespace {
 
+// Bases [lo, hi) of `contig` of the index `index`, from bases[0]; contig -1
+// when it holds none.
+struct RegionWindow {
+  std::vector<std::uint8_t> bases;
+  const void* index = nullptr;
+  int contig = -1;
+  std::int64_t lo = 0;
+  std::int64_t hi = 0;
+};
+
+RegionWindow& region_window() {
+  static thread_local RegionWindow held;
+  return held;
+}
+
+} // namespace
+
+::fa::cpu::engine::ReferenceWindow reused_reference_window(
+    const ::fa::cpu::engine::ReferenceContext& ref, int contig,
+    std::int64_t lo, std::int64_t hi, bool block) {
+  // The clamp of engine::ReferenceContext::window.
+  const std::int64_t length = ref.contig_length(contig);
+  lo = std::min(std::max<std::int64_t>(lo, 0), length);
+  hi = std::min(std::max(hi, lo), length);
+  RegionWindow& held = region_window();
+  const bool same = held.contig == contig && held.index == ref.index;
+  if (same && held.lo <= lo && hi <= held.hi)
+    return {held.bases.data() + (lo - held.lo), lo, hi};
+  const bool replace =
+      hi > lo && (block || (same && lo <= held.lo && held.hi <= hi));
+  if (!replace)
+    return ref.window(contig, lo, hi, ref_window_buffer());
+  const std::size_t n = static_cast<std::size_t>(hi - lo);
+  // Freed before it grows, so the old and the new bases are never both held.
+  if (held.bases.capacity() < n) {
+    held.bases = std::vector<std::uint8_t>{};
+    held.bases.reserve(n);
+  }
+  held.bases.resize(n);
+  ref.index->reference_bases_u8(static_cast<std::uint64_t>(contig),
+                                static_cast<std::uint64_t>(lo),
+                                static_cast<std::uint64_t>(hi),
+                                held.bases.data());
+  held.index = ref.index;
+  held.contig = contig;
+  held.lo = lo;
+  held.hi = hi;
+  return {held.bases.data(), lo, hi};
+}
+
+void forget_region_window() { region_window().contig = -1; }
+
+namespace {
+
 std::size_t kept_scratch_bytes(const DnaWorkerScratch& worker) {
   return worker.chain.heap_bytes() + worker.seed_density.heap_bytes() +
          ::fa::cpu::chaining::dense_chain_scratch_bytes() +
          pool_sort_scratch_bytes() + pass_slices_bytes() +
          ::fa::cpu::dp::thread_arena_bytes() + ava_read_targets_bytes() +
-         ava_target_scratch_bytes() + capacity_bytes(ref_window_buffer());
+         ava_target_scratch_bytes() +
+         capacity_bytes(ref_window_buffer(), region_window().bases);
 }
 
 void release_kept_scratch(DnaWorkerScratch& worker) {
@@ -874,6 +930,7 @@ void release_kept_scratch(DnaWorkerScratch& worker) {
   ::fa::cpu::dp::release_thread_arena();
   release_ava_scratch();
   ref_window_buffer() = std::vector<std::uint8_t>{};
+  region_window() = RegionWindow{};
 }
 
 } // namespace

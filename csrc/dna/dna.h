@@ -541,10 +541,11 @@ struct DnaWorkerScratch {
 
 /**** kept_scratch ****/
 // What a mapping thread keeps across reads: its worker scratch and the
-// thread_local buffers of the dense chain, the harvest, the ksw arena and the
-// overlap lane. The thread frees all of it after a read that leaves more than
-// kKeptScratchReleaseBytes, as minimap2 rebuilds a thread's kalloc arena past
-// its cap_kalloc (map.c, km_stat); the next read regrows it.
+// thread_local buffers of the dense chain, the harvest, the ksw arena, the
+// overlap lane and the reference windows. The thread frees all of it after a
+// read that leaves more than kKeptScratchReleaseBytes, as minimap2 rebuilds a
+// thread's kalloc arena past its cap_kalloc (map.c, km_stat); the next read
+// regrows it.
 
 namespace fa::cpu::lr::dna {
 
@@ -566,10 +567,26 @@ void release_ava_scratch();
 // (engine::ReferenceContext::window).
 std::vector<std::uint8_t>& ref_window_buffer();
 
-// The window of `contig`'s bases over [lo, hi) on the calling thread; the
-// thread's next window reuses its buffer.
+// A packed reference only. The calling thread keeps the last block window it
+// read (`block`) in a buffer of its own, and a window inside it is a view of
+// it. A block window outside it, or any window that contains it, replaces it;
+// any other window is unpacked into ref_window_buffer(). A block's Z-drop
+// continuations, whose windows lie inside its first one, so unpack nothing.
+::fa::cpu::engine::ReferenceWindow reused_reference_window(
+    const ::fa::cpu::engine::ReferenceContext& ref, int contig,
+    std::int64_t lo, std::int64_t hi, bool block);
+// At each read's start: the kept window never outlives the index it was read
+// from.
+void forget_region_window();
+
+// The window of `contig`'s bases over [lo, hi) on the calling thread, `block`
+// for a region block's anchors (realization.cpp block_window); valid until
+// the thread's next window.
 inline ::fa::cpu::engine::ReferenceWindow reference_window(
-    const DnaContext& context, int contig, std::int64_t lo, std::int64_t hi) {
+    const DnaContext& context, int contig, std::int64_t lo, std::int64_t hi,
+    bool block = false) {
+  if (context.ref.packed)
+    return reused_reference_window(context.ref, contig, lo, hi, block);
   return context.ref.window(contig, lo, hi, ref_window_buffer());
 }
 

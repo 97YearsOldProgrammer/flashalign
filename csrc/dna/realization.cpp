@@ -533,7 +533,8 @@ int unit_forward_end(const Unit& unit, int read_length) {
           hi, static_cast<std::int64_t>(anchor.r) + anchor.span);
     }
   }
-  return dna::reference_window(context, plan.chromosome, lo, hi);
+  return dna::reference_window(context, plan.chromosome, lo, hi,
+                               /*block=*/true);
 }
 
 } // namespace
