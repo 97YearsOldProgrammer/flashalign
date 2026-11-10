@@ -170,6 +170,9 @@ void shadow_verdict(const DnaChainMapqEvidence& evidence,
 double rival_strength(const DnaChainMapqEvidence& evidence,
                       const DnaChainMapqRival& rival,
                       int winner_vote) noexcept {
+  // Votes of different stretches do not compare: a rival is its chain.
+  if (evidence.rival_by_chain)
+    return rival.chained ? chain_ratio(evidence, rival) : 0.0;
   const double denominator = static_cast<double>(std::max(1, winner_vote));
   double strength = static_cast<double>(rival.vote_evidence) / denominator;
   if (rival.chained) {
@@ -792,6 +795,7 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
   evidence.chain_shadow_read_slack =
       dctx.opts.dna_chain_mapq_chain_shadow_read_slack;
   evidence.study_bits = chain_mapq_study_bits(dctx);
+  evidence.rival_by_chain = dctx.opts.vote_stretch > 0;
   if (winner_chain != nullptr) {
     evidence.f1 = winner_chain->chain_score;
     evidence.cnt = winner_chain->chain_anchors;

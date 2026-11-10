@@ -298,8 +298,10 @@ struct DnaLongOptions {
   // Each stretch has its own catalogue, its ratio admission on the stretch's
   // own tile grid (dna/catalogue.cpp append_stretch_family), and each
   // candidate is harvested in a window around its diagonal over its stretch
-  // from the seeds of its stretch (dna/placement.cpp stretch_member). 0 votes
-  // the whole query as one window. asm5, asm10 and asm20 install 1,000,000; not
+  // from the seeds of its stretch (dna/placement.cpp stretch_member). Votes
+  // of different stretches do not compare, so the chain MAPQ prices a rival
+  // by its chain alone (dna/mapq.cpp rival_strength). 0 votes the whole query
+  // as one window. asm5, asm10 and asm20 install 1,000,000; not
   // settable.
   int vote_stretch = 0;
 };

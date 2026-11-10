@@ -2234,6 +2234,10 @@ struct DnaChainMapqEvidence {
   int part_score = 0;
   int part_anchors = 0;
   int part_n_sub = 0;
+  // The asm rows, whose vote runs per stretch (options/options.h
+  // vote_stretch): a rival's strength is its chain ratio alone, and a rival
+  // with no chain adds none (rival_strength in dna/mapq.cpp).
+  bool rival_by_chain = false;
 };
 
 // The formula's verdict on one rival, for the caller.
