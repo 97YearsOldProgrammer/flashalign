@@ -500,8 +500,10 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     mapq =
         truncate_to_int(pen_cm * kDnaChainMapqCoef * (1.0 - x) * std::log(f1));
   }
-  mapq -= truncate_to_int(4.343 * std::log(static_cast<double>(n_sub) + 1.0) +
-                          0.499);
+  // A Phred saturated at INT_MIN (x astronomical) must not wrap here.
+  mapq = std::max(mapq, 0) -
+         truncate_to_int(4.343 * std::log(static_cast<double>(n_sub) + 1.0) +
+                         0.499);
   mapq = std::max(0, mapq);
   mapq = std::min(60, mapq);
   // An aligned hit that beat its rival on the rescaled pair is never Q0
