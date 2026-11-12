@@ -225,20 +225,22 @@ DNA preset two pieces of a read join into one record only across gaps of at most
 .IR NUM .
 Under a DNA preset chaining links anchors across at most the larger of it and
 .BR \-r 's
-second value, so values under that band leave the chain unchanged; under the
-assembly presets it is also the reach of the first of two chain passes, the
-larger of it and
+second value, so under lr and lr:hq values under that band leave the chain
+unchanged; under the assembly presets it is also the reach of the first of two
+chain passes, the larger of it and
 .BR \-r 's
-first value.
+first value; under ava\-ont and ava\-hifi a chain link is also taken only within
+.I NUM
+on both the query and the target, as in minimap2, so every value acts there.
 Under a splice preset it bounds base alignment and is also the maximum
 query gap of the fine chain; there
 .B \-G
 bounds introns.
 Untyped,
-.B lr
-and
-.B lr:hq
-use 5000, the assembly presets 10000 and the splice presets 2000.
+.BR lr ,
+.BR lr:hq ,
+ava\-ont and ava\-hifi use 5000, the assembly presets 10000 and the splice
+presets 2000.
 .I NUM
 may be ending with k/K/m/M/g/G.
 .TP

@@ -81,6 +81,9 @@ int32_t dense_step(const RunB& b, const RunA& a,
   const int64_t dd = dr > dq ? dr - dq : dq - dr;
   if (dd > params.bw)
     return kNegInf;
+  // Every arm elects through this test, and its bounds only prune, so they stay exact.
+  if (params.link_gap > 0 && (dq > params.link_gap || dr > params.link_gap))
+    return kNegInf;
   const int64_t dg = dr < dq ? dr : dq;
   const int64_t length = b.q_end - b.q_begin;
   const int64_t overlap = std::max<int64_t>(

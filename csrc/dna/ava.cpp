@@ -465,7 +465,8 @@ void window_members(const DnaContext& context,
   }
 }
 
-// Chains one target's pool with placement's whole-query parameters.
+// Chains one target's pool with placement's whole-query parameters, and a link
+// taken only within -g on the query and the target, as minimap2's max_gap.
 chaining::ChainResult chain_target_pool(const DnaContext& context,
                                         const DnaPlacementFamily& family,
                                         int diagonal_band,
@@ -473,11 +474,10 @@ chaining::ChainResult chain_target_pool(const DnaContext& context,
   const int seed_length = family.seed_length;
   const chaining::ColinearChainParams chain_params =
       dna_candidate_chain_params(context, diagonal_band, seed_length);
-  return chaining::chain_dense_colinear(
-      std::move(anchors),
-      dna_dense_chain_params(chain_params, seed_length,
-                             context.opts.dna_dense_diag_min_runs),
-      nullptr);
+  chaining::DenseChainParams params = dna_dense_chain_params(
+      chain_params, seed_length, context.opts.dna_dense_diag_min_runs);
+  params.link_gap = context.opts.cigar_dp_max_gap;
+  return chaining::chain_dense_colinear(std::move(anchors), params, nullptr);
 }
 
 // Hands one target's chains to its windowed members, best score first, in

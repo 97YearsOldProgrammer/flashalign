@@ -212,7 +212,8 @@ struct DnaLongOptions {
   // cigar_dp_bw_long only bounds it.
   int cigar_dp_bw = 500;
   int cigar_dp_bw_long = 20000;
-  // minimap2 -g; on a splice preset also the fine chain's query gap.
+  // minimap2 -g; on a splice preset also the fine chain's query gap, and on
+  // an overlap preset the bound on a chain link's query and target distance.
   int cigar_dp_max_gap = 5000;
   // The strand floor and the inversion probe and middle bounds; the preset's,
   // not -g.

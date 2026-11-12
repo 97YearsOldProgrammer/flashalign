@@ -192,7 +192,7 @@ constexpr std::array<DnaPresetProfile, 7> kDnaPresetProfiles{{
      kOntOverlapPlacement, kOntOverlap, kNoAssembly},
     {"ava-hifi", DnaPresetKind::HiFi, 21, 5, 48, 64, 2048,
      1, 4, 1, 6, 2, 26, 1, 400, -1, 500, 20000,
-     10000, 10000, 200,
+     5000, 10000, 200,
      3, 12, 3, 18, 6, 78, 1, 1200, 600,
      kReadPlacement, kHiFiOverlap, kNoAssembly},
 }};
@@ -763,8 +763,8 @@ void apply_band_and_gap_overrides(bool rna_mode,
         "with '-rNUM1,NUM2', NUM1 (" + std::to_string(mapping.cigar_dp_bw) +
         ") can't be larger than NUM2 (" +
         std::to_string(mapping.cigar_dp_bw_long) + ")");
-  // -g, minimap2's max_gap: the DP's gap, and on a splice preset the fine
-  // chain's query gap.
+  // -g, minimap2's max_gap: the DP's gap, on a splice preset the fine chain's
+  // query gap, and on an overlap preset the chain link's bound.
   if (user.dp_max_gap)
     mapping.cigar_dp_max_gap = std::max(1, *user.dp_max_gap);
 }

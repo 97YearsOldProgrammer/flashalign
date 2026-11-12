@@ -61,7 +61,9 @@ const std::vector<OptionSpec>& specs_table() {
         // align, shown by --help
         // minimap2's -g. On a DNA preset the chains' reach is max(-r's NUM2,
         // NUM), as minimap2's long join; on a splice preset it also sets the
-        // fine chain's query gap, which the band does not raise.
+        // fine chain's query gap, which the band does not raise; on an overlap
+        // preset a chain link is also taken only within NUM on the query and
+        // the target.
         {OptionId::DpMaxGap, 'g', "", kSize, kStable, A,
          "NUM", SEC_PLACEMENT,
          "stop alignment elongation if there are no seeds in NUM-bp [5000]"},

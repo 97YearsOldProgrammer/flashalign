@@ -312,6 +312,10 @@ struct DenseChainParams {
   int32_t max_dist_x = 20000;
   int32_t max_dist_y = 20000;
   int32_t bw = 20000;
+  // A link's bound on both dq and dr in dense_step, 0 for none. Unlike max_dist it is not
+  // raised to the band, and the reach, the search bounds and the backtrack's drop do not
+  // read it.
+  int32_t link_gap = 0;
   int32_t min_sc = 1;
   int32_t min_cnt = 1;
   float chn_pen_gap = 0.168f;
