@@ -941,7 +941,7 @@ namespace fa::cpu::lr {
 namespace internal {
 
 // The band of a whole-query chain pass, for its chain and its window's
-// widening, and of the ava lane's harvest: -r's second value.
+// widening, and of the ava lane's chains: -r's second value.
 int pass_diagonal_band(const DnaContext& context);
 
 // A candidate's harvest window [low, high) on its contig: the read's span from
@@ -957,14 +957,6 @@ struct HarvestWindow {
 HarvestWindow harvest_window(const DnaContext& context,
                              const VotePeak& peak, int read_length,
                              std::int64_t chromosome_length);
-
-// The band test: whether a posting on `diagonal` lies within `diagonal_band`
-// of the candidate's expected diagonal, in the caller's integer type.
-template <class Diagonal>
-inline bool within_band(Diagonal diagonal, Diagonal expected,
-                        int diagonal_band) {
-  return std::abs(diagonal - expected) <= diagonal_band;
-}
 
 // Whether a pass over `contig` and the lane drops the posting at each seed's
 // own read position: the read's own exact diagonal gives no anchor, so the

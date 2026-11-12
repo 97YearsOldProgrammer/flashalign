@@ -17,21 +17,18 @@
 namespace fa::cpu::lr {
 namespace internal {
 
-// The inverse of harvest_window and within_band for a peak with no widening:
-// the expected starts [lowest, highest] whose window and band admit a posting
-// at `reference_position` on `diagonal`, for the same read length, pad and
-// band. Empty when lowest > highest.
+// The inverse of harvest_window for a peak with no widening: the expected
+// starts [lowest, highest] whose window admits a posting at
+// `reference_position` inside the contig, for the same read length and pad.
+// Empty when lowest > highest.
 struct ExpectedStarts {
   std::int64_t lowest = 0;
   std::int64_t highest = 0;
 };
 static ExpectedStarts admitting_expected_starts(
-    std::int64_t reference_position, std::int64_t diagonal, int read_length,
-    int interval_pad, int diagonal_band) {
-  return {std::max(reference_position - read_length - interval_pad + 1,
-                   diagonal - diagonal_band),
-          std::min(reference_position + interval_pad,
-                   diagonal + diagonal_band)};
+    std::int64_t reference_position, int read_length, int interval_pad) {
+  return {reference_position - read_length - interval_pad + 1,
+          reference_position + interval_pad};
 }
 
 }  // namespace internal
@@ -252,10 +249,10 @@ void build_read_targets(const DnaContext& context,
 }
 
 // Each target is chained once, over the union of its members' pools. A
-// posting is an anchor when placement's whole-query harvest would build it
-// for at least one member, and it is flagged tandem when it is in any of those
-// members' pools. A one-member target so builds that harvest's pool, in its
-// order.
+// posting is an anchor when it lies in at least one member's harvest window,
+// whatever its diagonal (placement's admission, on the window before its
+// L / 8 widening), and it is flagged tandem when it is in any of those
+// members' pools.
 
 // A member's harvest window [low, high) on its contig (harvest_window) and its
 // expected diagonal.
@@ -292,7 +289,7 @@ void build_target_pool(const DnaContext& context,
                        const RetainedSeedDensity& seed_index,
                        const std::vector<RetainedSeedRef>& seeds,
                        const TargetHits& hits, std::uint32_t contig,
-                       bool reverse, int diagonal_band, TargetScratch& scratch,
+                       bool reverse, TargetScratch& scratch,
                        std::vector<chaining::Anchor>& anchors) {
   const int read_length = family.read_length;
   const int seed_length = family.seed_length;
@@ -351,16 +348,14 @@ void build_target_pool(const DnaContext& context,
       if (reference_position + seed_length > chromosome_length) continue;
       if (!packed_ref_orientation_compatible(seed.z, *at, reverse))
         continue;
-      const std::int64_t diagonal = reference_position - query_position;
       // The members admitting the posting, and the widest of their windows.
       std::int64_t admit_low = std::numeric_limits<std::int64_t>::max();
       std::int64_t admit_high = std::numeric_limits<std::int64_t>::min();
       // Without a widened window a member admits the posting exactly when
       // its expected diagonal is one of these starts.
       const internal::ExpectedStarts starts =
-          internal::admitting_expected_starts(reference_position, diagonal,
-                                              read_length, interval_pad,
-                                              diagonal_band);
+          internal::admitting_expected_starts(reference_position, read_length,
+                                              interval_pad);
       if (starts.lowest <= starts.highest) {
         const std::int64_t* from =
             std::lower_bound(expected_begin, expected_end, starts.lowest);
@@ -377,8 +372,7 @@ void build_target_pool(const DnaContext& context,
       }
       for (const TargetMember& member : scratch.wide) {
         if (reference_position < member.low ||
-            reference_position >= member.high ||
-            !internal::within_band(diagonal, member.expected, diagonal_band))
+            reference_position >= member.high)
           continue;
         admit_low = std::min(admit_low, member.low);
         admit_high = std::max(admit_high, member.high);
@@ -541,7 +535,7 @@ void chain_read_targets(const DnaContext& context,
     build_target_pool(context, family, seed_index, seeds,
                       {targets.hits.data() + targets.hits_begin[target],
                        targets.hits.data() + targets.hits_begin[target + 1]},
-                      contig, reverse, diagonal_band, scratch, anchors);
+                      contig, reverse, scratch, anchors);
     if (anchors.empty()) continue;
     internal::sort_unique_pool_anchors(anchors);
     const chaining::ChainResult chained =
