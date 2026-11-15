@@ -266,6 +266,10 @@ struct DnaLongOptions {
   // vote's undrained copies of its candidate; the vote keeps its ranked
   // buckets for the walk. Not settable.
   bool chain_mapq_undrained_nsub = false;
+  // lr and lr:hq (dna/mapq.cpp): a record with no DP pair caps its MAPQ by
+  // minimap2's mapq_alt read on the chain pair, one difference worth k chain
+  // units. Not settable.
+  bool chain_mapq_chain_alt = false;
   // HiFi only (dna/dna.h): the late inversion probe of a seam or
   // piece runs only where the read's opposite-lane fine seeds in the drop
   // window chain to kDnaInvLocalMinAnchors anchors.

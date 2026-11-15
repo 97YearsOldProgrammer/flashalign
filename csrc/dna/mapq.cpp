@@ -47,6 +47,11 @@
 //   - Arithmetic is double rather than float, so a value on an integer
 //     boundary may truncate differently, and n_sub counts a bounded rival set
 //     rather than every secondary.
+//   - On lr and lr:hq a record with no DP pair (map-only) and a chained
+//     rival (f2 > 0) takes minimap2's mapq_alt on its chain pair before the
+//     n_sub term, q = min(q, int(6.02 (A + B) / A (f1 - f2) / k + 0.499)):
+//     one difference costs k chain units as it costs A + B on the DP pair
+//     (chain_mapq_chain_alt).
 //   - On lr and lr:hq n_sub adds the vote's undrained copies of the record's
 //     candidate (vote_copy_walk, chain_mapq_undrained_nsub): the loci of
 //     folded tally at least half its fold that no emitted peak drained, the
@@ -531,6 +536,16 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     mapq =
         truncate_to_int(pen_cm * kDnaChainMapqCoef * (1.0 - x) * std::log(f1));
   }
+  // A record with no DP pair: mapq_alt on the chain pair, where one difference
+  // costs k chain units and A + B on the DP pair.
+  if (evidence.chain_alt_k > 0 && dp1 <= 0.0 && f2 > 0)
+    mapq = std::min(
+        mapq, std::max(0, truncate_to_int(
+                              6.02 *
+                                  static_cast<double>(evidence.substitution_cost) /
+                                  match_sc * (f1 - static_cast<double>(f2)) /
+                                  static_cast<double>(evidence.chain_alt_k) +
+                              0.499)));
   // A Phred saturated at INT_MIN (x astronomical) must not wrap here.
   mapq = std::max(mapq, 0) -
          truncate_to_int(4.343 * std::log(static_cast<double>(n_sub) + 1.0) +
@@ -897,6 +912,7 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
   evidence.chain_shadow_read_slack =
       dctx.opts.dna_chain_mapq_chain_shadow_read_slack;
   evidence.voter_fold = dctx.opts.chain_mapq_voter_fold;
+  evidence.chain_alt_k = dctx.opts.chain_mapq_chain_alt ? dctx.opts.k : 0;
   evidence.study_bits = chain_mapq_study_bits(dctx);
   evidence.rival_by_chain = dctx.opts.vote_stretch > 0;
   if (winner_chain != nullptr) {

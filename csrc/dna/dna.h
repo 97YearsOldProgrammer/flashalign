@@ -113,6 +113,8 @@ struct ResolvedDnaOptions {
   bool chain_mapq_voter_fold = false;
   // options/options.h chain_mapq_undrained_nsub.
   bool chain_mapq_undrained_nsub = false;
+  // options/options.h chain_mapq_chain_alt.
+  bool chain_mapq_chain_alt = false;
   // HiFi presets only: a seam's or piece's late inversion probe runs only
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (dna.h).
@@ -2312,6 +2314,9 @@ struct DnaChainMapqEvidence {
   // lr and lr:hq (options/options.h chain_mapq_voter_fold): rival and winner
   // are read on their folds wherever the formula forms a vote ratio.
   bool voter_fold = false;
+  // lr and lr:hq (options/options.h chain_mapq_chain_alt): the seed length a
+  // difference costs on the chain pair; 0 elsewhere.
+  int chain_alt_k = 0;
   // lr and lr:hq (options/options.h chain_mapq_undrained_nsub): the vote's
   // undrained copies of this record's candidate, added to n_sub; 0 elsewhere.
   int undrained_copies = 0;
