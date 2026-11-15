@@ -133,6 +133,11 @@ inline constexpr int kDnaHiFiOccCeiling = 500;
 inline constexpr int kDnaTileRescueOcc = 4095;
 inline constexpr int kDnaHiFiTileRescueOcc = 1024;
 
+// lr and lr:hq: the voters the chain MAPQ's vote floor (dna/dna.h
+// kDnaChainMapqVoteFloor, 40) presumes a query can field, the vote's 128
+// (DnaLongOptions vote_floor_capacity).
+inline constexpr int kDnaChainMapqVoteFloorVoters = 128;
+
 // minimap2's seed-repetitiveness discount (uniq_ratio from rep_len, hit.c) is
 // deliberately not applied: pen_s1 is the bare term (dna/mapq.cpp).
 
@@ -270,6 +275,12 @@ struct DnaLongOptions {
   // minimap2's mapq_alt read on the chain pair, one difference worth k chain
   // units. Not settable.
   bool chain_mapq_chain_alt = false;
+  // lr and lr:hq (dna/mapq.cpp): C = kDnaChainMapqVoteFloorVoters, 0
+  // elsewhere. The chain MAPQ's vote floor reads the winner's vote over
+  // min(1, S / C), S = max(1, (L - k + 1) 2 / (k - s + 1)) the closed
+  // syncmers expected on a query of L bases; a query with S >= C is
+  // unchanged. The vote cap reads the vote as counted. Not settable.
+  int vote_floor_capacity = 0;
   // HiFi only (dna/dna.h): the late inversion probe of a seam or
   // piece runs only where the read's opposite-lane fine seeds in the drop
   // window chain to kDnaInvLocalMinAnchors anchors.

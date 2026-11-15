@@ -115,6 +115,8 @@ struct ResolvedDnaOptions {
   bool chain_mapq_undrained_nsub = false;
   // options/options.h chain_mapq_chain_alt.
   bool chain_mapq_chain_alt = false;
+  // options/options.h vote_floor_capacity.
+  int vote_floor_capacity = 0;
   // HiFi presets only: a seam's or piece's late inversion probe runs only
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (dna.h).
@@ -2160,7 +2162,10 @@ inline constexpr double kDnaChainMapqCoef = 40.0; // q_coef
 inline constexpr double kDnaChainMapqMaskLevel = 0.5;
 // The vote floor under which pen_cm is discounted linearly, and the vote cap
 // q <= (int)(4.343 * w / 3); w is the winner's recount on every preset, where
-// lr and lr:hq read the vote ratios on folds.
+// lr and lr:hq read the vote ratios on folds. On lr and lr:hq the floor reads
+// w over min(1, S / 128), S the closed syncmers a query of its length can
+// field (options/options.h kDnaChainMapqVoteFloorVoters); the cap reads w as
+// counted.
 inline constexpr double kDnaChainMapqVoteFloor = 40.0;
 inline constexpr double kDnaChainMapqVoteCapCoef = 4.343;
 inline constexpr double kDnaChainMapqVoteCapDiv = 3.0;
@@ -2320,6 +2325,11 @@ struct DnaChainMapqEvidence {
   // lr and lr:hq (options/options.h chain_mapq_undrained_nsub): the vote's
   // undrained copies of this record's candidate, added to n_sub; 0 elsewhere.
   int undrained_copies = 0;
+  // lr and lr:hq (options/options.h vote_floor_capacity): C, 0 elsewhere, and
+  // min(1, S / C), the scale the vote floor reads the winner's vote over; the
+  // vote cap reads the vote as counted.
+  int vote_floor_capacity = 0;
+  double vote_floor_scale = 1.0;
   // HiFi margin rule (header comment), HiFi presets only: the margin
   // dp1_raw - dp2_raw is read against the scoring row below.
   bool hifi_margin_rule = false;

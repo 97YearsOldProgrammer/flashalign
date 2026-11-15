@@ -33,8 +33,11 @@
 //     vote_i / max(1, vote_eff), on the recount.
 //   - The winner's vote, the recount on every preset, is an absolute term: it
 //     floors pen_cm and, below kDnaChainMapqVoteCapMinVote votes, caps the
-//     Phred. The rivals' admissibility, shadow and tie verdicts do not read
-//     the fold.
+//     Phred. On lr and lr:hq the floor reads it over min(1, S / 128), S the
+//     closed syncmers expected on a query of its length (vote_floor_capacity):
+//     a query too short to field the vote's 128 voters is floored against
+//     what it can field. The cap reads the vote as counted.
+//     The rivals' admissibility, shadow and tie verdicts do not read the fold.
 //   - A rival on the winner's own locus (a shadow, such as an SV flank) is not
 //     a rival. A chained rival at another locus that ties the winner exactly
 //     gives x = 1.
@@ -488,9 +491,14 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   // R3: the margin rule's pen has no vote floor.
   const double pen_margin = pen_cm;
   const double w_abs = static_cast<double>(std::max(0, effective_vote));
+  // The vote the floor reads: w_abs over the share of the vote's voters the
+  // query can field (vote_floor_scale; 1 but on lr and lr:hq). The cap reads
+  // w_abs: under kDnaChainMapqVoteCapMinVote votes a copy a few differences
+  // away can sit under the support floor, whatever the query's length.
+  const double w_floor = w_abs / evidence.vote_floor_scale;
   // The vote floor: a winner the vote barely supports is discounted as
   // minimap2 discounts a short chain.
-  pen_cm = std::min(pen_cm, std::min(1.0, w_abs / kDnaChainMapqVoteFloor));
+  pen_cm = std::min(pen_cm, std::min(1.0, w_floor / kDnaChainMapqVoteFloor));
 
   const double match_sc = static_cast<double>(std::max(1, evidence.match_sc));
   // R2.
@@ -913,6 +921,18 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
       dctx.opts.dna_chain_mapq_chain_shadow_read_slack;
   evidence.voter_fold = dctx.opts.chain_mapq_voter_fold;
   evidence.chain_alt_k = dctx.opts.chain_mapq_chain_alt ? dctx.opts.k : 0;
+  // lr and lr:hq: S, the query's expected closed syncmers (two per k - s + 1
+  // k-mers), against the C voters the vote floor presumes.
+  if (dctx.opts.vote_floor_capacity > 0) {
+    const int k = std::max(1, dctx.opts.k);
+    const int s = effective_closed_syncmer_s(k, dctx.opts.chain_syncmer_s);
+    const double syncmers =
+        std::max(1.0, static_cast<double>(read_len - k + 1) * 2.0 /
+                          static_cast<double>(k - s + 1));
+    evidence.vote_floor_capacity = dctx.opts.vote_floor_capacity;
+    evidence.vote_floor_scale = std::min(
+        1.0, syncmers / static_cast<double>(dctx.opts.vote_floor_capacity));
+  }
   evidence.study_bits = chain_mapq_study_bits(dctx);
   evidence.rival_by_chain = dctx.opts.vote_stretch > 0;
   if (winner_chain != nullptr) {

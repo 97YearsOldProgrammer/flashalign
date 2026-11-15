@@ -256,14 +256,18 @@ static void set_dna_long_platform_fields(
     // HiFi only: the chain MAPQ margin rule (dna/dna.h).
     mapping.chain_mapq_hifi_margin = profile.kind == DnaPresetKind::HiFi;
     // lr and lr:hq only: the chain MAPQ's vote ratios read the voters' fold,
-    // its n_sub adds the vote's undrained copies, and a record with no DP
-    // pair reads mapq_alt on its chain pair (options.h chain_mapq_voter_fold,
-    // chain_mapq_undrained_nsub, chain_mapq_chain_alt).
+    // its n_sub adds the vote's undrained copies, a record with no DP pair
+    // reads mapq_alt on its chain pair, and the vote floor reads the vote
+    // against the voters a query of its length can field (options.h
+    // chain_mapq_voter_fold, chain_mapq_undrained_nsub, chain_mapq_chain_alt,
+    // vote_floor_capacity).
     const bool read_row =
         profile.kind != DnaPresetKind::Asm && !profile.overlap.on;
     mapping.chain_mapq_voter_fold = read_row;
     mapping.chain_mapq_undrained_nsub = read_row;
     mapping.chain_mapq_chain_alt = read_row;
+    mapping.vote_floor_capacity =
+        read_row ? lr::kDnaChainMapqVoteFloorVoters : 0;
     // HiFi only: the late inversion probe's local-chain gate
     // (dna/dna.h).
     mapping.inversion_probe_local_gate = profile.kind == DnaPresetKind::HiFi;
@@ -394,6 +398,7 @@ static void set_splice_fields(
     mapping.base.chain_mapq_voter_fold = false;
     mapping.base.chain_mapq_undrained_nsub = false;
     mapping.base.chain_mapq_chain_alt = false;
+    mapping.base.vote_floor_capacity = 0;
     mapping.base.inversion_probe_local_gate = false;
     mapping.base.rival_split_ends = false;
     mapping.base.dna_pool_gate_occ = 0;

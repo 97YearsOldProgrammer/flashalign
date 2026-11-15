@@ -598,6 +598,7 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.chain_mapq_voter_fold = mapping.chain_mapq_voter_fold;
   dctx.opts.chain_mapq_undrained_nsub = mapping.chain_mapq_undrained_nsub;
   dctx.opts.chain_mapq_chain_alt = mapping.chain_mapq_chain_alt;
+  dctx.opts.vote_floor_capacity = mapping.vote_floor_capacity;
   dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
   dctx.opts.secondary_max = mapping.secondary_max;
   dctx.opts.rival_split_ends = mapping.rival_split_ends;
