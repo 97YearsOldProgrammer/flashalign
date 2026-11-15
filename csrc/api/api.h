@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -93,9 +94,9 @@ struct IndexImageSpan {
   std::uint64_t bytes = 0;
 };
 
-class WindowedAlignSession;
+class StreamAlignSession;
 
-// A batch returned by WindowedAlignSession::collect(): the submitted reads, given back, and
+// A chunk returned by StreamAlignSession::collect(): the submitted reads, given back, and
 // one result per read in submission order.
 struct AlignedReadBatch {
   std::vector<std::string> reads;
@@ -156,15 +157,13 @@ public:
               const std::vector<int> *self_contigs = nullptr,
               const std::vector<int> *name_ranks = nullptr) const;
 
-  // Session that maps up to threading::kBatchWindow batches at once with the configured
-  // thread count; a worker takes a read of a batch younger than the oldest only while the
-  // bases in flight stay within `max_bases`. `helper_threads` of those threads are not
-  // started here; the caller's own threads lend time through
-  // WindowedAlignSession::try_help. At least one worker stays the session's. The session
-  // borrows this aligner: destroy it first, and do not reconfigure meanwhile. Results equal
-  // align_batch.
-  std::unique_ptr<WindowedAlignSession>
-  make_windowed_session(int helper_threads, std::uint64_t max_bases) const;
+  // Session that maps a stream of chunks with at most `max_alive` bases alive (plus one
+  // chunk), on the configured thread count. `helper_threads` of those threads are not
+  // started here; the caller's own threads lend time through StreamAlignSession::try_help.
+  // At least one worker stays the session's. The session borrows this aligner: destroy it
+  // first, and do not reconfigure meanwhile. Results equal align_batch for any chunking.
+  std::unique_ptr<StreamAlignSession>
+  make_stream_session(int helper_threads, std::uint64_t max_alive) const;
 
   std::vector<std::string> chromosome_names() const;
   std::vector<int64_t> chromosome_lengths() const;
@@ -176,21 +175,24 @@ public:
   // length, then name (strcmp). 0 outside that lane.
   int contig_dual_rank(std::string_view name, std::int64_t length) const;
 private:
-  friend class WindowedAlignSession;
+  friend class StreamAlignSession;
   LongReadAligner();
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-// Ordered windowed mapping session, owned by one thread. submit() queues a batch and
-// returns; collect() waits for the oldest batch and rethrows its first per-read exception.
-// Keep in_flight() below window() before each submit.
-class WindowedAlignSession {
+// Ordered mapping stream (engine/engine.h StreamAlignSession). One reader thread calls
+// wait_room() before each read, submit() and, at the end of the input, close(); one writer
+// thread calls collect() and, once a chunk is written, release() with its bases. Either
+// calls abort() on an error. Join the reader and end the writer before destroying it.
+class StreamAlignSession {
 public:
-  ~WindowedAlignSession();
-  WindowedAlignSession(const WindowedAlignSession &) = delete;
-  WindowedAlignSession &operator=(const WindowedAlignSession &) = delete;
+  ~StreamAlignSession();
+  StreamAlignSession(const StreamAlignSession &) = delete;
+  StreamAlignSession &operator=(const StreamAlignSession &) = delete;
 
+  // False after abort().
+  bool wait_room();
   // `read_name_hashes` is empty or holds one hash per read, `self_contigs` is empty or
   // holds one LongReadAligner::contig_id() per read, and `name_ranks` is empty or holds
   // one LongReadAligner::contig_dual_rank() per read.
@@ -198,19 +200,21 @@ public:
               std::vector<std::uint32_t> read_name_hashes = {},
               std::vector<int> self_contigs = {},
               std::vector<int> name_ranks = {});
-  AlignedReadBatch collect();
-  std::size_t in_flight() const;
-  std::size_t window() const;
-
+  void close();
+  // The oldest chunk, or std::nullopt at the end of the stream or after abort(); rethrows
+  // the chunk's first per-read exception.
+  std::optional<AlignedReadBatch> collect();
+  void release(std::uint64_t bases);
+  void abort();
   // For helper threads only: maps at most one read and returns whether one was available.
   // `tid` must lie in [thread_count - helper_threads, thread_count) after clamping. Safe to
-  // call concurrently with submit/collect and with other tids.
+  // call concurrently with the other calls and with other tids.
   bool try_help(int tid);
 
 private:
   friend class LongReadAligner;
-  WindowedAlignSession(const LongReadAligner &aligner, int helper_threads,
-                       std::uint64_t max_bases);
+  StreamAlignSession(const LongReadAligner &aligner, int helper_threads,
+                     std::uint64_t max_alive);
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

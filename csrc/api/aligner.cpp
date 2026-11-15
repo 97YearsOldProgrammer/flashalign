@@ -18,6 +18,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <stdexcept>
 #include <string>
@@ -196,28 +197,31 @@ LongReadAligner::align_batch(
   });
 }
 
-// Type-erases the backend of engine/engine.h's WindowedAlignSession: one virtual call per
-// batch.
-struct WindowedAlignSession::Impl {
+// Type-erases the backend of engine/engine.h's StreamAlignSession: one virtual call per
+// chunk.
+struct StreamAlignSession::Impl {
   struct Arm {
     virtual ~Arm() = default;
+    virtual bool wait_room() = 0;
     virtual void submit(std::vector<std::string> reads,
                         std::vector<std::uint32_t> read_name_hashes,
                         std::vector<int> self_contigs,
                         std::vector<int> name_ranks) = 0;
-    virtual AlignedReadBatch collect() = 0;
-    virtual std::size_t in_flight() const = 0;
-    virtual std::size_t window() const = 0;
+    virtual void close() = 0;
+    virtual std::optional<AlignedReadBatch> collect() = 0;
+    virtual void release(std::uint64_t bases) = 0;
+    virtual void abort() = 0;
     virtual bool try_help(int tid) = 0;
   };
 
   template <class Backend> struct BackendArm final : Arm {
-    ::fa::cpu::lr::WindowedAlignSession<Backend> session;
+    ::fa::cpu::lr::StreamAlignSession<Backend> session;
 
     BackendArm(const ::fa::cpu::lr::LongReadEngine &engine, int n_threads,
-               int n_helpers, std::uint64_t max_bases)
-        : session(engine, n_threads, n_helpers, max_bases) {}
+               int n_helpers, std::uint64_t max_alive)
+        : session(engine, n_threads, n_helpers, max_alive) {}
 
+    bool wait_room() override { return session.wait_room(); }
     void submit(std::vector<std::string> reads,
                 std::vector<std::uint32_t> read_name_hashes,
                 std::vector<int> self_contigs,
@@ -225,24 +229,27 @@ struct WindowedAlignSession::Impl {
       session.submit(std::move(reads), std::move(read_name_hashes),
                      std::move(self_contigs), std::move(name_ranks));
     }
-    AlignedReadBatch collect() override {
+    void close() override { session.close(); }
+    std::optional<AlignedReadBatch> collect() override {
       auto batch = session.collect();
+      if (batch == nullptr)
+        return std::nullopt;
       AlignedReadBatch out;
       out.reads = std::move(batch->reads);
       out.results = std::move(batch->results);
       return out;
     }
-    std::size_t in_flight() const override { return session.in_flight(); }
-    std::size_t window() const override { return session.window(); }
+    void release(std::uint64_t bases) override { session.release(bases); }
+    void abort() override { session.abort(); }
     bool try_help(int tid) override { return session.try_help(tid); }
   };
 
   std::unique_ptr<Arm> arm;
 };
 
-WindowedAlignSession::WindowedAlignSession(const LongReadAligner &aligner,
-                                           int helper_threads,
-                                           std::uint64_t max_bases)
+StreamAlignSession::StreamAlignSession(const LongReadAligner &aligner,
+                                       int helper_threads,
+                                       std::uint64_t max_alive)
     : impl_(std::make_unique<Impl>()) {
   const ::fa::cpu::lr::LongReadEngine &engine = *aligner.impl_->a;
   // The thread count align_batch uses; helper threads are part of it.
@@ -251,39 +258,39 @@ WindowedAlignSession::WindowedAlignSession(const LongReadAligner &aligner,
       [&](auto backend) {
         using Backend = decltype(backend);
         impl_->arm = std::make_unique<Impl::BackendArm<Backend>>(
-            engine, n_threads, helper_threads, max_bases);
+            engine, n_threads, helper_threads, max_alive);
       },
       aligner.impl_->backend);
 }
 
 // Joins the session's workers.
-WindowedAlignSession::~WindowedAlignSession() = default;
+StreamAlignSession::~StreamAlignSession() = default;
 
-void WindowedAlignSession::submit(std::vector<std::string> reads,
-                                  std::vector<std::uint32_t> read_name_hashes,
-                                  std::vector<int> self_contigs,
-                                  std::vector<int> name_ranks) {
+bool StreamAlignSession::wait_room() { return impl_->arm->wait_room(); }
+void StreamAlignSession::submit(std::vector<std::string> reads,
+                                std::vector<std::uint32_t> read_name_hashes,
+                                std::vector<int> self_contigs,
+                                std::vector<int> name_ranks) {
   impl_->arm->submit(std::move(reads), std::move(read_name_hashes),
                      std::move(self_contigs), std::move(name_ranks));
 }
-AlignedReadBatch WindowedAlignSession::collect() {
+void StreamAlignSession::close() { impl_->arm->close(); }
+std::optional<AlignedReadBatch> StreamAlignSession::collect() {
   return impl_->arm->collect();
 }
-std::size_t WindowedAlignSession::in_flight() const {
-  return impl_->arm->in_flight();
+void StreamAlignSession::release(std::uint64_t bases) {
+  impl_->arm->release(bases);
 }
-std::size_t WindowedAlignSession::window() const {
-  return impl_->arm->window();
-}
-bool WindowedAlignSession::try_help(int tid) {
+void StreamAlignSession::abort() { impl_->arm->abort(); }
+bool StreamAlignSession::try_help(int tid) {
   return impl_->arm->try_help(tid);
 }
 
-std::unique_ptr<WindowedAlignSession>
-LongReadAligner::make_windowed_session(int helper_threads,
-                                       std::uint64_t max_bases) const {
-  return std::unique_ptr<WindowedAlignSession>(
-      new WindowedAlignSession(*this, helper_threads, max_bases));
+std::unique_ptr<StreamAlignSession>
+LongReadAligner::make_stream_session(int helper_threads,
+                                     std::uint64_t max_alive) const {
+  return std::unique_ptr<StreamAlignSession>(
+      new StreamAlignSession(*this, helper_threads, max_alive));
 }
 
 std::vector<std::string> LongReadAligner::chromosome_names() const {

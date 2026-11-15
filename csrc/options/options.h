@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -628,6 +629,9 @@ bool preset_is_valid(std::string_view preset);
 // Preset (k, s) for building an index. A loaded index uses its own values.
 struct PresetSeeding { int k; int syncmer_s; };
 PresetSeeding resolve_preset_seeding(std::string_view preset);
+
+// The stream's chunk in bases, at most -K: small beside -K, big enough to map longest first.
+inline constexpr std::int64_t kStreamChunkBp = 20'000'000;
 
 // Every accepted preset name, for error messages; the experimental ones last.
 std::string accepted_preset_names();

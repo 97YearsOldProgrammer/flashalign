@@ -273,7 +273,7 @@ struct IoPlan {
 
 // The tids that a run's decode team takes from its `threads` mapping threads
 // and lends back through the mapping session: the top `team`. The session's
-// window owns the rest, [0, window()).
+// own workers take the rest, [0, window()).
 struct DecodeTids {
   int threads = 0;
   int team = 0; // 0 when no file decodes in parallel

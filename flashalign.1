@@ -798,13 +798,16 @@ decompression of compressed input borrows from it rather than adding to it:
 on one thread.
 .TP
 .B \-K, \-\-batch\-bp \fINUM\fR
-Number of bases loaded into memory to process in a mini-batch [500M]. As with
+Number of query bases held in memory from read to written [500M]. The reader
+waits at this bound, and the mapping threads take reads from all that is held,
+so a larger value gives them more to choose from when reads are uneven, for more
+memory. As with
 .BR \-I ,
 a k/K/m/M/g/G suffix is accepted. Output bytes and output order do not depend on
-it. At most five mini-batches are alive from read to written; the mapping
-threads draw from two at once, and take a read of the younger only while the
-query bases in flight stay within
-.IR NUM .
+it. At \-t 1 the reads are mapped one mini-batch of this size at a time. One
+case is known where the bound costs time, about a tenth: reads sorted by
+coordinate, as many threads as the machine has, and SAM piped to another program
+on the same machine; fewer threads avoid it.
 .TP
 .B \-\-show\-config
 Print the fully resolved configuration to stdout and exit 0. It reads no
@@ -825,7 +828,9 @@ Print a summary of the run to stderr: reads and bases, mapped reads, records
 written, wall time, throughput and peak memory.
 .TP
 .B \-\-progress
-Print per-batch progress to stderr.
+Print progress to stderr, a line for every
+.B \-K
+bases written.
 .TP
 .B \-\-quiet
 Suppress non-error logging, including the three lines a run ends with on stderr:

@@ -263,7 +263,7 @@ const std::vector<OptionSpec>& specs_table() {
          "number of threads [all-2]"},
         {OptionId::BatchBp, 'K', "--batch-bp", kSize, kStable, A,
          "NUM", SEC_IO,
-         "minibatch size for mapping [500M]"},
+         "bases in memory from read to written [500M]"},
         {OptionId::ShowConfig, '\0', "--show-config", kNone, kStable, A,
          "", SEC_IO,
          "print the resolved configuration and exit"},
