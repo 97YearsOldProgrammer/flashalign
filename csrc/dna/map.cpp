@@ -688,6 +688,11 @@ AlignResult map_read(const DnaContext& base_dctx,
     // The winner's harvest window and band, on its line.
     vote_slope_widen_winner(seed_ctx, dctx.vote_tie_seed, span, scratch, fwd,
                             rc);
+    if (seed_ctx.vote_keep_ranked) {
+      dctx.vote_ranked[0] = &scratch.fwd.ranked_all;
+      dctx.vote_ranked[1] = &scratch.rc.ranked_all;
+      dctx.vote_peaks = &raw;
+    }
     raw.insert(raw.end(), fwd.begin(), fwd.end());
     raw.insert(raw.end(), rc.begin(), rc.end());
   }

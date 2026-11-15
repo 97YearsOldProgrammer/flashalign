@@ -163,6 +163,7 @@ static void vote_rank(const VoteWindowState& st,
             }),
         ranked.end());
     std::make_heap(ranked.begin(), ranked.end(), VoteHeapBelow{&st});
+    if (st.ctx.vote_keep_ranked) scratch.ranked_all = ranked;
 }
 
 }}}  // namespace fa::cpu::lr

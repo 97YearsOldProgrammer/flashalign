@@ -11,6 +11,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -21,8 +22,9 @@
 // (minimap2's score0 / cnt), each catalogue rival's chain score and vote
 // evidence, the rival count n_sub and, with CIGAR output, the realized DP
 // scores dp1 / dp2; on lr and lr:hq also each candidate's VotePeak::fold (the
-// rank stage's folded tally). Branches, the C (int) truncations and the n_sub
-// term follow minimap2 (q_coef 40, min_chain_score 40). The differences:
+// rank stage's folded tally) and the vote's ranked buckets. Branches, the C
+// (int) truncations and the n_sub term follow minimap2 (q_coef 40,
+// min_chain_score 40). The differences:
 //   - x is the largest per-rival product of vote ratio, chain ratio and DP
 //     ratio. The vote ratio discounts a rival only while its chain scores
 //     below the winner's; from there the chain ratio is a floor. On lr and
@@ -45,6 +47,10 @@
 //   - Arithmetic is double rather than float, so a value on an integer
 //     boundary may truncate differently, and n_sub counts a bounded rival set
 //     rather than every secondary.
+//   - On lr and lr:hq n_sub adds the vote's undrained copies of the record's
+//     candidate (vote_copy_walk, chain_mapq_undrained_nsub): the loci of
+//     folded tally at least half its fold that no emitted peak drained, the
+//     copies x has not priced.
 //
 // The formula runs once per block-owning record of the committed family: each
 // record is scored on its own candidate's chain, with its own dp1 and
@@ -456,6 +462,7 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   // minimap2's own x (chain ratio alone), for the breakdown.
   const int subsc = std::max(f2, evidence.min_chain_score);
   const double x_chain = static_cast<double>(subsc) / f1;
+  n_sub += evidence.undrained_copies;
 
   // minimap2's pen_s1, without its uniq_ratio factor.
   const double pen_s1 =
@@ -786,6 +793,74 @@ chain_mapq_rival_from_placement(const DnaPlacementFamily& catalogue,
   return rival;
 }
 
+// The vote's undrained copies of a candidate: the loci of the ranked buckets
+// before the drain, both lanes, of folded tally F with 2 F >= the candidate's
+// fold, that no emitted peak drained. In heap order, a bucket within
+// kVoteCopyDedupBins bins of a counted bucket on its lane and contig is that
+// locus, and one within kVoteCopyOwnBins bins of the candidate's own bin is the
+// candidate's. At most kVoteCopyMaxLoci loci. A locus is drained when an
+// emitted peak of its lane and contig lies within 2 W of its bin's span.
+constexpr int kVoteCopyDedupBins = 2;
+constexpr int kVoteCopyOwnBins = 2;
+constexpr std::size_t kVoteCopyMaxLoci = 1000;
+
+int vote_copy_walk(const DnaContext& dctx,
+                   const DnaPlacementCandidate& candidate) {
+  const VotePeak& own = candidate.peak;
+  const std::int64_t width = std::max(1, own.anchor.ref_start_bin_width);
+  using Emitted = std::tuple<bool, int, std::int64_t>;
+  std::vector<Emitted> emitted;
+  if (dctx.vote_peaks != nullptr)
+    for (const VotePeak& peak : *dctx.vote_peaks)
+      emitted.emplace_back(peak.is_rc, peak.chr, peak.raw_ref_start);
+  std::sort(emitted.begin(), emitted.end());
+  std::vector<ChainWindowRankedBucket> order;
+  std::unordered_set<std::int64_t> counted;
+  std::size_t loci = 0;
+  int undrained = 0;
+  for (int lane = 0; lane < 2 && loci < kVoteCopyMaxLoci; ++lane) {
+    if (dctx.vote_ranked[lane] == nullptr)
+      continue;
+    const bool reverse = lane == 1;
+    order.clear();
+    for (const ChainWindowRankedBucket& bucket : *dctx.vote_ranked[lane])
+      if (2 * bucket.support >= own.fold)
+        order.push_back(bucket);
+    std::sort(order.begin(), order.end(),
+              [&dctx, reverse](const ChainWindowRankedBucket& a,
+                               const ChainWindowRankedBucket& b) {
+                return chain_window_ranked_better(a, b, dctx.vote_tie_seed,
+                                                  reverse);
+              });
+    counted.clear();
+    for (const ChainWindowRankedBucket& bucket : order) {
+      bool near = false;
+      for (int delta = -kVoteCopyDedupBins;
+           delta <= kVoteCopyDedupBins && !near; ++delta)
+        near = counted.count(vote_pack_key(bucket.chr, bucket.bin + delta)) != 0;
+      if (near)
+        continue;
+      counted.insert(vote_pack_key(bucket.chr, bucket.bin));
+      if (own.is_rc == reverse && own.chr == bucket.chr &&
+          std::abs(bucket.bin - own.anchor.ref_start_bin) <= kVoteCopyOwnBins)
+        continue;
+      ++loci;
+      const std::int64_t start = bucket.bin * width;
+      const auto peak = std::lower_bound(
+          emitted.begin(), emitted.end(),
+          Emitted(reverse, bucket.chr, start - 2 * width));
+      const bool drained = peak != emitted.end() &&
+                           std::get<0>(*peak) == reverse &&
+                           std::get<1>(*peak) == bucket.chr &&
+                           std::get<2>(*peak) < start + 3 * width;
+      undrained += !drained;
+      if (loci >= kVoteCopyMaxLoci)
+        break;
+    }
+  }
+  return undrained;
+}
+
 // The MAPQ evidence for one block owner of the committed family: the primary,
 // or a supplementary scored on its own candidate's chain. Every owner sees the
 // same rivals: candidates that own no selected block and are not the winner.
@@ -839,6 +914,8 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
     evidence.winner_contig = winner->peak.chr;
     evidence.winner_reverse = winner->peak.is_rc;
     evidence.winner_peak_diagonal = winner->peak.raw_ref_start;
+    if (dctx.opts.chain_mapq_undrained_nsub)
+      evidence.undrained_copies = vote_copy_walk(dctx, *winner);
   }
   if (!placement_ran)
     return evidence;

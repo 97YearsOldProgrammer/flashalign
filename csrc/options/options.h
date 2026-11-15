@@ -262,6 +262,10 @@ struct DnaLongOptions {
   // rank stage's folded tally (VotePeak::fold) instead of the recount; the
   // vote floor, the vote cap and the verdicts keep the recount. Not settable.
   bool chain_mapq_voter_fold = false;
+  // lr and lr:hq (dna/mapq.cpp vote_copy_walk): a record's n_sub adds the
+  // vote's undrained copies of its candidate; the vote keeps its ranked
+  // buckets for the walk. Not settable.
+  bool chain_mapq_undrained_nsub = false;
   // HiFi only (dna/dna.h): the late inversion probe of a seam or
   // piece runs only where the read's opposite-lane fine seeds in the drop
   // window chain to kDnaInvLocalMinAnchors anchors.

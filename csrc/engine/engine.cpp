@@ -275,6 +275,7 @@ LongReadEngine::make_seed_context(
       !config.is_rna() &&
       (mapping.vote_admission_ratio > 0.0 || mapping.all_chains);
   ctx.tile_rescue_occ = mapping.dna_tile_rescue_occ;
+  ctx.vote_keep_ranked = !config.is_rna() && mapping.chain_mapq_undrained_nsub;
   ctx.chr_names = &chr_names_;
   return ctx;
 }
@@ -595,6 +596,7 @@ void LongReadEngine::bind_dual_order() {
   dctx.opts.cigar_replay_request = cigar_replay_request_for(cfg_.common);
   dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
   dctx.opts.chain_mapq_voter_fold = mapping.chain_mapq_voter_fold;
+  dctx.opts.chain_mapq_undrained_nsub = mapping.chain_mapq_undrained_nsub;
   dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
   dctx.opts.secondary_max = mapping.secondary_max;
   dctx.opts.rival_split_ends = mapping.rival_split_ends;

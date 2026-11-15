@@ -111,6 +111,8 @@ struct ResolvedDnaOptions {
   bool chain_mapq_hifi_margin = false;
   // options/options.h chain_mapq_voter_fold.
   bool chain_mapq_voter_fold = false;
+  // options/options.h chain_mapq_undrained_nsub.
+  bool chain_mapq_undrained_nsub = false;
   // HiFi presets only: a seam's or piece's late inversion probe runs only
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (dna.h).
@@ -195,6 +197,12 @@ struct DnaContext {
   // map_read when opts.occ_dist > 0, null otherwise. The vote and every pool
   // gate admit them as rescued seeds (RetainedSeedRef::rescued).
   const std::vector<std::uint8_t>* readmitted = nullptr;
+  // Under LongReadSeedContext::vote_keep_ranked: each lane's ranked vote buckets
+  // before the drain (ChainWindowPeakScratch::ranked_all) and both lanes' emitted
+  // peaks, set by map_read.
+  const std::vector<ChainWindowRankedBucket>* vote_ranked[2] = {nullptr,
+                                                                nullptr};
+  const std::vector<VotePeak>* vote_peaks = nullptr;
   // Told of the read's stage boundaries (map.cpp StageRelease), set by
   // map_read for every read.
   DnaStageListener* stage_listener = nullptr;
@@ -2304,6 +2312,9 @@ struct DnaChainMapqEvidence {
   // lr and lr:hq (options/options.h chain_mapq_voter_fold): rival and winner
   // are read on their folds wherever the formula forms a vote ratio.
   bool voter_fold = false;
+  // lr and lr:hq (options/options.h chain_mapq_undrained_nsub): the vote's
+  // undrained copies of this record's candidate, added to n_sub; 0 elsewhere.
+  int undrained_copies = 0;
   // HiFi margin rule (header comment), HiFi presets only: the margin
   // dp1_raw - dp2_raw is read against the scoring row below.
   bool hifi_margin_rule = false;

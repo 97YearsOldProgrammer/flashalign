@@ -34,6 +34,8 @@ struct ChainWindowPeakScratch {
     std::vector<ChainWindowRankedBucket> ranked;
     std::vector<int> ref_starts;
     std::vector<uint32_t> occurrence_values;
+    // Under LongReadSeedContext::vote_keep_ranked: `ranked` before the drain.
+    std::vector<ChainWindowRankedBucket> ranked_all;
 
     void clear_for_window() {
         seeds.clear();
@@ -46,6 +48,7 @@ struct ChainWindowPeakScratch {
         ranked.clear();
         ref_starts.clear();
         occurrence_values.clear();
+        ranked_all.clear();
     }
 
     template <class T>
@@ -69,6 +72,7 @@ struct ChainWindowPeakScratch {
         release_vec_if_excessive(ranked, seed_retain * 2);
         release_vec_if_excessive(ref_starts, seed_retain * 4);
         release_vec_if_excessive(occurrence_values, seed_retain);
+        release_vec_if_excessive(ranked_all, seed_retain * 2);
         const size_t bucket_retain = std::max<size_t>(2048, seed_retain * 2);
         if (buckets.bucket_count() > bucket_retain * 4) {
             ChainWindowVoteTable().swap(buckets);

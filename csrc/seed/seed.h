@@ -429,6 +429,10 @@ struct LongReadSeedContext {
     // DNA, options/options.h skip_self: the contig that is the query read itself,
     // found by its exact name; -1 when the read is not in the index or the option is off.
     int self_contig = -1;
+    // The vote keeps its ranked buckets before the drain
+    // (ChainWindowPeakScratch::ranked_all), for the lr and lr:hq copy walk
+    // (dna/mapq.cpp vote_copy_walk).
+    bool vote_keep_ranked = false;
     const std::vector<std::string>* chr_names = nullptr;
 
     bool syncmer_occ_aware_active() const;
