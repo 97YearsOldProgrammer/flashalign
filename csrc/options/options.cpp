@@ -255,6 +255,11 @@ static void set_dna_long_platform_fields(
         hifi_row ? lr::kDnaHiFiTileRescueOcc : lr::kDnaTileRescueOcc;
     // HiFi only: the chain MAPQ margin rule (dna/dna.h).
     mapping.chain_mapq_hifi_margin = profile.kind == DnaPresetKind::HiFi;
+    // lr and lr:hq only: the chain MAPQ's vote ratios read the voters' fold
+    // (options.h chain_mapq_voter_fold).
+    const bool read_row =
+        profile.kind != DnaPresetKind::Asm && !profile.overlap.on;
+    mapping.chain_mapq_voter_fold = read_row;
     // HiFi only: the late inversion probe's local-chain gate
     // (dna/dna.h).
     mapping.inversion_probe_local_gate = profile.kind == DnaPresetKind::HiFi;
@@ -382,6 +387,7 @@ static void set_splice_fields(
     mapping.base.vote_admission_ratio = 0.0;
     mapping.base.cigar_dp_min_ksw_len = 0;
     mapping.base.chain_mapq_hifi_margin = false;
+    mapping.base.chain_mapq_voter_fold = false;
     mapping.base.inversion_probe_local_gate = false;
     mapping.base.rival_split_ends = false;
     mapping.base.dna_pool_gate_occ = 0;

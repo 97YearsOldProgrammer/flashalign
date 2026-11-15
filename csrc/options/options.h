@@ -258,6 +258,10 @@ struct DnaLongOptions {
   // BWA-MEM's margin Phred on dp_max - dp_max2. The full guard is in
   // dna/dna.h.
   bool chain_mapq_hifi_margin = false;
+  // lr and lr:hq (dna/mapq.cpp): every vote ratio of the chain MAPQ reads the
+  // rank stage's folded tally (VotePeak::fold) instead of the recount; the
+  // vote floor, the vote cap and the verdicts keep the recount. Not settable.
+  bool chain_mapq_voter_fold = false;
   // HiFi only (dna/dna.h): the late inversion probe of a seam or
   // piece runs only where the read's opposite-lane fine seeds in the drop
   // window chain to kDnaInvLocalMinAnchors anchors.

@@ -417,6 +417,7 @@ static void vote_emit_peaks_batched(const VoteWindowState& st,
             cp.support = chunk_seed_count[c];
             cp.center_support = std::min(rb.center, chunk_seed_count[c]);
             cp.vote_score = chunk_seed_count[c];
+            cp.fold = rb.support;
             cp.anchor.ref_start_bin = rb.bin;
             cp.anchor.ref_start_bin_width = st.W;
             cp.anchor.median_occurrence = median_occurrence;
@@ -581,6 +582,7 @@ static void vote_emit_peaks(const VoteWindowState& st,
         cp.support = contributing_seed_count;
         cp.center_support = std::min(rb.center, contributing_seed_count);
         cp.vote_score = contributing_score;
+        cp.fold = rb.support;
         cp.anchor.ref_start_bin = rb.bin;
         cp.anchor.ref_start_bin_width = st.W;
         cp.anchor.median_occurrence = median_occurrence;

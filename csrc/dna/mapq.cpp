@@ -20,13 +20,19 @@
 // of a DNA MAPQ. The inputs are the committed chain's score and anchor count
 // (minimap2's score0 / cnt), each catalogue rival's chain score and vote
 // evidence, the rival count n_sub and, with CIGAR output, the realized DP
-// scores dp1 / dp2. Branches, the C (int) truncations and the n_sub term
-// follow minimap2 (q_coef 40, min_chain_score 40). The differences:
+// scores dp1 / dp2; on lr and lr:hq also each candidate's VotePeak::fold (the
+// rank stage's folded tally). Branches, the C (int) truncations and the n_sub
+// term follow minimap2 (q_coef 40, min_chain_score 40). The differences:
 //   - x is the largest per-rival product of vote ratio, chain ratio and DP
 //     ratio. The vote ratio discounts a rival only while its chain scores
-//     below the winner's; from there the chain ratio is a floor.
-//   - The winner's vote is an absolute term: it floors pen_cm and, below
-//     kDnaChainMapqVoteCapMinVote votes, caps the Phred.
+//     below the winner's; from there the chain ratio is a floor. On lr and
+//     lr:hq it is fold_i / max(1, fold_eff), fold_eff the winner's fold
+//     after the shadow vote credit (chain_mapq_voter_fold); elsewhere it is
+//     vote_i / max(1, vote_eff), on the recount.
+//   - The winner's vote, the recount on every preset, is an absolute term: it
+//     floors pen_cm and, below kDnaChainMapqVoteCapMinVote votes, caps the
+//     Phred. The rivals' admissibility, shadow and tie verdicts do not read
+//     the fold.
 //   - A rival on the winner's own locus (a shadow, such as an SV flank) is not
 //     a rival. A chained rival at another locus that ties the winner exactly
 //     gives x = 1.
@@ -166,15 +172,25 @@ void shadow_verdict(const DnaChainMapqEvidence& evidence,
   }
 }
 
-// A non-tie rival's strength against a winner with `winner_vote` votes.
+// A rival's vote ratio against a winner of `vote` votes and `fold` fold.
+double rival_vote_ratio(const DnaChainMapqEvidence& evidence,
+                        const DnaChainMapqRival& rival, int vote,
+                        int fold) noexcept {
+  return evidence.voter_fold
+             ? static_cast<double>(rival.fold) /
+                   static_cast<double>(std::max(1, fold))
+             : static_cast<double>(rival.vote_evidence) /
+                   static_cast<double>(std::max(1, vote));
+}
+
+// A non-tie rival's strength against a winner of `vote` votes and `fold` fold.
 double rival_strength(const DnaChainMapqEvidence& evidence,
-                      const DnaChainMapqRival& rival,
-                      int winner_vote) noexcept {
+                      const DnaChainMapqRival& rival, int vote,
+                      int fold) noexcept {
   // Votes of different stretches do not compare: a rival is its chain.
   if (evidence.rival_by_chain)
     return rival.chained ? chain_ratio(evidence, rival) : 0.0;
-  const double denominator = static_cast<double>(std::max(1, winner_vote));
-  double strength = static_cast<double>(rival.vote_evidence) / denominator;
+  double strength = rival_vote_ratio(evidence, rival, vote, fold);
   if (rival.chained) {
     const double ratio = chain_ratio(evidence, rival);
     strength *= ratio;
@@ -287,7 +303,8 @@ dna_chain_mapq_rival_verdict(const DnaChainMapqEvidence& evidence,
   if (verdict.tie) {
     verdict.strength = 1.0;
   } else {
-    verdict.strength = rival_strength(evidence, rival, evidence.winner_vote);
+    verdict.strength = rival_strength(evidence, rival, evidence.winner_vote,
+                                      evidence.winner_fold);
   }
   verdict.counted = rival.chained && evidence.n_sub_cnt_clause &&
                     rival.chain_anchors >= evidence.cnt;
@@ -337,17 +354,24 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   // chained or record-explained shadows, since one locus's vote can split
   // between twin candidates. Un-chained shadows are not credited.
   int effective_vote = evidence.winner_vote;
+  int effective_fold = evidence.winner_fold;
   if (evidence.shadow_vote_credit) {
     for (std::size_t index = 0; index < evidence.rivals.size(); ++index)
       if (judged[index].shadow && (evidence.rivals[index].chained ||
-                                   evidence.rivals[index].record_shadow))
+                                   evidence.rivals[index].record_shadow)) {
         effective_vote =
             std::max(effective_vote, evidence.rivals[index].vote_evidence);
-    if (effective_vote != evidence.winner_vote)
+        effective_fold = std::max(effective_fold, evidence.rivals[index].fold);
+      }
+    const bool credited = evidence.voter_fold
+                              ? effective_fold != evidence.winner_fold
+                              : effective_vote != evidence.winner_vote;
+    if (credited)
       for (std::size_t index = 0; index < evidence.rivals.size(); ++index)
         if (!judged[index].tie)
           judged[index].strength =
-              rival_strength(evidence, evidence.rivals[index], effective_vote);
+              rival_strength(evidence, evidence.rivals[index], effective_vote,
+                             effective_fold);
   }
 
   // R1: the seat is the dp2 owner.
@@ -384,7 +408,6 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
   int tie_rivals = 0;
   double vote_ratio = 0.0;
   double max_competing_strength = 0.0;
-  const double winner_vote = static_cast<double>(std::max(1, effective_vote));
   // The winner's sibling path seeds x with its chain ratio.
   const double sibling_floor =
       static_cast<double>(std::max(evidence.sib_f2, evidence.min_chain_score)) / f1;
@@ -403,8 +426,9 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
     }
     if (verdict.tie)
       ++tie_rivals;
-    vote_ratio = std::max(vote_ratio, static_cast<double>(rival.vote_evidence) /
-                                          winner_vote);
+    vote_ratio =
+        std::max(vote_ratio, rival_vote_ratio(evidence, rival, effective_vote,
+                                              effective_fold));
     max_competing_strength = std::max(max_competing_strength, verdict.strength);
     const bool is_seat = seat.kind != 0 && seat.slot == index;
     // R1: a dp2 owner that is not the seat enters neither x nor x_other.
@@ -734,6 +758,7 @@ chain_mapq_rival_from_placement(const DnaPlacementFamily& catalogue,
   rival.candidate = id;
   if (const DnaPlacementCandidate* candidate = catalogue.find(id)) {
     rival.vote_evidence = candidate->vote_evidence;
+    rival.fold = candidate->peak.fold;
     rival.contig = candidate->peak.chr;
     rival.reverse = candidate->peak.is_rc;
     rival.peak_diagonal = candidate->peak.raw_ref_start;
@@ -796,6 +821,7 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
   evidence.shadow_vote_credit = dctx.opts.dna_chain_mapq_shadow_vote_credit;
   evidence.chain_shadow_read_slack =
       dctx.opts.dna_chain_mapq_chain_shadow_read_slack;
+  evidence.voter_fold = dctx.opts.chain_mapq_voter_fold;
   evidence.study_bits = chain_mapq_study_bits(dctx);
   evidence.rival_by_chain = dctx.opts.vote_stretch > 0;
   if (winner_chain != nullptr) {
@@ -809,6 +835,7 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
   }
   if (const DnaPlacementCandidate* winner = catalogue.find(winner_candidate)) {
     evidence.winner_vote = winner->vote_evidence;
+    evidence.winner_fold = winner->peak.fold;
     evidence.winner_contig = winner->peak.chr;
     evidence.winner_reverse = winner->peak.is_rc;
     evidence.winner_peak_diagonal = winner->peak.raw_ref_start;
@@ -887,6 +914,7 @@ void admit_realized_rivals(const DnaPlacementFamily& catalogue,
       if (const DnaPlacementCandidate* candidate = catalogue.find(
               static_cast<::fa::cpu::voting::CandidateId>(source.candidate))) {
         rival.vote_evidence = candidate->vote_evidence;
+        rival.fold = candidate->peak.fold;
         rival.contig = candidate->peak.chr;
         rival.reverse = candidate->peak.is_rc;
         rival.peak_diagonal = candidate->peak.raw_ref_start;

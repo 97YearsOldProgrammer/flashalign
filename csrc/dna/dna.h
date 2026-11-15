@@ -109,6 +109,8 @@ struct ResolvedDnaOptions {
   // Chain MAPQ, HiFi presets only: on the DP branch the margin dp_max -
   // dp_max2 over the dp2 owner replaces the ratio form.
   bool chain_mapq_hifi_margin = false;
+  // options/options.h chain_mapq_voter_fold.
+  bool chain_mapq_voter_fold = false;
   // HiFi presets only: a seam's or piece's late inversion probe runs only
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (dna.h).
@@ -2147,7 +2149,8 @@ inline constexpr double kDnaChainMapqCoef = 40.0; // q_coef
 // another segment of the same read.
 inline constexpr double kDnaChainMapqMaskLevel = 0.5;
 // The vote floor under which pen_cm is discounted linearly, and the vote cap
-// q <= (int)(4.343 * w / 3).
+// q <= (int)(4.343 * w / 3); w is the winner's recount on every preset, where
+// lr and lr:hq read the vote ratios on folds.
 inline constexpr double kDnaChainMapqVoteFloor = 40.0;
 inline constexpr double kDnaChainMapqVoteCapCoef = 4.343;
 inline constexpr double kDnaChainMapqVoteCapDiv = 3.0;
@@ -2226,6 +2229,8 @@ struct DnaChainMapqRival {
   int q_begin = -1;
   int q_end = -1;
   int vote_evidence = 0;
+  // The candidate's VotePeak::fold; 0 without a catalogue candidate.
+  int fold = 0;
   bool chained = false;
   // The evidence's dp2 is this rival's DP score, as minimap2 attributes
   // dp_max2 to one rival; n_sub then counts it once under either rule.
@@ -2258,6 +2263,7 @@ struct DnaChainMapqEvidence {
   int winner_q_begin = -1;
   int winner_q_end = -1;
   int winner_vote = 0;
+  int winner_fold = 0; // the winner's VotePeak::fold
   int read_len = 0;
   // The winner's locus, for the shadow rule; see DnaChainMapqRival.
   int winner_contig = -1;
@@ -2295,6 +2301,9 @@ struct DnaChainMapqEvidence {
   //   chain_shadow_read_slack: see dna_chain_mapq_chain_shadow_slack.
   bool shadow_vote_credit = false;
   bool chain_shadow_read_slack = false;
+  // lr and lr:hq (options/options.h chain_mapq_voter_fold): rival and winner
+  // are read on their folds wherever the formula forms a vote ratio.
+  bool voter_fold = false;
   // HiFi margin rule (header comment), HiFi presets only: the margin
   // dp1_raw - dp2_raw is read against the scoring row below.
   bool hifi_margin_rule = false;

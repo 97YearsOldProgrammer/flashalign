@@ -146,6 +146,9 @@ struct VotePeak {
   int support = 0;
   int center_support = 0;
   int vote_score = 0;
+  // The bucket's folded voter tally at the rank stage, before the refine recounts
+  // support (ChainWindowRankedBucket::support).
+  int fold = 0;
   LongWindowAnchor anchor;
   // The whole-read winner's per-read line d(q) = line_a + stretch(q, line_b_q20)
   // (vote/vote.h), set only on that winner, when its line passes the gate (line_gate).

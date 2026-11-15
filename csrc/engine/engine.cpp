@@ -594,6 +594,7 @@ void LongReadEngine::bind_dual_order() {
       cfg_.common.enable_full_read_cigar;
   dctx.opts.cigar_replay_request = cigar_replay_request_for(cfg_.common);
   dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
+  dctx.opts.chain_mapq_voter_fold = mapping.chain_mapq_voter_fold;
   dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
   dctx.opts.secondary_max = mapping.secondary_max;
   dctx.opts.rival_split_ends = mapping.rival_split_ends;
