@@ -93,15 +93,11 @@
 //   R5 Otherwise minimap2's ratio form on the rescaled dp1 / dp2, with its
 //      mapq_alt on m_eff.
 //   R6 On a block record of a multi-block family the MAPQ is capped at
-//      kDnaChainMapqHifiSplitCapMapq when (a) there is no seat and a competing
-//      rival reaches kDnaChainMapqHifiSplitRivalStrength, or (b) the record's
-//      own divergence is substitution-dominated: HiFi errors are mostly
-//      indels, a wrong repeat copy's differences are not.
+//      kDnaChainMapqHifiSplitCapMapq when there is no seat and a competing
+//      rival reaches kDnaChainMapqHifiSplitRivalStrength.
 //
 // The kDnaChainMapqStudy* bits, on under the HiFi presets only, adapt these
 // rules to real reads, which carry sample variants and SVs:
-//   2   R6(b) fires only when the block's mismatch rate also exceeds the
-//       family's cleanest record's, by the divergence contrast's z test.
 //   8   The committed record vouches for a chained rival when both ends of
 //       the rival's chain lie on the record's alignment (record_shadow).
 //   64  Any record of the family, or two records jointly (an SV's flanks),
@@ -572,54 +568,13 @@ int dna_chain_mapq(const DnaChainMapqEvidence& evidence,
                                         kDnaChainMapqVoteCapDiv))
           : 60;
   mapq = std::min(mapq, cap);
-  // R6: (a) no seat and a strong competing rival; (b) a
-  // substitution-dominated record, seat or not.
+  // R6: a block of a multi-block family, no seat and a strong competing
+  // rival.
   int split_cap = 0;
-  if (hifi && evidence.family_blocks >= 2) {
-    if (!dp_branch &&
-        max_competing_strength >= kDnaChainMapqHifiSplitRivalStrength)
-      split_cap |= 1;
-    if (evidence.record_mismatches >= 0 && evidence.record_ins_events >= 0 &&
-        evidence.record_del_events >= 0) {
-      const int events = evidence.record_mismatches +
-                         evidence.record_ins_events +
-                         evidence.record_del_events;
-      bool share_dominated = events >= kDnaChainMapqHifiSubstitutionEvents &&
-                             static_cast<double>(evidence.record_mismatches) /
-                                     static_cast<double>(events) >=
-                                 kDnaChainMapqHifiSubstitutionShare;
-      // Bit 2: also require the block's mismatch rate to exceed the family's
-      // cleanest record's by the divergence contrast's two-sample test.
-      // Without such a record there is no cap.
-      if (share_dominated &&
-          (evidence.study_bits & kDnaChainMapqStudyRelativeShareCap) != 0) {
-        share_dominated = false;
-        if (evidence.record_aligned_bases > 0 &&
-            evidence.family_min_aligned > 0 &&
-            evidence.family_min_mismatches >= 0) {
-          const double length =
-              static_cast<double>(evidence.record_aligned_bases);
-          const double length_min =
-              static_cast<double>(evidence.family_min_aligned);
-          const double rate =
-              static_cast<double>(evidence.record_mismatches) / length;
-          const double rate_min =
-              static_cast<double>(evidence.family_min_mismatches) / length_min;
-          const double pooled =
-              static_cast<double>(evidence.record_mismatches +
-                                  evidence.family_min_mismatches) /
-              (length + length_min);
-          const double variance = std::max(pooled * (1.0 - pooled), 1e-12) *
-                                  (1.0 / length + 1.0 / length_min);
-          share_dominated = (rate - rate_min) / std::sqrt(variance) >
-                            kDnaChainMapqDivergentRecordZ;
-        }
-      }
-      if (share_dominated)
-        split_cap |= 2;
-    }
-    if (split_cap != 0)
-      mapq = std::min(mapq, kDnaChainMapqHifiSplitCapMapq);
+  if (hifi && evidence.family_blocks >= 2 && !dp_branch &&
+      max_competing_strength >= kDnaChainMapqHifiSplitRivalStrength) {
+    split_cap = 1;
+    mapq = std::min(mapq, kDnaChainMapqHifiSplitCapMapq);
   }
 
   if (breakdown != nullptr) {
@@ -763,8 +718,8 @@ void route_dna_mapq(const DnaPlacementFamily& catalogue,
 
 /**** evidence ****/
 // Each record's MAPQ evidence: its chain and the catalogue's rivals, the
-// committed family's diagonal maps for the shadow rules, its census for the
-// split-read caps and the divergence contrast's inputs.
+// committed family's diagonal maps for the shadow rules and the divergence
+// contrast's inputs.
 
 namespace fa::cpu::lr {
 namespace dna {
@@ -933,7 +888,6 @@ DnaChainMapqEvidence build_chain_mapq_evidence(
     evidence.vote_floor_scale = std::min(
         1.0, syncmers / static_cast<double>(dctx.opts.vote_floor_capacity));
   }
-  evidence.study_bits = chain_mapq_study_bits(dctx);
   evidence.rival_by_chain = dctx.opts.vote_stretch > 0;
   if (winner_chain != nullptr) {
     evidence.f1 = winner_chain->chain_score;
@@ -1133,57 +1087,6 @@ DnaFamilyDivergence divergence_contrast(const dna::Result& realized,
   }
   dna_divergence_contrast(family, denominators);
   return family;
-}
-
-// A record's divergence structure: mismatches and ambiguous bases from its
-// replay accounting, indel events and bases and aligned columns from its
-// CIGAR. All -1 without a CIGAR; the first two -1 without accounting.
-struct DnaChainMapqRecordCensus {
-  int mismatches = -1;
-  int ambiguous = -1;
-  int ins_events = -1;
-  int ins_bases = -1;
-  int del_events = -1;
-  int del_bases = -1;
-  int aligned_bases = -1;
-};
-
-DnaChainMapqRecordCensus chain_mapq_record_census(const AlignResult& record) {
-  DnaChainMapqRecordCensus census;
-  if (record.cigar.empty())
-    return census;
-  census.ins_events = 0;
-  census.ins_bases = 0;
-  census.del_events = 0;
-  census.del_bases = 0;
-  census.aligned_bases = 0;
-  for (const std::pair<int, char>& op :
-       ::fa::cpu::output::parse_cigar_ops(record.cigar)) {
-    if (op.first <= 0)
-      continue;
-    switch (op.second) {
-    case 'M':
-    case '=':
-    case 'X':
-      census.aligned_bases += op.first;
-      break;
-    case 'I':
-      ++census.ins_events;
-      census.ins_bases += op.first;
-      break;
-    case 'D':
-      ++census.del_events;
-      census.del_bases += op.first;
-      break;
-    default:
-      break;
-    }
-  }
-  if (record.alignment_accounting_valid) {
-    census.mismatches = record.mismatches;
-    census.ambiguous = record.ambiguities;
-  }
-  return census;
 }
 
 // The contig index of a name, or -1 when unknown.
@@ -1540,26 +1443,6 @@ void price_dna_regions(const DnaContext& dctx,
   for (const DnaRegionPrice& price : prices)
     if (!price.inversion)
       ++family_blocks;
-  const bool census_wanted =
-      dctx.opts.chain_mapq_hifi_margin && family_blocks >= 2;
-  std::vector<std::pair<int, int>> family_mismatch_pairs;
-  if ((chain_mapq_study_bits(dctx) & kDnaChainMapqStudyRelativeShareCap) !=
-          0 &&
-      census_wanted) {
-    family_mismatch_pairs.assign(count, std::pair<int, int>(-1, -1));
-    for (std::size_t index = 0; index < count; ++index) {
-      const AlignResult& record = member(index);
-      if (record.origin == AlignmentOrigin::DnaLocalInversion ||
-          !record.alignment_accounting_valid ||
-          !clears_dna_emission_floor(record, dctx.opts.min_chain_score,
-                                     dctx.opts.cigar_dp_min_dp_max))
-        continue;
-      const DnaChainMapqRecordCensus census = chain_mapq_record_census(record);
-      if (census.mismatches < 0 || census.aligned_bases <= 0)
-        continue;
-      family_mismatch_pairs[index] = {census.mismatches, census.aligned_bases};
-    }
-  }
   std::vector<int> mapqs(count, -1);
   for (std::size_t index = 0; index < count; ++index) {
     const DnaRegionPrice& price = prices[index];
@@ -1604,28 +1487,7 @@ void price_dna_regions(const DnaContext& dctx,
     evidence.part_anchors = price.cnt;
     evidence.sib_f2 = static_cast<int>(price.pool_subsc + .499);
     evidence.part_n_sub = price.pool_n_sub;
-    const DnaChainMapqRecordCensus census =
-        census_wanted ? chain_mapq_record_census(record)
-                      : DnaChainMapqRecordCensus();
     evidence.family_blocks = family_blocks;
-    evidence.record_mismatches = census.mismatches;
-    evidence.record_ins_events = census.ins_events;
-    evidence.record_del_events = census.del_events;
-    evidence.record_aligned_bases = census.aligned_bases;
-    for (std::size_t other = 0; other < family_mismatch_pairs.size(); ++other) {
-      if (other == index || family_mismatch_pairs[other].second <= 0)
-        continue;
-      const bool cleaner =
-          evidence.family_min_aligned <= 0 ||
-          static_cast<double>(family_mismatch_pairs[other].first) *
-                  static_cast<double>(evidence.family_min_aligned) <
-              static_cast<double>(evidence.family_min_mismatches) *
-                  static_cast<double>(family_mismatch_pairs[other].second);
-      if (cleaner) {
-        evidence.family_min_mismatches = family_mismatch_pairs[other].first;
-        evidence.family_min_aligned = family_mismatch_pairs[other].second;
-      }
-    }
     DnaChainMapqBreakdown breakdown;
     mapqs[index] = dna_chain_mapq(evidence, &breakdown, nullptr);
     if (evidence.f1 > 0) {
@@ -1678,74 +1540,12 @@ void price_dna_blocks(const DnaContext& dctx,
   DnaChainMapqFamilyMap family_map;
   if (family_map_wanted)
     family_map = chain_mapq_family_map(dctx, realized, primary_candidate);
-  // The committed family's block-owning records. The split-read caps
-  // (dna.h R6) read this and each block record's divergence, so
-  // the per-record counts are taken only where the caps can fire.
+  // The committed family's block-owning records, which R6 reads.
   int family_blocks = 1;
   for (const ::fa::cpu::voting::CandidateId owner :
        realized.supplementary_candidates)
     if (owner != ::fa::cpu::voting::kNullCandidate)
       ++family_blocks;
-  const bool census_wanted =
-      dctx.opts.chain_mapq_hifi_margin && family_blocks >= 2;
-  const auto block_census = [census_wanted](const AlignResult& record) {
-    return census_wanted ? chain_mapq_record_census(record)
-                         : DnaChainMapqRecordCensus();
-  };
-  // For kDnaChainMapqStudyRelativeShareCap: each record's (mismatches,
-  // aligned bases), over the records the divergence contrast collects, so
-  // each block's evidence can carry the family's cleanest other record.
-  // Index 0 is the primary.
-  std::vector<std::pair<int, int>> family_mismatch_pairs;
-  if ((chain_mapq_study_bits(dctx) & kDnaChainMapqStudyRelativeShareCap) !=
-          0 &&
-      census_wanted) {
-    family_mismatch_pairs.assign(1 + realized.supplementary.size(),
-                                 std::pair<int, int>(-1, -1));
-    for (std::size_t index = 0; index < family_mismatch_pairs.size();
-         ++index) {
-      const AlignResult& member =
-          index == 0 ? static_cast<const AlignResult&>(realized)
-                     : realized.supplementary[index - 1];
-      if (member.origin == AlignmentOrigin::DnaLocalInversion ||
-          !member.alignment_accounting_valid ||
-          !clears_dna_emission_floor(member, dctx.opts.min_chain_score,
-                                     dctx.opts.cigar_dp_min_dp_max))
-        continue;
-      const DnaChainMapqRecordCensus member_census =
-          chain_mapq_record_census(member);
-      if (member_census.mismatches < 0 || member_census.aligned_bases <= 0)
-        continue;
-      family_mismatch_pairs[index] = {member_census.mismatches,
-                                      member_census.aligned_bases};
-    }
-  }
-  const auto rule_fields = [family_blocks, &family_mismatch_pairs](
-                               const DnaChainMapqRecordCensus& census,
-                               DnaChainMapqEvidence& into,
-                               std::size_t record_index) {
-    into.family_blocks = family_blocks;
-    into.record_mismatches = census.mismatches;
-    into.record_ins_events = census.ins_events;
-    into.record_del_events = census.del_events;
-    into.record_aligned_bases = census.aligned_bases;
-    // The cleanest other accounted record by mismatch rate.
-    for (std::size_t other = 0; other < family_mismatch_pairs.size();
-         ++other) {
-      if (other == record_index || family_mismatch_pairs[other].second <= 0)
-        continue;
-      const bool cleaner =
-          into.family_min_aligned <= 0 ||
-          static_cast<double>(family_mismatch_pairs[other].first) *
-                  static_cast<double>(into.family_min_aligned) <
-              static_cast<double>(into.family_min_mismatches) *
-                  static_cast<double>(family_mismatch_pairs[other].second);
-      if (cleaner) {
-        into.family_min_mismatches = family_mismatch_pairs[other].first;
-        into.family_min_aligned = family_mismatch_pairs[other].second;
-      }
-    }
-  };
   DnaChainMapqEvidence evidence = build_chain_mapq_evidence(
       dctx, placement_family, placement_chaining, placement_chaining_ran,
       winner_chain, primary_candidate, ::fa::cpu::voting::kNullCandidate,
@@ -1754,9 +1554,7 @@ void price_dna_blocks(const DnaContext& dctx,
                                  placement_chaining, family_map, 0,
                                  primary_candidate, read_len, evidence);
   price_block_part(placement_family, realized.primary_part, evidence);
-  const DnaChainMapqRecordCensus primary_census =
-      block_census(static_cast<const AlignResult&>(realized));
-  rule_fields(primary_census, evidence, 0);
+  evidence.family_blocks = family_blocks;
   DnaChainMapqBreakdown breakdown;
   std::vector<DnaChainMapqRivalVerdict> verdicts;
   int mapq = dna_chain_mapq(evidence, &breakdown, &verdicts);
@@ -1806,8 +1604,7 @@ void price_dna_blocks(const DnaContext& dctx,
                          ? realized.supplementary_parts[index]
                          : -1,
                      block_evidence);
-    const DnaChainMapqRecordCensus census = block_census(record);
-    rule_fields(census, block_evidence, index + 1);
+    block_evidence.family_blocks = family_blocks;
     DnaChainMapqBreakdown block_breakdown;
     std::vector<DnaChainMapqRivalVerdict> block_verdicts;
     supplementary_mapq[index] =

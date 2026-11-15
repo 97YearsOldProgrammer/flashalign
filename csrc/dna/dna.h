@@ -2189,13 +2189,9 @@ inline constexpr double kDnaChainMapqHifiRivalStrengthMax = 1.0;
 // two-base gap (O1 + 2 E1), which one gap event (the HiFi homopolymer error)
 // explains.
 inline constexpr int kDnaChainMapqHifiSingleEventMapq = 9;
-// R6: the split-read cap; (a) the rival strength that triggers it; (b) the
-// minimum event count (mismatches + indel events) and mismatch share. (b)
-// applies with or without a seat.
+// R6: the split-read cap and the competing rival strength that triggers it.
 inline constexpr int kDnaChainMapqHifiSplitCapMapq = 3;
 inline constexpr double kDnaChainMapqHifiSplitRivalStrength = 0.4;
-inline constexpr int kDnaChainMapqHifiSubstitutionEvents = 20;
-inline constexpr double kDnaChainMapqHifiSubstitutionShare = 0.45;
 // Shadow rule, chained rivals: a chained rival is the winner's own locus when
 // its chain overlaps the winner's reference span over more than half the
 // shorter span, lies within that span extended by the slack on each side, and
@@ -2216,16 +2212,15 @@ inline constexpr int kDnaChainMapqChainShadowFraction = 5;
 inline constexpr int kDnaChainMapqPeakShadowFloorBp = 2000;
 inline constexpr int kDnaChainMapqPeakShadowFraction = 10;
 // The rule bits (header comment).
-inline constexpr int kDnaChainMapqStudyRelativeShareCap = 2;
 inline constexpr int kDnaChainMapqStudyRecordShadow = 8;
 inline constexpr int kDnaChainMapqStudyFamilyVouch = 64;
 inline constexpr int kDnaChainMapqStudyBlockRivals = 256;
 
 // The bits in force under the HiFi presets.
-inline constexpr int kDnaChainMapqStudy =
-    kDnaChainMapqStudyRelativeShareCap | kDnaChainMapqStudyRecordShadow |
-    kDnaChainMapqStudyFamilyVouch | kDnaChainMapqStudyBlockRivals;
-static_assert(kDnaChainMapqStudy == 330, "the HiFi MAPQ rule set");
+inline constexpr int kDnaChainMapqStudy = kDnaChainMapqStudyRecordShadow |
+                                          kDnaChainMapqStudyFamilyVouch |
+                                          kDnaChainMapqStudyBlockRivals;
+static_assert(kDnaChainMapqStudy == 328, "the HiFi MAPQ rule set");
 
 // The rule bits for a run: kDnaChainMapqStudy under the HiFi presets, else 0.
 inline constexpr int dna_chain_mapq_study_bits(bool hifi_margin_rule) noexcept {
@@ -2336,19 +2331,8 @@ struct DnaChainMapqEvidence {
   int substitution_cost = 0; // A + B
   int gap_open1 = 0;         // O1
   int gap_extend1 = 0;       // E1
-  // R6: the family's block-owning records, and this record's mismatches (-1
-  // without accounting) and indel events (-1 without a CIGAR).
+  // R6: the family's block-owning records.
   int family_blocks = 1;
-  int record_mismatches = -1;
-  int record_ins_events = -1;
-  int record_del_events = -1;
-  // The rule bits (dna_chain_mapq_study_bits); the formula reads only bit 2.
-  // For it: this record's aligned bases, and the (mismatches, aligned bases)
-  // of the family's cleanest other accounted record, -1 when there is none.
-  int study_bits = 0;
-  int record_aligned_bases = -1;
-  int family_min_mismatches = -1;
-  int family_min_aligned = -1;
   // The record prints from a block part (DnaBlockPart). f1 and cnt are then
   // its whole chain's and sib_f2 the part's same-candidate subsc; pen_cm and
   // the map-only logarithm read part_score and part_anchors (minimap2's score
@@ -2404,8 +2388,7 @@ struct DnaChainMapqBreakdown {
   int hifi_margin_mapq = -1;
   // The seat (0 none, 1 the dp2 owner) and its margin on the rescaled pair
   // (R1 reads the pair before the rescale), the pen the margin rule uses,
-  // and the split-read cap applied (0 none, 1 rival strength, 2 substitution
-  // share, 3 both).
+  // and the split-read cap applied (0 none, 1 R6).
   int seat_kind = 0;
   double seat_m_eff = 0.0;
   double hifi_pen = 0.0;
