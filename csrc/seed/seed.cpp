@@ -814,21 +814,38 @@ const std::vector<QuerySeed>* drop_query_repeats(
   const std::size_t n = seeds.size();
   if (cap <= 0 || frac <= 0.0f || n <= static_cast<std::size_t>(cap))
     return &seeds;
-  keys.clear();
-  keys.reserve(n);
-  for (const QuerySeed& seed : seeds)
-    keys.push_back(seed.key);
-  std::sort(keys.begin(), keys.end());
   // minimap2's float test, cnt > n * q_occ_frac.
   const float frac_floor = static_cast<float>(n) * frac;
+  const auto over = [&](std::size_t count) {
+    return count > static_cast<std::size_t>(cap) &&
+           static_cast<float>(count) > frac_floor;
+  };
+  // Seeds per key bucket. A key's count is at most its bucket's and the test
+  // rises with the count, so only a key in a bucket over the test can repeat.
+  constexpr int kBucketBits = 12;
+  const auto bucket = [](std::uint64_t key) {
+    return static_cast<std::size_t>((key * 0x9e3779b97f4a7c15ULL) >>
+                                    (64 - kBucketBits));
+  };
+  std::uint32_t counts[std::size_t{1} << kBucketBits] = {};
+  std::uint32_t most = 0;
+  for (const QuerySeed& seed : seeds)
+    most = std::max(most, ++counts[bucket(seed.key)]);
+  if (!over(most))
+    return &seeds;
+  // The keys of the buckets over the test, sorted.
+  keys.clear();
+  for (const QuerySeed& seed : seeds)
+    if (over(counts[bucket(seed.key)]))
+      keys.push_back(seed.key);
+  std::sort(keys.begin(), keys.end());
   // The repeated keys, compacted in order to the front of `keys`.
+  const std::size_t m = keys.size();
   std::size_t repeated = 0;
-  for (std::size_t begin = 0, i = 1; i <= n; ++i) {
-    if (i < n && keys[i] == keys[begin])
+  for (std::size_t begin = 0, i = 1; i <= m; ++i) {
+    if (i < m && keys[i] == keys[begin])
       continue;
-    const std::size_t count = i - begin;
-    if (count > static_cast<std::size_t>(cap) &&
-        static_cast<float>(count) > frac_floor)
+    if (over(i - begin))
       keys[repeated++] = keys[begin];
     begin = i;
   }
@@ -838,7 +855,8 @@ const std::vector<QuerySeed>* drop_query_repeats(
   kept.clear();
   kept.reserve(n);
   for (const QuerySeed& seed : seeds)
-    if (!std::binary_search(keys.begin(), keys.end(), seed.key))
+    if (!over(counts[bucket(seed.key)]) ||
+        !std::binary_search(keys.begin(), keys.end(), seed.key))
       kept.push_back(seed);
   dropped = n - kept.size();
   return &kept;

@@ -283,8 +283,8 @@ struct ChainAnchorScratch {
     ChainWindowPeakScratch shadow_rc;
     ChainSeedLookupCache lookup_cache;
     std::vector<QuerySeed> full_syncmer_rc_seeds;
-    // seed/seed.h drop_query_repeats: the read's sorted seed keys, and its
-    // forward stream without the repeated ones. Each read that uses them
+    // seed/seed.h drop_query_repeats: the read's candidate repeated keys, and
+    // its forward stream without the repeated ones. Each read that uses them
     // refills them.
     std::vector<uint64_t> query_occ_keys;
     std::vector<QuerySeed> query_occ_seeds;
