@@ -310,6 +310,8 @@ inline KmerPostingIntervalView posting_interval(
 
 struct RetainedSeedDensityEntry {
   PostingHandle view;
+  // A one-posting view's posting, read-local (ChainSeedLookupCache::singles).
+  PackedRefPos single = 0;
   // Some RetainedSeedRef of this key is rescued.
   bool rescued = false;
   bool retained = false;
@@ -403,17 +405,37 @@ class RetainedSeedDensity {
                                 std::uint32_t low,
                                 std::uint32_t high) const;
 
-  // Resolves n intervals for the same (chromosome, low, high) window; result i
-  // equals slice(index, entry_indices[i], chromosome, low, high). The binary
-  // searches of up to kSliceBatch entries are interleaved so their cache
-  // misses overlap.
-  void slice_batch(const SeedIndex& index,
-                   const std::uint32_t* entry_indices,
-                   std::size_t n,
-                   int chromosome,
-                   std::uint32_t low,
-                   std::uint32_t high,
-                   KmerPostingIntervalView* out);
+  // The per-window part of a slice, computed once for every entry sliced to
+  // one (chromosome, low, high).
+  struct SliceWindow {
+    int chromosome = -1;
+    std::uint32_t low = 0;
+    std::uint32_t high = 0;
+    bool valid = false;
+    bool empty = true;
+    // The index's directory is the validated one, every stored view's.
+    bool same_directory = false;
+    bool low_packed = false;
+    bool high_packed = false;
+    PackedRefPos packed_low = 0;
+    PackedRefPos packed_high = 0;
+  };
+  SliceWindow slice_window(const SeedIndex& index, int chromosome,
+                           std::uint32_t low, std::uint32_t high) const;
+
+  // Resolves n intervals of `window`; result i is the handle of
+  // slice(index, entry_indices[i], chromosome, low, high). The first bounds
+  // of up to kSliceBatch entries are interleaved so their cache misses
+  // overlap.
+  void slice_batch(const SeedIndex& index, const SliceWindow& window,
+                   const std::uint32_t* entry_indices, std::size_t n,
+                   PostingHandle* out) const;
+
+  // When the entry's list is one posting, its slice_batch result into `out`,
+  // by two comparisons on the entry's read-local copy of the posting, which
+  // the result's postings point at.
+  bool slice_single(const SliceWindow& window, std::uint32_t entry_index,
+                    PostingHandle& out) const;
 
  private:
   std::vector<RetainedSeedDensityEntry> entries_;

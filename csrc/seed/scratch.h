@@ -100,6 +100,9 @@ struct ChainSeedLookupCache {
     std::vector<uint32_t> stamps;
     std::vector<uint64_t> keys;
     std::vector<KmerPostingView> views;
+    // A one-posting view's posting, copied while its line is loaded; 0 for
+    // any other view.
+    std::vector<PackedRefPos> singles;
     size_t mask = 0;
     size_t used = 0;
     uint32_t epoch = 1;
@@ -117,12 +120,15 @@ struct ChainSeedLookupCache {
         stamps.assign(cap, 0);
         keys.clear();
         views.clear();
+        singles.clear();
         if (keys.capacity() > cap / 2) {
             std::vector<uint64_t>().swap(keys);
             std::vector<KmerPostingView>().swap(views);
+            std::vector<PackedRefPos>().swap(singles);
         }
         keys.reserve(cap / 2);
         views.reserve(cap / 2);
+        singles.reserve(cap / 2);
         mask = cap - 1;
         used = 0;
         epoch = 1;
@@ -142,6 +148,7 @@ struct ChainSeedLookupCache {
             }
             keys.clear();
             views.clear();
+            singles.clear();
             used = 0;
         }
     }
@@ -189,6 +196,7 @@ struct ChainSeedLookupCache {
         buckets[slot] = static_cast<uint32_t>(used);
         keys.push_back(key);
         views.push_back(view);
+        singles.push_back(single_posting(view));
         ++used;
         return view;
     }
@@ -206,8 +214,10 @@ struct ChainSeedLookupCache {
         auto flush = [&]() {
             if (pending == 0) return;
             index.lookup_batch(pending_keys, pending, pending_views);
-            for (size_t i = 0; i < pending; ++i)
+            for (size_t i = 0; i < pending; ++i) {
                 views[pending_slots[i]] = pending_views[i];
+                singles[pending_slots[i]] = single_posting(pending_views[i]);
+            }
             pending = 0;
         };
         uint32_t* slots = out_slots;
@@ -233,6 +243,7 @@ struct ChainSeedLookupCache {
             buckets[slot] = entry;
             keys.push_back(key);
             views.push_back(KmerPostingView{});
+            singles.push_back(0);
             ++used;
             if (slots != nullptr) slots[i] = entry;
             pending_keys[pending] = key;
@@ -260,6 +271,10 @@ struct ChainSeedLookupCache {
         return entry < used && keys[entry] == key;
     }
     const KmerPostingView& view_at(size_t entry) const { return views[entry]; }
+    PackedRefPos single_at(size_t entry) const { return singles[entry]; }
+    static PackedRefPos single_posting(const KmerPostingView& view) {
+        return view.found() && view.count == 1 ? view.positions.packed_at(0) : 0;
+    }
     uint64_t key_at(size_t entry) const { return keys[entry]; }
     size_t entry_count() const { return used; }
     size_t capacity() const { return buckets.size(); }
@@ -279,7 +294,8 @@ struct ChainSeedLookupCache {
     }
 
     size_t heap_bytes() const {
-        return capacity_bytes(buckets, stamps, keys, views, warm_slots_scratch);
+        return capacity_bytes(buckets, stamps, keys, views, singles,
+                              warm_slots_scratch);
     }
 };
 

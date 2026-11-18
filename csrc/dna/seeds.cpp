@@ -26,8 +26,9 @@ bool compatible_views(const KmerPostingView& left,
 }
 
 // lower_bound of one value over up to kSliceBatch sorted ranges in lock step:
-// each round issues one independent load per live range, so the misses
-// overlap. A null range yields 0.
+// each round halves every range of more than one element with one
+// independent load per range and no branch on what it loaded, so the misses
+// overlap; a last load settles the ranges of one. A null range yields 0.
 void batched_lower_bound_packed(const PackedRefPos* const* data,
                                 const std::uint32_t* count,
                                 std::size_t lanes,
@@ -35,35 +36,46 @@ void batched_lower_bound_packed(const PackedRefPos* const* data,
                                 std::uint32_t* out) {
   const PackedRefPos* base[RetainedSeedDensity::kSliceBatch];
   std::uint32_t length[RetainedSeedDensity::kSliceBatch];
-  PackedRefPos probe[RetainedSeedDensity::kSliceBatch] = {};
+  std::uint32_t longest = 0;
   for (std::size_t lane = 0; lane < lanes; ++lane) {
     base[lane] = data[lane];
     length[lane] = data[lane] != nullptr ? count[lane] : 0;
+    longest = std::max(longest, length[lane]);
   }
-  for (;;) {
-    bool live = false;
+  // The bound lies in [base, base + length]; a round keeps the half that
+  // holds it, of ceil(length / 2) elements.
+  for (; longest > 1; longest -= longest >> 1) {
     for (std::size_t lane = 0; lane < lanes; ++lane) {
-      if (length[lane] == 0) continue;
-      probe[lane] = base[lane][length[lane] >> 1];
-      live = true;
-    }
-    if (!live) break;
-    for (std::size_t lane = 0; lane < lanes; ++lane) {
-      if (length[lane] == 0) continue;
       const std::uint32_t half = length[lane] >> 1;
-      if (probe[lane] < value) {
-        base[lane] += half + 1;
-        length[lane] -= half + 1;
-      } else {
-        length[lane] = half;
-      }
+      if (half == 0) continue;
+      const PackedRefPos* const middle = base[lane] + half;
+      base[lane] = *middle < value ? middle : base[lane];
+      length[lane] -= half;
     }
   }
   for (std::size_t lane = 0; lane < lanes; ++lane) {
     out[lane] = data[lane] != nullptr
-                    ? static_cast<std::uint32_t>(base[lane] - data[lane])
+                    ? static_cast<std::uint32_t>(base[lane] - data[lane]) +
+                          (length[lane] == 1 && *base[lane] < value ? 1u : 0u)
                     : 0;
   }
+}
+
+// lower_bound of `value` over the sorted data[0, n), by galloping from the
+// front (probes 0, 1, 3, 7, ...) and a binary search inside the last step:
+// cheap when the bound is near the front.
+std::uint32_t gallop_lower_bound_packed(const PackedRefPos* data,
+                                        std::uint32_t n, PackedRefPos value) {
+  if (n == 0 || !(data[0] < value)) return 0;
+  std::uint64_t below = 0;  // data[below] < value
+  std::uint64_t step = 1;
+  while (below + step < n && data[below + step] < value) {
+    below += step;
+    step <<= 1;
+  }
+  const std::uint64_t end = std::min<std::uint64_t>(below + step, n);
+  return static_cast<std::uint32_t>(
+      std::lower_bound(data + below + 1, data + end, value) - data);
 }
 
 }  // namespace
@@ -114,7 +126,8 @@ bool RetainedSeedDensity::build(
     entries_.reserve(lookup_cache->entry_count() + input_seed_records);
     for (std::size_t entry = 0; entry < lookup_cache->entry_count(); ++entry)
       entries_.push_back(RetainedSeedDensityEntry{
-          posting_handle(lookup_cache->view_at(entry))});
+          posting_handle(lookup_cache->view_at(entry)),
+          lookup_cache->single_at(entry)});
   } else {
     by_key.reserve(input_seed_records + 1);
   }
@@ -159,8 +172,9 @@ bool RetainedSeedDensity::build(
         }
         entry_index = static_cast<std::uint32_t>(entries_.size());
         remember(retained.seed.key, slot, entry_index);
-        entries_.push_back(
-            RetainedSeedDensityEntry{posting_handle(retained.view)});
+        entries_.push_back(RetainedSeedDensityEntry{
+            posting_handle(retained.view),
+            ChainSeedLookupCache::single_posting(retained.view)});
       } else {
         entry_index = static_cast<std::uint32_t>(held);
         if (entries_[entry_index].retained) {
@@ -168,6 +182,8 @@ bool RetainedSeedDensity::build(
             valid = false;
         } else {
           entries_[entry_index].view = posting_handle(retained.view);
+          entries_[entry_index].single =
+              ChainSeedLookupCache::single_posting(retained.view);
         }
       }
       entries_[entry_index].retained = true;
@@ -218,9 +234,13 @@ bool RetainedSeedDensity::build(
           slot);
       if (held >= 0) return entries_[held].view.found() ? held : -1;
       KmerPostingView view;
+      PackedRefPos single = 0;
       if (slot != ChainSeedLookupCache::npos) {
         view = lookup_cache->view_at(slot);
-      } else if (!lookup_cache->find_cached_view(seed.key, view)) {
+        single = lookup_cache->single_at(slot);
+      } else if (lookup_cache->find_cached_view(seed.key, view)) {
+        single = ChainSeedLookupCache::single_posting(view);
+      } else {
         valid = false;
         return -1;
       }
@@ -232,7 +252,7 @@ bool RetainedSeedDensity::build(
       }
       const auto entry_index = static_cast<std::uint32_t>(entries_.size());
       remember(seed.key, slot, entry_index);
-      entries_.push_back(RetainedSeedDensityEntry{posting_handle(view)});
+      entries_.push_back(RetainedSeedDensityEntry{posting_handle(view), single});
       return entry_index;
     };
     // The reverse stream holds the forward stream's keys in reverse order
@@ -365,29 +385,21 @@ KmerPostingIntervalView RetainedSeedDensity::slice(
           interval_end - interval_begin, full.occurrence};
 }
 
-void RetainedSeedDensity::slice_batch(const SeedIndex& index,
-                                      const std::uint32_t* entry_indices,
-                                      std::size_t n,
-                                      int chromosome,
-                                      std::uint32_t low,
-                                      std::uint32_t high,
-                                      KmerPostingIntervalView* out) {
-  if (n == 0 || entry_indices == nullptr || out == nullptr) return;
-
-  // The per-window part of slice(), computed once.
+RetainedSeedDensity::SliceWindow RetainedSeedDensity::slice_window(
+    const SeedIndex& index, int chromosome, std::uint32_t low,
+    std::uint32_t high) const {
+  SliceWindow window;
+  window.chromosome = chromosome;
+  window.low = low;
+  window.high = high;
   const std::uint64_t* offsets = index.chrom_offsets_data();
-  const bool window_valid =
+  window.valid =
       chromosome >= 0 &&
       chromosome < static_cast<int>(index.chrom_count()) && high > low &&
       ((offsets == validated_offsets_ &&
         index.chrom_count() == validated_chrom_count_) ||
        posting_density_boundaries_valid(offsets, index.chrom_count()));
-  bool empty_window = true;
-  PackedRefPos packed_low = 0;
-  PackedRefPos packed_high = 0;
-  bool packed_low_valid = false;
-  bool packed_high_valid = false;
-  if (window_valid) {
+  if (window.valid) {
     const std::uint64_t chromosome_base =
         offsets[static_cast<std::size_t>(chromosome)];
     const std::uint64_t chromosome_end =
@@ -396,95 +408,96 @@ void RetainedSeedDensity::slice_batch(const SeedIndex& index,
         chromosome_base + static_cast<std::uint64_t>(low), chromosome_end);
     const std::uint64_t global_high = std::min(
         chromosome_base + static_cast<std::uint64_t>(high), chromosome_end);
-    empty_window = global_high <= global_low;
-    if (!empty_window) {
-      packed_low_valid = packed_ref_bound_from_global(
-          offsets, index.chrom_count(), global_low, packed_low);
-      packed_high_valid = packed_ref_bound_from_global(
-          offsets, index.chrom_count(), global_high, packed_high);
+    window.empty = global_high <= global_low;
+    if (!window.empty) {
+      window.low_packed = packed_ref_bound_from_global(
+          offsets, index.chrom_count(), global_low, window.packed_low);
+      window.high_packed = packed_ref_bound_from_global(
+          offsets, index.chrom_count(), global_high, window.packed_high);
     }
   }
+  // Under another directory the bounds pack differently, and every lane
+  // takes the scalar path.
+  window.same_directory = offsets == validated_offsets_ &&
+                          index.chrom_count() == validated_chrom_count_;
+  return window;
+}
 
-  // Each lane's view, rebuilt from its entry.
-  KmerPostingView lane_views[kSliceBatch];
-  const KmerPostingView* views[kSliceBatch];
+bool RetainedSeedDensity::slice_single(const SliceWindow& window,
+                                       std::uint32_t entry_index,
+                                       PostingHandle& out) const {
+  if (!window.valid || window.empty || !window.same_directory ||
+      !window.low_packed || !window.high_packed ||
+      entry_index >= entries_.size())
+    return false;
+  const RetainedSeedDensityEntry& entry = entries_[entry_index];
+  if (entry.view.count != 1 || !entry.view.found()) return false;
+  const std::uint32_t begin = entry.single < window.packed_low ? 1 : 0;
+  out = {&entry.single + begin,
+         begin == 0 && entry.single < window.packed_high ? 1u : 0u,
+         entry.view.occurrence};
+  return true;
+}
+
+void RetainedSeedDensity::slice_batch(const SeedIndex& index,
+                                      const SliceWindow& window,
+                                      const std::uint32_t* entry_indices,
+                                      std::size_t n,
+                                      PostingHandle* out) const {
+  if (n == 0 || entry_indices == nullptr || out == nullptr) return;
+
   const PackedRefPos* range_data[kSliceBatch];
   std::uint32_t range_count[kSliceBatch];
   std::uint32_t bound[kSliceBatch];
-  std::uint32_t interval_begin[kSliceBatch];
-  std::uint32_t interval_length[kSliceBatch];
 
   for (std::size_t block = 0; block < n; block += kSliceBatch) {
     const std::size_t lanes = std::min(kSliceBatch, n - block);
+    PostingHandle* const lane_out = out + block;
     for (std::size_t lane = 0; lane < lanes; ++lane) {
-      out[block + lane] = {};
-      views[lane] = nullptr;
+      lane_out[lane] = {};
       range_data[lane] = nullptr;
       range_count[lane] = 0;
-      interval_begin[lane] = 0;
-      interval_length[lane] = 0;
-      if (!window_valid) continue;
+      if (!window.valid) continue;
       const std::uint32_t entry_index = entry_indices[block + lane];
       if (entry_index >= entries_.size()) continue;
-      lane_views[lane] = view(entry_index);
-      const KmerPostingView& full = lane_views[lane];
+      const PostingHandle& full = entries_[entry_index].view;
       if (!full.found()) continue;
-      if (empty_window) {
-        out[block + lane] = {full.positions, 0, full.occurrence};
+      if (window.empty) {
+        lane_out[lane] = {full.postings, 0, full.occurrence};
         continue;
       }
-      if (full.positions.chromosome_offsets() != offsets ||
-          full.positions.chromosome_count() != index.chrom_count()) {
-        // A view with another chromosome directory packs the bounds
-        // differently; take the scalar path.
-        out[block + lane] = slice(index, entry_index, chromosome, low, high);
+      if (!window.same_directory) {
+        lane_out[lane] = posting_handle(slice(index, entry_index,
+                                              window.chromosome, window.low,
+                                              window.high));
         continue;
       }
-      views[lane] = &full;
-      if (packed_low_valid) {
-        range_data[lane] = full.positions.data();
-        range_count[lane] = full.positions.size();
+      if (window.low_packed) {
+        range_data[lane] = full.postings;
+        range_count[lane] = full.count;
+        lane_out[lane].occurrence = full.occurrence;
       } else {
         // An unpackable bound makes lower_bound return the span size.
-        interval_begin[lane] = full.positions.size();
+        lane_out[lane] = {full.postings + full.count, 0, full.occurrence};
       }
     }
+    if (!window.low_packed) continue;
 
-    if (packed_low_valid) {
-      batched_lower_bound_packed(range_data, range_count, lanes, packed_low,
-                                 bound);
-      for (std::size_t lane = 0; lane < lanes; ++lane)
-        if (views[lane] != nullptr) interval_begin[lane] = bound[lane];
-    }
+    batched_lower_bound_packed(range_data, range_count, lanes,
+                               window.packed_low, bound);
 
+    // The window is short against the genome, so its end lies at or just
+    // past its begin, whose posting the first bound read.
     for (std::size_t lane = 0; lane < lanes; ++lane) {
-      range_data[lane] = nullptr;
-      range_count[lane] = 0;
-      if (views[lane] == nullptr) continue;
-      const RefPosSpan tail = views[lane]->positions.subspan(
-          interval_begin[lane], views[lane]->count - interval_begin[lane]);
-      if (packed_high_valid) {
-        range_data[lane] = tail.data();
-        range_count[lane] = tail.size();
-      } else {
-        // Same fallback over the trailing subspan.
-        interval_length[lane] = tail.size();
-      }
-    }
-
-    if (packed_high_valid) {
-      batched_lower_bound_packed(range_data, range_count, lanes, packed_high,
-                                 bound);
-      for (std::size_t lane = 0; lane < lanes; ++lane)
-        if (views[lane] != nullptr) interval_length[lane] = bound[lane];
-    }
-
-    for (std::size_t lane = 0; lane < lanes; ++lane) {
-      if (views[lane] == nullptr) continue;
-      out[block + lane] = {
-          views[lane]->positions.subspan(interval_begin[lane],
-                                         interval_length[lane]),
-          interval_length[lane], views[lane]->occurrence};
+      if (range_data[lane] == nullptr) continue;
+      const PackedRefPos* const begin = range_data[lane] + bound[lane];
+      const std::uint32_t rest = range_count[lane] - bound[lane];
+      lane_out[lane].postings = begin;
+      // Same fallback over the trailing subspan.
+      lane_out[lane].count =
+          window.high_packed
+              ? gallop_lower_bound_packed(begin, rest, window.packed_high)
+              : rest;
     }
   }
 }
