@@ -120,7 +120,7 @@ public:
                            bool packed_reference = false);
   // Loads a prebuilt .faix; k and s are taken from the index (LongReadEngine::from_index).
   // `n_threads` <= 0 uses the default. With `reference_bases_needed` false (DNA map-only
-  // PAF) the reference is not unpacked. `image` selects one part of a multi-part index.
+  // PAF) the reference is not loaded. `image` selects one part of a multi-part index.
   // `packed_reference` keeps the needed bases packed (LongReadEngine::from_index).
   static LongReadAligner
   from_index(std::unordered_map<std::string, std::string> genome,

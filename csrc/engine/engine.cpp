@@ -45,6 +45,7 @@ LongReadEngine::LongReadEngine(std::unordered_map<std::string, std::string> geno
   cfg.build_threads = build_threads > 0
                           ? build_threads
                           : ::fa::cpu::threading::default_thread_count();
+  index_threads_ = cfg.build_threads;
   ::fa::cpu::FaixBuildStatus build_status;
   index_ = std::make_shared<SeedIndex>(
       build_seed_index(chr_encs_, cfg, &build_status));
@@ -77,8 +78,10 @@ LongReadEngine::from_index(std::unordered_map<std::string, std::string> genome,
   // s is set from the index below.
   obj->apply_chain_seed_constructor_config(0, chain_syncmer_downsample);
   FaixLoadStatus load_status;
-  obj->index_ = std::make_shared<SeedIndex>(load_seed_index(
-      index_path, &load_status, n_threads, image_offset, image_bytes));
+  obj->index_threads_ = n_threads;
+  obj->index_ = std::make_shared<SeedIndex>(
+      load_seed_index(index_path, &load_status, n_threads, image_offset,
+                      image_bytes, reference_bases_needed));
   if (obj->index_->empty()) {
     throw std::runtime_error("cannot load index " + index_path + ": " +
                              faix_load_error_message(load_status));
@@ -122,6 +125,7 @@ LongReadEngine::from_shared_index(std::shared_ptr<SeedIndex> index,
   }
   auto obj = std::make_unique<LongReadEngine>();
   obj->index_ = std::move(index);
+  obj->index_threads_ = config.common.num_threads;
   if (!(obj->index_->has_reference_payload() &&
         obj->index_->reference_chromosomes_u8(
             obj->chr_encs_, config.common.num_threads))) {
@@ -200,7 +204,7 @@ void LongReadEngine::resolve_index_occ_cap_into(
   if (!index_ || index_->empty()) return;
   if (!occ_dist_ || occ_dist_source_ != index_.get()) {
     occ_dist_ = std::make_shared<const ::fa::cpu::FaixOccDistribution>(
-        ::fa::cpu::faix_occ_distribution(*index_));
+        ::fa::cpu::faix_occ_distribution(*index_, index_threads_));
     occ_dist_source_ = index_.get();
   }
   const auto& previous = mapping.long_occ_index_resolution;

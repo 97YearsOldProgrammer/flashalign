@@ -212,10 +212,13 @@ public:
         int n_threads = 0);
 
     // load() over the `image_bytes` starting at byte `image_offset` of `path`, one part of a
-    // multi-part container. Both 0 means the whole file.
+    // multi-part container. Both 0 means the whole file. With `read_reference` false the
+    // reference section is not read: has_reference_payload() is false, as for an index built
+    // with --idx-no-seq, while the header keeps the file's flags.
     static FaixIndex load_image(
         const std::string& path, uint64_t image_offset, uint64_t image_bytes,
-        FaixLoadStatus* status = nullptr, int n_threads = 0);
+        FaixLoadStatus* status = nullptr, int n_threads = 0,
+        bool read_reference = true);
 
     // `header` carries the build's k, s, shard and rank-block bits, counts and preset; the
     // names and the reference are attached afterwards.
@@ -284,8 +287,9 @@ struct FaixOccDistribution {
   std::uint64_t total_postings = 0;
 };
 
-// One streaming pass over the compact record table (the shards laid end to end).
-FaixOccDistribution faix_occ_distribution(const FaixIndex& index);
+// One pass over the compact record table (the shards laid end to end) on `n_threads`
+// (<= 0 takes the default); the result does not depend on the thread count.
+FaixOccDistribution faix_occ_distribution(const FaixIndex& index, int n_threads = 0);
 
 // minimap2's mm_idx_cal_max_occ(mi, f), evaluated from the cumulative counts. With the n
 // distinct occurrences sorted ascending, minimap2 returns occ[(size_t)((1 - f) * n)] + 1:
@@ -891,11 +895,13 @@ using IndexView = SeedIndex;
 
 // `image_offset` / `image_bytes` name one part of a multi-part container
 // (FaixPartEntry); both 0 is the whole file, i.e. a single-part .faix.
+// `read_reference` as FaixIndex::load_image.
 inline SeedIndex load_seed_index(
     const std::string& path, FaixLoadStatus* status = nullptr,
-    int n_threads = 0, uint64_t image_offset = 0, uint64_t image_bytes = 0) {
+    int n_threads = 0, uint64_t image_offset = 0, uint64_t image_bytes = 0,
+    bool read_reference = true) {
     return SeedIndex::load_image(path, image_offset, image_bytes, status,
-                                 n_threads);
+                                 n_threads, read_reference);
 }
 
 // Builds an index in memory. `status`, when supplied, names the refusal behind an empty
