@@ -36,6 +36,10 @@ struct ChainWindowPeakScratch {
     std::vector<uint32_t> occurrence_values;
     // Under LongReadSeedContext::vote_keep_ranked: `ranked` before the drain.
     std::vector<ChainWindowRankedBucket> ranked_all;
+    // The vote seeds' selection: each seed's view, when the caller captured none.
+    std::vector<KmerPostingView> probed_views;
+    // The rank's neighbour filter, a bit per bucket.
+    std::vector<uint64_t> rank_filter;
 
     void clear_for_window() {
         seeds.clear();
@@ -73,7 +77,9 @@ struct ChainWindowPeakScratch {
         release_vec_if_excessive(ref_starts, seed_retain * 4);
         release_vec_if_excessive(occurrence_values, seed_retain);
         release_vec_if_excessive(ranked_all, seed_retain * 2);
+        release_vec_if_excessive(probed_views, seed_retain);
         const size_t bucket_retain = std::max<size_t>(2048, seed_retain * 2);
+        release_vec_if_excessive(rank_filter, bucket_retain);
         if (buckets.bucket_count() > bucket_retain * 4) {
             ChainWindowVoteTable().swap(buckets);
         }
@@ -82,7 +88,8 @@ struct ChainWindowPeakScratch {
     size_t heap_bytes() const {
         return capacity_bytes(seeds, extracted_seeds, seed_views, seed_used,
                               retained_seeds, pending_exact_refine_views,
-                              ranked, ref_starts, occurrence_values) +
+                              ranked, ref_starts, occurrence_values,
+                              probed_views, rank_filter) +
                seed_bundle.heap_bytes() + buckets.heap_bytes();
     }
 };
