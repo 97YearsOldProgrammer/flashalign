@@ -484,51 +484,90 @@ inline bool occupancy_bit(const uint8_t* bits, uint64_t slot) {
             static_cast<uint8_t>(1u << (slot & 7ULL))) != 0;
 }
 
-inline uint64_t popcount_bit_range(
+// The rank's helpers are inlined into every caller, so that a caller compiled for the popcount
+// instruction (faix.cpp's batch) compiles them for it.
+#if defined(__GNUC__) || defined(__clang__)
+#define FA_FAIX_RANK_INLINE inline __attribute__((always_inline))
+#else
+#define FA_FAIX_RANK_INLINE inline
+#endif
+
+// The set bits of a word. Baseline x86-64 has no instruction for it and the builtin is a
+// library call there, so the word is counted in place, unless kInstruction says the caller
+// is compiled for the instruction (faix.cpp chooses that batch at run time).
+template <bool kInstruction = false>
+FA_FAIX_RANK_INLINE uint64_t popcount_word(uint64_t x) {
+#if defined(__POPCNT__) || defined(__aarch64__)
+    return static_cast<uint64_t>(__builtin_popcountll(x));
+#else
+    if constexpr (kInstruction)
+        return static_cast<uint64_t>(__builtin_popcountll(x));
+    x -= (x >> 1) & 0x5555555555555555ULL;
+    x = (x & 0x3333333333333333ULL) + ((x >> 2) & 0x3333333333333333ULL);
+    x = (x + (x >> 4)) & 0x0f0f0f0f0f0f0f0fULL;
+    return (x * 0x0101010101010101ULL) >> 56;
+#endif
+}
+
+// Whether popcount_word<kInstruction> is one instruction.
+template <bool kInstruction>
+constexpr bool popcount_word_is_instruction() {
+#if defined(__POPCNT__) || defined(__aarch64__)
+    return true;
+#else
+    return kInstruction;
+#endif
+}
+
+// The set bits in [begin_bit, end_bit) of a bitmap stored in whole 64-bit words
+// (occupancy_storage_bytes): a word per load, the first and the last masked.
+template <bool kInstruction = false>
+FA_FAIX_RANK_INLINE uint64_t popcount_bit_range(
     const uint8_t* bits,
     uint64_t begin_bit,
     uint64_t end_bit
 ) {
     if (!bits || end_bit <= begin_bit) return 0;
-    uint64_t count = 0;
-    uint64_t byte_idx = begin_bit >> 3;
-    uint32_t bit_idx = static_cast<uint32_t>(begin_bit & 7ULL);
-    uint64_t remaining = end_bit - begin_bit;
-
-    if (bit_idx != 0) {
-        const uint32_t take =
-            static_cast<uint32_t>(std::min<uint64_t>(8ULL - bit_idx, remaining));
-        const uint8_t mask = static_cast<uint8_t>(
-            ((1u << take) - 1u) << bit_idx);
-        count += static_cast<uint64_t>(
-            __builtin_popcount(static_cast<unsigned>(bits[byte_idx] & mask)));
-        ++byte_idx;
-        remaining -= take;
-    }
-
-    // Eight bytes per popcount; the memcpy is an unaligned-safe load.
-    while (remaining >= 64) {
+    const auto word_at = [bits](uint64_t index) {
         uint64_t word;
-        std::memcpy(&word, bits + byte_idx, sizeof(word));
-        count += static_cast<uint64_t>(__builtin_popcountll(word));
-        byte_idx += 8;
-        remaining -= 64;
+        std::memcpy(&word, bits + 8 * index, sizeof(word));
+        return word;
+    };
+    const uint64_t last = (end_bit - 1) >> 6;
+    uint64_t keep = ~0ULL << (begin_bit & 63ULL);
+    uint64_t count = 0;
+    for (uint64_t index = begin_bit >> 6; index < last; ++index) {
+        count += popcount_word<kInstruction>(word_at(index) & keep);
+        keep = ~0ULL;
     }
+    keep &= ~0ULL >> (63ULL - ((end_bit - 1) & 63ULL));
+    return count + popcount_word<kInstruction>(word_at(last) & keep);
+}
 
-    while (remaining >= 8) {
-        count += static_cast<uint64_t>(
-            __builtin_popcount(static_cast<unsigned>(bits[byte_idx])));
-        ++byte_idx;
-        remaining -= 8;
-    }
-
-    if (remaining > 0) {
-        const uint8_t mask =
-            static_cast<uint8_t>((1u << static_cast<uint32_t>(remaining)) - 1u);
-        count += static_cast<uint64_t>(
-            __builtin_popcount(static_cast<unsigned>(bits[byte_idx] & mask)));
-    }
-    return count;
+// popcount_bit_range for a range that starts on a word and spans fewer than 512 bits, as from
+// the start of a rank block of 64 to 512 slots, with no branch: seven words at indices
+// min(j, last) are counted whole, the 7 - last repeats of word `last` (end_bit's) taken off
+// again, and word `last` added below end_bit. No word past end_bit's is read.
+template <bool kInstruction = false>
+FA_FAIX_RANK_INLINE uint64_t popcount_block_prefix(
+    const uint8_t* bits,
+    uint64_t begin_bit,
+    uint64_t end_bit
+) {
+    const uint8_t* const first = bits + (begin_bit >> 3);
+    const uint64_t span = end_bit - begin_bit;
+    const uint64_t last = span >> 6;
+    const auto word_at = [first](uint64_t index) {
+        uint64_t word;
+        std::memcpy(&word, first + 8 * index, sizeof(word));
+        return word;
+    };
+    uint64_t count = 0;
+    for (uint64_t j = 0; j < 7; ++j)
+        count += popcount_word<kInstruction>(word_at(j < last ? j : last));
+    const uint64_t end_word = word_at(last);
+    return count - (7 - last) * popcount_word<kInstruction>(end_word) +
+        popcount_word<kInstruction>(end_word & ((1ULL << (span & 63ULL)) - 1ULL));
 }
 
 // Non-owning view of one directory: the pointers alias owned vectors (built index) or
@@ -551,50 +590,67 @@ struct FaixDirectory {
     uint64_t compact_posting_count = 0;
 };
 
+// The rank of `slot` in a shard of `occupancy` and `rank` samples when its block has a sample,
+// as for every slot of a non-empty shard: the sample + the occupied slots from the block start.
+template <bool kInstruction = false>
+FA_FAIX_RANK_INLINE uint64_t shard_rank_before(const uint8_t* occupancy, const uint64_t* rank,
+                                               uint32_t block_bits, uint64_t slot) {
+    const uint64_t block = slot >> block_bits;
+    const uint64_t block_begin = block << block_bits;
+    if (popcount_word_is_instruction<kInstruction>() && block_bits >= 6 && block_bits <= 9)
+        return rank[block] + popcount_block_prefix<kInstruction>(occupancy, block_begin, slot);
+    return rank[block] + popcount_bit_range<kInstruction>(occupancy, block_begin, slot);
+}
+
 // Dense record index of the first occupied slot < `slot`: rank-sample at the
 // slot's block + a popcount of the occupancy bitmap from the block start.
-inline uint64_t directory_rank_before(const FaixDirectory& d, uint64_t slot) {
+template <bool kInstruction = false>
+FA_FAIX_RANK_INLINE uint64_t directory_rank_before(const FaixDirectory& d, uint64_t slot) {
     if (!d.rank_index || d.rank_entries == 0) return 0;
     const uint64_t block = slot >> d.rank_block_bits;
     if (block + 1 >= d.rank_entries) return d.unique_key_count;
-    const uint64_t block_begin = block << d.rank_block_bits;
-    return d.rank_index[block] +
-        popcount_bit_range(d.occupancy_bits, block_begin, slot);
+    return shard_rank_before<kInstruction>(d.occupancy_bits, d.rank_index,
+                                           d.rank_block_bits, slot);
 }
 
-// Decode one dense record into a posting view via the tag word's multi bit:
-// inline singleton (packed position in payloads[record]), or a direct slice of
-// the shard posting array (payload low/high uint32 words are begin/count).
-inline KmerPostingView directory_bucket_view(
-    const FaixDirectory& d,
-    uint64_t record
-) {
-    if ((d.tags[static_cast<size_t>(record)] & kFaixTagMultiBit) == 0) {
+// Decode one dense record into a posting view: with `multi` 0 an inline singleton (the packed
+// position at `payload`), else a direct slice of the shard's `postings` (the payload's low and
+// high uint32 words are begin and count).
+inline KmerPostingView record_view(const uint64_t* payload, bool multi,
+                                   const PackedRefPos* postings, uint64_t posting_count,
+                                   const uint64_t* chromosome_offsets,
+                                   uint64_t chromosome_count) {
+    if (!multi) {
         // singleton: the payload is the packed (contig, local, z) coordinate
-        if (packed_ref_contig(d.payloads[static_cast<size_t>(record)]) >=
-            d.chromosome_count) {
+        if (packed_ref_contig(*payload) >= chromosome_count) {
           return {};
         }
-        return {RefPosSpan(&d.payloads[static_cast<size_t>(record)], 1,
-                           d.chromosome_offsets, d.chromosome_count),
-                1, 1};
+        return {RefPosSpan(payload, 1, chromosome_offsets, chromosome_count), 1, 1};
     }
-    const uint64_t payload = d.payloads[static_cast<size_t>(record)];
-    const uint64_t begin = static_cast<uint32_t>(payload);
-    const uint32_t count = static_cast<uint32_t>(payload >> 32);
-    if (!d.postings || count < 2 || begin > d.compact_posting_count ||
-        static_cast<uint64_t>(count) > d.compact_posting_count - begin) {
+    const uint64_t begin = static_cast<uint32_t>(*payload);
+    const uint32_t count = static_cast<uint32_t>(*payload >> 32);
+    if (!postings || count < 2 || begin > posting_count ||
+        static_cast<uint64_t>(count) > posting_count - begin) {
       return {};
     }
     // Postings are sorted, so the last carries the largest contig id: a constant-time
     // corruption guard.
-    if (packed_ref_contig(d.postings[begin + count - 1]) >=
-        d.chromosome_count) {
+    if (packed_ref_contig(postings[begin + count - 1]) >= chromosome_count) {
       return {};
     }
-    return {RefPosSpan(d.postings + begin, count, d.chromosome_offsets,
-                       d.chromosome_count),
+    return {RefPosSpan(postings + begin, count, chromosome_offsets, chromosome_count),
             count, count};
+}
+
+// record_view of `record` in directory `d`, by its tag word's multi bit.
+inline KmerPostingView directory_bucket_view(
+    const FaixDirectory& d,
+    uint64_t record
+) {
+    return record_view(&d.payloads[static_cast<size_t>(record)],
+                       (d.tags[static_cast<size_t>(record)] & kFaixTagMultiBit) != 0,
+                       d.postings, d.compact_posting_count, d.chromosome_offsets,
+                       d.chromosome_count);
 }
 
 // Probes one shard's open-addressed table for `tag` through the occupancy bitmap and rank
@@ -701,29 +757,30 @@ inline KmerPostingView faix_sharded_lookup(
 // each stage's loads for several keys before any is consumed. Every key gets the same view
 // as the scalar path.
 
-// Keys per pipeline stage step (see faix_sharded_lookup_batch): a lane's
-// prefetches are consumed three steps later, and four lanes are in flight.
-static constexpr size_t kFaixPipelineLane = 8;
+// Keys per pipeline stage step (see faix_sharded_lookup_batch): the prefetches a stage
+// issues for a lane are consumed by the next stage one step later; four lanes are in flight.
+static constexpr size_t kFaixPipelineLane = 16;
 
 namespace detail {
 
-// One in-flight scalar probe, frozen between stages. `probe` is the index of
-// the scalar loop iteration currently being executed, so the loop bound
-// `probes < d.bucket_count` can be reproduced exactly across the stage split.
+// One in-flight scalar probe, frozen between stages: the key's shard entry and the probe's
+// place in it; a stage finds the shard's slices from the entry. `probe` is the index of the
+// scalar loop iteration being executed, so the loop bound `probes < bucket_count` is
+// reproduced exactly across the stage split.
 struct FaixLookupProbeState {
-    FaixDirectory d;
-    uint64_t mask = 0;
+    const FaixShardEntry* shard = nullptr;
     uint64_t slot = 0;
     uint64_t record = 0;
     uint64_t probe = 0;
     uint32_t tag = 0;
     bool have_record = false;
-    bool live = false;     // still probing: stages 1/2 must run it
-    bool matched = false;  // stage 2 found the tag; stage 3 decodes the record
+    bool live = false;    // still probing: stages 1/2 must run it
+    uint8_t matched = 0;  // stage 2 found the tag: 1 + its multi bit; stage 3 decodes the record
 };
 
 }  // namespace detail
 
+template <bool kInstruction = false>
 inline void faix_sharded_lookup_batch(
     const uint32_t* tags, const uint64_t* payloads,
     const PackedRefPos* postings, const uint64_t* chromosome_offsets,
@@ -733,123 +790,20 @@ inline void faix_sharded_lookup_batch(
     const uint64_t* keys, size_t key_count, KmerPostingView* out) {
   if (!keys || !out || key_count == 0)
     return;
-  for (size_t i = 0; i < key_count; ++i)
-    out[i] = KmerPostingView{};
-  // Same refusal as the scalar's `if (!shard_dir || !tags)`.
-  if (!shard_dir || !tags)
+  // The scalar's `if (!shard_dir || !tags)`, and directory_lookup()'s first line once for all
+  // shards: a shard's slices are offsets into these arrays.
+  if (!shard_dir || !tags || !occupancy_bits || !rank_index) {
+    for (size_t i = 0; i < key_count; ++i)
+      out[i] = KmerPostingView{};
     return;
+  }
 
   // The scalar probe split at its three dependent loads into four stages. Keys move through
   // them in lanes of kFaixPipelineLane: each step runs stage 0 on lane t, stage 1 on t-1,
-  // stage 2 on t-2 and stage 3 on t-3, so other lanes' work overlaps each prefetch.
-  auto stage0 = [&](detail::FaixLookupProbeState* st, size_t base, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-      detail::FaixLookupProbeState& s = st[i];
-      s.live = false;
-      s.matched = false;
-      const uint64_t mixed = detail::shard_mix_2k(keys[base + i], twok);
-      const FaixShardEntry& e =
-          shard_dir[static_cast<size_t>(mixed & shard_mask)];
-      if (e.bucket_count == 0)
-        continue;
-      s.d = faix_shard_directory(tags, payloads, postings, chromosome_offsets,
-                                 chromosome_count, occupancy_bits, rank_index,
-                                 e, rank_block_bits);
-      // Mirrors directory_lookup()'s first line.
-      if (!s.d.occupancy_bits || !s.d.rank_index || !s.d.tags)
-        continue;
-      s.tag = static_cast<uint32_t>(mixed >> shard_bits);
-      s.mask = s.d.bucket_count - 1;
-      s.slot = detail::splitmix64(s.tag) & s.mask;
-      s.record = 0;
-      s.probe = 0;
-      s.have_record = false;
-      s.live = true;
-      const uint64_t block = s.slot >> s.d.rank_block_bits;
-      __builtin_prefetch(&s.d.occupancy_bits[s.slot >> 3], 0, 3);
-      __builtin_prefetch(
-          &s.d.occupancy_bits[(block << s.d.rank_block_bits) >> 3], 0, 3);
-      if (s.d.rank_entries != 0 && block + 1 < s.d.rank_entries)
-        __builtin_prefetch(&s.d.rank_index[block], 0, 3);
-    }
-  };
-  auto stage1 = [&](detail::FaixLookupProbeState* st, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-      detail::FaixLookupProbeState& s = st[i];
-      if (!s.live)
-        continue;
-      if (!occupancy_bit(s.d.occupancy_bits, s.slot)) {
-        s.live = false;
-        continue;
-      }
-      s.record = directory_rank_before(s.d, s.slot);
-      s.have_record = true;
-      if (s.record >= s.d.unique_key_count) {
-        s.live = false;
-        continue;
-      }
-      __builtin_prefetch(&s.d.tags[static_cast<size_t>(s.record)], 0, 3);
-      __builtin_prefetch(&s.d.payloads[static_cast<size_t>(s.record)], 0, 3);
-    }
-  };
-  auto stage2 = [&](detail::FaixLookupProbeState* st, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-      detail::FaixLookupProbeState& s = st[i];
-      if (!s.live)
-        continue;
-      s.live = false;
-      for (;;) {
-        const uint32_t tagword = s.d.tags[static_cast<size_t>(s.record)];
-        if ((tagword >> 1) == s.tag) {  // high 31 bits = key tag
-          s.matched = true;
-          if ((tagword & kFaixTagMultiBit) != 0) {
-            // Multi-hit: prefetch the posting tail directory_bucket_view reads in
-            // stage 3, within the bounds it checks.
-            const uint64_t payload =
-                s.d.payloads[static_cast<size_t>(s.record)];
-            const uint64_t begin = static_cast<uint32_t>(payload);
-            const uint64_t count = static_cast<uint32_t>(payload >> 32);
-            if (s.d.postings && count >= 2 &&
-                begin <= s.d.compact_posting_count &&
-                count <= s.d.compact_posting_count - begin) {
-              __builtin_prefetch(&s.d.postings[begin + count - 1], 0, 3);
-            }
-          }
-          break;
-        }
-        const uint64_t next = (s.slot + 1) & s.mask;
-        if (next < s.slot) {  // wrapped to slot 0: rank discontinuity
-          s.have_record = false;
-        } else {
-          ++s.record;
-        }
-        s.slot = next;
-        ++s.probe;
-        if (s.probe >= s.d.bucket_count) {  // scalar loop bound exhausted
-          break;
-        }
-        if (!occupancy_bit(s.d.occupancy_bits, s.slot)) {
-          break;
-        }
-        if (!s.have_record) {
-          s.record = directory_rank_before(s.d, s.slot);
-          s.have_record = true;
-        }
-        if (s.record >= s.d.unique_key_count) {
-          break;
-        }
-      }
-    }
-  };
-  auto stage3 = [&](detail::FaixLookupProbeState* st, size_t base, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-      detail::FaixLookupProbeState& s = st[i];
-      if (!s.matched)
-        continue;
-      out[base + i] = directory_bucket_view(s.d, s.record);
-    }
-  };
-
+  // stage 2 on t-2 and stage 3 on t-3, so other lanes' work overlaps each prefetch. The
+  // stages are blocks of the step, not functions, so that a caller compiled for another
+  // target (faix.cpp's popcount batch) compiles all of them for it. Stage 3 writes every
+  // key's view.
   detail::FaixLookupProbeState st[4][kFaixPipelineLane];
   const size_t lanes = (key_count + kFaixPipelineLane - 1) / kFaixPipelineLane;
   const auto lane_base = [](size_t lane) { return lane * kFaixPipelineLane; };
@@ -857,14 +811,126 @@ inline void faix_sharded_lookup_batch(
     return std::min<size_t>(kFaixPipelineLane, key_count - lane_base(lane));
   };
   for (size_t t = 0; t < lanes + 3; ++t) {
-    if (t < lanes)
-      stage0(st[t & 3], lane_base(t), lane_size(t));
-    if (t >= 1 && t - 1 < lanes)
-      stage1(st[(t - 1) & 3], lane_size(t - 1));
-    if (t >= 2 && t - 2 < lanes)
-      stage2(st[(t - 2) & 3], lane_size(t - 2));
-    if (t >= 3 && t - 3 < lanes)
-      stage3(st[(t - 3) & 3], lane_base(t - 3), lane_size(t - 3));
+    if (t < lanes) {  // stage 0
+      detail::FaixLookupProbeState* const lane = st[t & 3];
+      const size_t base = lane_base(t);
+      const size_t n = lane_size(t);
+      for (size_t i = 0; i < n; ++i) {
+        detail::FaixLookupProbeState& s = lane[i];
+        const uint64_t mixed = detail::shard_mix_2k(keys[base + i], twok);
+        const FaixShardEntry& e =
+            shard_dir[static_cast<size_t>(mixed & shard_mask)];
+        s.shard = &e;
+        s.live = e.bucket_count != 0;
+        s.matched = 0;
+        if (!s.live)
+          continue;
+        s.tag = static_cast<uint32_t>(mixed >> shard_bits);
+        s.slot = detail::splitmix64(s.tag) & (e.bucket_count - 1);
+        s.probe = 0;
+        s.have_record = false;
+        const uint8_t* const occupancy = occupancy_bits + e.occ_off;
+        const uint64_t block = s.slot >> rank_block_bits;
+        __builtin_prefetch(&occupancy[s.slot >> 3], 0, 3);
+        __builtin_prefetch(&occupancy[(block << rank_block_bits) >> 3], 0, 3);
+        __builtin_prefetch(&rank_index[e.rank_off + block], 0, 3);
+      }
+    }
+    if (t >= 1 && t - 1 < lanes) {  // stage 1
+      detail::FaixLookupProbeState* const lane = st[(t - 1) & 3];
+      const size_t n = lane_size(t - 1);
+      for (size_t i = 0; i < n; ++i) {
+        detail::FaixLookupProbeState& s = lane[i];
+        if (!s.live)
+          continue;
+        const FaixShardEntry& e = *s.shard;
+        const uint8_t* const occupancy = occupancy_bits + e.occ_off;
+        if (!occupancy_bit(occupancy, s.slot)) {
+          s.live = false;
+          continue;
+        }
+        // directory_rank_before: a slot of a non-empty shard has its block's sample.
+        s.record = shard_rank_before<kInstruction>(occupancy, rank_index + e.rank_off,
+                                                   rank_block_bits, s.slot);
+        s.have_record = true;
+        if (s.record >= e.unique_keys) {
+          s.live = false;
+          continue;
+        }
+        __builtin_prefetch(&tags[e.bucket_off + s.record], 0, 3);
+        __builtin_prefetch(&payloads[e.bucket_off + s.record], 0, 3);
+      }
+    }
+    if (t >= 2 && t - 2 < lanes) {  // stage 2
+      detail::FaixLookupProbeState* const lane = st[(t - 2) & 3];
+      const size_t n = lane_size(t - 2);
+      for (size_t i = 0; i < n; ++i) {
+        detail::FaixLookupProbeState& s = lane[i];
+        if (!s.live)
+          continue;
+        s.live = false;
+        const FaixShardEntry& e = *s.shard;
+        const uint32_t* const shard_tags = tags + e.bucket_off;
+        const uint8_t* const occupancy = occupancy_bits + e.occ_off;
+        const uint64_t mask = e.bucket_count - 1;
+        for (;;) {
+          const uint32_t tagword = shard_tags[s.record];
+          if ((tagword >> 1) == s.tag) {  // high 31 bits = key tag
+            s.matched = static_cast<uint8_t>(1 + (tagword & kFaixTagMultiBit));
+            if ((tagword & kFaixTagMultiBit) != 0) {
+              // Multi-hit: prefetch the posting tail record_view reads in stage 3,
+              // within the bounds it checks.
+              const uint64_t payload = payloads[e.bucket_off + s.record];
+              const uint64_t begin = static_cast<uint32_t>(payload);
+              const uint64_t count = static_cast<uint32_t>(payload >> 32);
+              if (postings && count >= 2 && begin <= e.posting_count &&
+                  count <= e.posting_count - begin) {
+                __builtin_prefetch(&postings[e.post_off + begin + count - 1], 0, 3);
+              }
+            }
+            break;
+          }
+          const uint64_t next = (s.slot + 1) & mask;
+          if (next < s.slot) {  // wrapped to slot 0: rank discontinuity
+            s.have_record = false;
+          } else {
+            ++s.record;
+          }
+          s.slot = next;
+          ++s.probe;
+          if (s.probe >= e.bucket_count) {  // scalar loop bound exhausted
+            break;
+          }
+          if (!occupancy_bit(occupancy, s.slot)) {
+            break;
+          }
+          if (!s.have_record) {
+            s.record = shard_rank_before<kInstruction>(occupancy, rank_index + e.rank_off,
+                                                       rank_block_bits, s.slot);
+            s.have_record = true;
+          }
+          if (s.record >= e.unique_keys) {
+            break;
+          }
+        }
+      }
+    }
+    if (t >= 3 && t - 3 < lanes) {  // stage 3
+      const detail::FaixLookupProbeState* const lane = st[(t - 3) & 3];
+      const size_t base = lane_base(t - 3);
+      const size_t n = lane_size(t - 3);
+      for (size_t i = 0; i < n; ++i) {
+        const detail::FaixLookupProbeState& s = lane[i];
+        KmerPostingView view{};
+        if (s.matched != 0) {
+          const FaixShardEntry& e = *s.shard;
+          view = record_view(payloads + e.bucket_off + s.record, s.matched == 2,
+                             postings ? postings + e.post_off : nullptr, e.posting_count,
+                             chromosome_offsets, chromosome_count);
+        }
+        out[base + i] = view;
+      }
+    }
   }
 }
 }}  // namespace fa::cpu

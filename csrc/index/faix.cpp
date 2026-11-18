@@ -991,6 +991,38 @@ bool FaixIndex::set_packed_reference_payload(
     return true;
 }
 
+#if defined(__x86_64__) && !defined(__POPCNT__) && (defined(__GNUC__) || defined(__clang__))
+#define FA_FAIX_POPCNT_DISPATCH 1
+#else
+#define FA_FAIX_POPCNT_DISPATCH 0
+#endif
+
+namespace {
+
+#if FA_FAIX_POPCNT_DISPATCH
+// The batch with the popcount instruction, for a CPU that has one. flatten inlines the batch
+// here and its stages are blocks of it, so no count is left to code compiled for the baseline.
+__attribute__((target("popcnt"), flatten)) void faix_lookup_batch_popcnt(
+    const uint32_t* tags, const uint64_t* payloads, const PackedRefPos* postings,
+    const uint64_t* chromosome_offsets, uint64_t chromosome_count,
+    const uint8_t* occupancy_bits, const uint64_t* rank_index,
+    const FaixShardEntry* shard_dir, uint64_t shard_mask, int shard_bits, int twok,
+    uint32_t rank_block_bits, const uint64_t* keys, size_t key_count,
+    KmerPostingView* out) {
+    faix_sharded_lookup_batch<true>(
+        tags, payloads, postings, chromosome_offsets, chromosome_count, occupancy_bits,
+        rank_index, shard_dir, shard_mask, shard_bits, twok, rank_block_bits, keys,
+        key_count, out);
+}
+
+bool cpu_has_popcnt() {
+    static const bool ok = __builtin_cpu_supports("popcnt") != 0;
+    return ok;
+}
+#endif
+
+}  // namespace
+
 void FaixIndex::lookup_batch(
     const uint64_t* keys,
     size_t n,
@@ -1001,7 +1033,11 @@ void FaixIndex::lookup_batch(
         for (size_t i = 0; i < n; ++i) out[i] = KmerPostingView{};
         return;
     }
-    faix_sharded_lookup_batch(
+    auto* batch = &faix_sharded_lookup_batch<false>;
+#if FA_FAIX_POPCNT_DISPATCH
+    if (cpu_has_popcnt()) batch = &faix_lookup_batch_popcnt;
+#endif
+    batch(
         tags_, payloads_, postings_, chr_offsets_, header_.contig_count,
         occupancy_bits_, rank_index_, shard_dir_, shard_mask_,
         static_cast<int>(header_.shard_bits), 2 * static_cast<int>(header_.k),
