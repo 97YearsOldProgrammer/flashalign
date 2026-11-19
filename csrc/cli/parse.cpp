@@ -803,26 +803,55 @@ TokenStream expand_short_bundles(
     return out;
 }
 
-// Consumes the value after `opt`. A registered spelling or "--" in that
-// position means the value is missing (`-t --quiet`); anything else, such as
-// a negative number or "-", is a value. An attached value is always accepted.
+// A long option and the value attached to it with '=', as in minimap2
+// (--end-bonus=100); the token itself and no value otherwise.
+struct LongToken {
+    std::string spelling;
+    std::optional<std::string> attached;
+};
+
+LongToken split_long_token(const std::string& arg) {
+    const std::size_t eq = arg.find('=');
+    if (arg.size() < 3 || arg.compare(0, 2, "--") != 0 ||
+        eq == std::string::npos)
+        return {arg, std::nullopt};
+    return {arg.substr(0, eq), arg.substr(eq + 1)};
+}
+
+// Consumes the value after `opt`. A registered spelling, with or without an
+// attached value, or "--" in that position means the value is missing
+// (`-t --quiet`); anything else, such as a negative number or "-", is a value.
+// A value glued to its letter is always accepted.
 std::string require_value(
     std::size_t& i, const TokenStream& ts, const std::string& opt,
     unsigned mode) {
     if (i + 1 >= ts.size()) throw UsageError("missing value for " + opt);
     const std::string& next = ts.tokens[i + 1];
     if (!ts.attached[i + 1] &&
-        (next == "--" || find_option_spec(next, mode) != nullptr)) {
+        (next == "--" ||
+         find_option_spec(split_long_token(next).spelling, mode) != nullptr)) {
         throw UsageError(opt + " expects a value");
     }
     return ts.tokens[++i];
 }
 
-// The align spellings that take a value attached with '=', as in minimap2:
-// --secondary=yes|no and --dual=yes|no, which also take it separate, and
-// --cs=short|long, which takes it only attached (a bare --cs is short).
-constexpr std::string_view kAttachedValueSpellings[] = {"--secondary", "--cs",
-                                                        "--dual"};
+// The value of `spec`: attached with '=', else the next token. --cs takes
+// its value only attached, which its dispatch reads; any other option that
+// takes no value refuses one.
+std::string option_value(std::size_t& i, const TokenStream& ts,
+                         const OptionSpec& spec, const LongToken& tok,
+                         unsigned mode) {
+    if (spec.kind == ValueKind::None) {
+        if (tok.attached && spec.id != OptionId::Cs)
+            throw UsageError(tok.spelling + " takes no value (got " +
+                             ts.tokens[i] + ")");
+        return {};
+    }
+    if (!tok.attached) return require_value(i, ts, tok.spelling, mode);
+    if (tok.attached->empty())
+        throw UsageError("missing value for " + tok.spelling);
+    return *tok.attached;
+}
 
 }  // namespace
 
@@ -1298,18 +1327,8 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
             end_of_options = true;
             continue;
         }
-        // SPELLING=VALUE, for the spellings of kAttachedValueSpellings.
-        std::string_view spelling = arg;
-        std::optional<std::string> attached;
-        for (const std::string_view name : kAttachedValueSpellings) {
-            if (arg.size() > name.size() && arg[name.size()] == '=' &&
-                arg.compare(0, name.size(), name) == 0) {
-                spelling = name;
-                attached = arg.substr(name.size() + 1);
-                break;
-            }
-        }
-        const OptionSpec* spec = find_option_spec(spelling, ModeAlign);
+        const LongToken tok = split_long_token(arg);
+        const OptionSpec* spec = find_option_spec(tok.spelling, ModeAlign);
         if (spec == nullptr) {
             if (arg.size() > 1 && arg[0] == '-') {
                 throw UsageError("unknown align option: " + arg +
@@ -1320,28 +1339,21 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
             continue;
         }
         opt.given_options.insert(spec->id);
-        // --secondary accepts its value attached or separate.
+        const std::string val = option_value(i, ts, *spec, tok, ModeAlign);
         if (spec->id == OptionId::Secondary) {
-            const std::string answer =
-                attached ? *attached : require_value(i, ts, arg, ModeAlign);
-            if (answer != "yes" && answer != "no")
+            if (val != "yes" && val != "no")
                 throw UsageError("--secondary must be yes or no");
-            opt.output_secondary = answer == "yes";
+            opt.output_secondary = val == "yes";
             continue;
         }
         if (spec->id == OptionId::Dual) {
-            const std::string answer =
-                attached ? *attached : require_value(i, ts, arg, ModeAlign);
-            if (answer != "yes" && answer != "no")
+            if (val != "yes" && val != "no")
                 throw UsageError("--dual must be yes or no");
-            opt.dual = answer == "yes";
+            opt.dual = val == "yes";
             continue;
         }
-        std::string val;
-        if (spec->kind != ValueKind::None) {
-            val = require_value(i, ts, arg, ModeAlign);
-        }
-        dispatch_align_option(opt, secondary_off_by_n, arg, attached, spec, val);
+        dispatch_align_option(opt, secondary_off_by_n, tok.spelling,
+                              tok.attached, spec, val);
     }
     settle_align_options(opt, secondary_off_by_n, positional);
     return opt;
@@ -1363,7 +1375,8 @@ IndexOptions parse_index_args(int argc, char** argv, int start) {
             end_of_options = true;
             continue;
         }
-        const OptionSpec* spec = find_option_spec(arg, ModeIndex);
+        const LongToken tok = split_long_token(arg);
+        const OptionSpec* spec = find_option_spec(tok.spelling, ModeIndex);
         if (spec == nullptr) {
             // A bare "-" is stdin.
             if (arg.size() > 1 && arg[0] == '-') {
@@ -1373,21 +1386,20 @@ IndexOptions parse_index_args(int argc, char** argv, int start) {
             positional.push_back(arg);
             continue;
         }
-        std::string val;
-        if (spec->kind != ValueKind::None)
-            val = require_value(i, ts, arg, ModeIndex);
+        const std::string val = option_value(i, ts, *spec, tok, ModeIndex);
+        const std::string& name = tok.spelling;
         switch (spec->id) {
             case OptionId::Help:
                 print_index_help(std::cout);
                 std::exit(0);
-            case OptionId::K:        opt.k = parse_int(val, arg); break;
+            case OptionId::K:        opt.k = parse_int(val, name); break;
             case OptionId::Preset:   opt.preset = val; break;
             // Unlike minimap2, where -s is the minimum DP score.
-            case OptionId::SyncmerS: opt.syncmer_s = parse_int(val, arg); break;
-            case OptionId::Threads:  opt.threads = parse_int(val, arg); break;
+            case OptionId::SyncmerS: opt.syncmer_s = parse_int(val, name); break;
+            case OptionId::Threads:  opt.threads = parse_int(val, name); break;
             case OptionId::IdxNoSeq: opt.no_seq = true; break;
             case OptionId::IndexBatchBp:
-                opt.batch_bp = parse_size(val, arg);
+                opt.batch_bp = parse_size(val, name);
                 break;
             case OptionId::Quiet:    opt.quiet = true; break;
             default:
