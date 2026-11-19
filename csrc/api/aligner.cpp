@@ -203,6 +203,7 @@ struct StreamAlignSession::Impl {
   struct Arm {
     virtual ~Arm() = default;
     virtual bool wait_room() = 0;
+    virtual bool short_of_input() = 0;
     virtual void submit(std::vector<std::string> reads,
                         std::vector<std::uint32_t> read_name_hashes,
                         std::vector<int> self_contigs,
@@ -222,6 +223,7 @@ struct StreamAlignSession::Impl {
         : session(engine, n_threads, n_helpers, max_alive) {}
 
     bool wait_room() override { return session.wait_room(); }
+    bool short_of_input() override { return session.short_of_input(); }
     void submit(std::vector<std::string> reads,
                 std::vector<std::uint32_t> read_name_hashes,
                 std::vector<int> self_contigs,
@@ -267,6 +269,9 @@ StreamAlignSession::StreamAlignSession(const LongReadAligner &aligner,
 StreamAlignSession::~StreamAlignSession() = default;
 
 bool StreamAlignSession::wait_room() { return impl_->arm->wait_room(); }
+bool StreamAlignSession::short_of_input() {
+  return impl_->arm->short_of_input();
+}
 void StreamAlignSession::submit(std::vector<std::string> reads,
                                 std::vector<std::uint32_t> read_name_hashes,
                                 std::vector<int> self_contigs,

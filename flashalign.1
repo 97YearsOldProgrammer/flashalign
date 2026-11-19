@@ -786,9 +786,11 @@ record the read produces.
 Number of threads [all\-2]: mapping runs on the machine's hardware threads less
 the reader and the writer. An explicit value is the whole mapping budget, and
 decompression of compressed input borrows from it rather than adding to it:
-\-t/8 threads, from 1 to 8, at any preset when every read input qualifies
-(BGZF or BAM of at least 16 MiB at any \-t of 2 or more; other gzip of at least
-64 MiB from \-t 32). With \-t 1 the reader, the mapper and the writer take turns
+up to \-t/4 threads, from 1 to 8, at any \-t of 2 or more, when every read
+input qualifies (BGZF or BAM of at least 16 MiB; other gzip of at least
+64 MiB). The reader thread decompresses what it can, and the borrowed threads
+decompress only while the mapping threads are short of reads; otherwise they
+map. With \-t 1 the reader, the mapper and the writer take turns
 on one thread.
 .TP
 .B \-K, \-\-batch\-bp \fINUM\fR

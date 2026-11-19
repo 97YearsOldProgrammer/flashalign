@@ -394,6 +394,8 @@ public:
 
   // False after abort().
   bool wait_room() { return stream_.wait_room(); }
+  // Reader thread, before a wait_room(): ChunkStream::short_of_input().
+  bool short_of_input() { return stream_.short_of_input(); }
 
   // Queues a chunk, which weighs its reads' bases. `read_name_hashes` is empty or holds one
   // hash per read, `self_contigs` is empty or holds one contig_id() per read, and

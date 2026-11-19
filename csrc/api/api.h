@@ -193,6 +193,9 @@ public:
 
   // False after abort().
   bool wait_room();
+  // Reader thread, before a wait_room(): whether the stream holds under three quarters of
+  // its bound, or has not been full since it did.
+  bool short_of_input();
   // `read_name_hashes` is empty or holds one hash per read, `self_contigs` is empty or
   // holds one LongReadAligner::contig_id() per read, and `name_ranks` is empty or holds
   // one LongReadAligner::contig_dual_rank() per read.

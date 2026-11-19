@@ -370,6 +370,17 @@ public:
         return !aborted_;
     }
 
+    // Reader thread, before a wait_room(): whether the stream is short of input. It turns
+    // short under three quarters of the bound and stays short until the bound is reached.
+    bool short_of_input() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (alive_ >= max_alive_)
+            short_ = false;
+        else if (alive_ < max_alive_ - max_alive_ / 4)
+            short_ = true;
+        return short_;
+    }
+
     // Reader thread. Queues a chunk of `n_items` weighing `weight`. Items are claimed in
     // index order, so items sorted longest first give LPT scheduling. Dropped after abort().
     void submit(std::int64_t n_items, std::uint64_t weight, Body body,
@@ -579,6 +590,7 @@ private:
     int n_threads_;
     std::uint64_t max_alive_;
     std::uint64_t alive_ = 0;
+    bool short_ = true;  // short_of_input()'s last answer
     bool closed_ = false;
     bool aborted_ = false;
     bool shutdown_ = false;

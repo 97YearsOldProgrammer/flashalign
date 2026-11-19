@@ -229,10 +229,11 @@ inline int64_t pread_exact(int fd, void* buf, size_t count, uint64_t offset) {
 // Otherwise one worker inflates the member front to back, as gzread would.
 //
 // With a `helper`, the decode threads are borrowed from the caller: a worker
-// with nothing to inflate runs one unit of the caller's work through it.
-// Decoding keeps priority, but a unit cannot be preempted, so decoding can
-// stall while every worker is inside a long unit; the caller should lend
-// several threads.
+// with nothing to inflate runs one unit of the caller's work through it, and
+// starts decode work ahead of the reader only while the caller is short of
+// input (`short_of_input`) or has no work for it. The piece being delivered
+// is the reader's: it inflates it itself, a chunk a call, and runs its
+// fix-up, so decoding never waits for a worker that is inside a unit.
 
 namespace fa {
 namespace cpu {
@@ -251,6 +252,12 @@ struct GzMemberSourceOptions {
   // [0, workers). Must not call back into this source. Empty: idle workers
   // sleep.
   std::function<bool(unsigned)> helper;
+  // With a `helper`: whether the caller is short of input. A worker decodes
+  // ahead of the reader only while it is true or when `helper` had no work
+  // for it; otherwise it does the caller's work, and the reader inflates what
+  // it needs itself. It must outlive the source. Null: the workers follow a
+  // private team's rule.
+  const std::atomic<bool>* short_of_input = nullptr;
   // Size of one output buffer, and so the granularity of back-pressure
   // checks. Must fit a zlib uInt.
   size_t chunk_bytes = 8u << 20;
@@ -346,13 +353,15 @@ private:
 // output is about 3-5 times its input), and 4 MiB of input per thread that has
 // cut a run.
 //
-// Demand: a worker starts a run only while the reader is waiting or fewer
-// than two runs are cut and not yet consumed, the one the reader is on
-// included; the ring is the hard cap. Otherwise it runs one unit of the
-// caller's work through `helper`, as in MemberParallelGzByteSource. The
-// reader inflates a run itself only when the run it needs is unclaimed, and
-// otherwise waits for that run's filler, so with every worker busy elsewhere
-// the file decodes serially on the reader's thread.
+// Demand: a loaned worker (`helper`) starts a run only while the reader is
+// waiting, the caller is short of input (`short_of_input`) or `helper` had
+// no work for it, up to the ring; otherwise it runs one unit of the caller's
+// work. A private team's worker starts one while the reader is waiting or
+// fewer than two runs are cut and not yet consumed, the one the reader is on
+// included. The reader cuts and inflates the run it needs when no worker has
+// it, so with every worker busy elsewhere the file decodes serially on the
+// reader's thread. Under a loan it also cuts the next run while a worker has
+// the one it needs; in a private team it waits for that run.
 
 namespace fa {
 namespace cpu {

@@ -1028,32 +1028,28 @@ private:
   std::function<bool(int)> target_;
 };
 
-// The smallest -t at which gzip decoding that is not BGZF borrows mapping
-// threads. BGZF borrows them from -t 2 whenever the inputs are all eligible.
-constexpr int kDecodeLoanMinThreads = 32;
-
-// Threads the decode team borrows from the -t budget: -t/8, clamped to [1, 8].
+// Threads the decode team borrows from the -t budget: -t/4, clamped to [1, 8].
+// A borrowed thread maps unless the stream is short of input, and one of a
+// gzip team of two or more scans for member starts instead of inflating.
 int decode_loan_threads(int num_threads) {
-  const int wanted = num_threads / 8;
+  const int wanted = num_threads / 4;
   if (wanted < 1)
     return 1;
   return wanted > 8 ? 8 : wanted;
 }
 
-// A loan needs every input to be eligible for a parallel source the run
-// allows (`gz`: member-parallel gzip; `bgzf`: block-parallel BGZF, BAM
-// included); otherwise the loaned threads would sit idle while the serial
-// reader runs.
-bool decode_loan_can_be_fed(const std::vector<std::string>& reads_paths,
-                            bool gz, bool bgzf) {
+// A loan needs every input to be eligible for a parallel source
+// (member-parallel gzip; block-parallel BGZF, BAM included); otherwise the
+// loaned threads would sit idle while the serial reader runs.
+bool decode_loan_can_be_fed(const std::vector<std::string>& reads_paths) {
   if (reads_paths.empty())
     return false;
   for (const std::string& path : reads_paths) {
-    if (bgzf && ::fa::cpu::io::bgzf_eligible(path))
+    if (::fa::cpu::io::bgzf_eligible(path))
       continue;
     // Generic-gzip BAM uses strict serial decoding, so it cannot feed a loan.
-    if (!(gz && ::fa::cpu::io::gz_member_parallel_eligible(path) &&
-          !::fa::cpu::io::path_is_bam(path)))
+    if (!::fa::cpu::io::gz_member_parallel_eligible(path) ||
+        ::fa::cpu::io::path_is_bam(path))
       return false;
   }
   return true;
@@ -1078,26 +1074,23 @@ int resolve_num_threads(const AlignOptions& opt) {
              : std::max(1, ::fa::cpu::threading::default_thread_count() - 2);
 }
 
-// The input decode plan, minus the loan callback. The parallel decoders
-// borrow mapping threads whenever the inputs can feed them, at any preset.
-// The member-parallel gzip decoder also needs -t >= kDecodeLoanMinThreads:
-// below that, serial decoding on the reader thread hides behind compute and
-// its extra work makes lending threads a net loss; its loan is then at least
-// four threads, so one thread stuck on a long read cannot starve the reader.
-// The BGZF decoder costs no extra work, and its reader inflates the run it
-// needs itself when no worker has claimed it, so it borrows from -t 2. -t 1
-// runs on one thread and lends nothing.
+// The input decode plan, minus the loan callbacks. The parallel decoders
+// borrow mapping threads whenever the inputs can feed them, at any preset,
+// from -t 2: who decodes is settled as the run goes. The reader inflates what
+// it needs itself when no loaned thread has it, and the loaned threads decode
+// ahead of it only while the stream is short of input (io.h), so decoding
+// costs the mapping threads nothing while they are the slower side, and one
+// thread stuck on a long read cannot starve the reader. -t 1 runs on one
+// thread and lends nothing.
 fa::cpu::io::IoPlan build_io_plan(const AlignOptions& opt, int num_threads) {
   fa::cpu::io::IoPlan plan;
   const fa::cpu::io::DecodeTids tids{num_threads,
                                      decode_loan_threads(num_threads)};
-  const bool room = tids.window() >= 1;
-  const bool gz = room && num_threads >= kDecodeLoanMinThreads;
-  const bool bgzf = room;
-  const bool fed = decode_loan_can_be_fed(opt.reads_paths, gz, bgzf);
-  plan.parallel_gz = gz && fed;
-  plan.parallel_bgzf = bgzf && fed;
-  if (!plan.parallel_gz && !plan.parallel_bgzf)
+  const bool fed =
+      tids.window() >= 1 && decode_loan_can_be_fed(opt.reads_paths);
+  plan.parallel_gz = fed;
+  plan.parallel_bgzf = fed;
+  if (!fed)
     return plan;
   plan.gz.workers = static_cast<unsigned>(decode_loan_threads(num_threads));
   plan.gz.staging_budget =
@@ -1587,6 +1580,10 @@ int run_align(const AlignOptions& cli_options) {
     std::vector<fa::cpu::AlignResult> results;
   };
 
+  // Whether the stream is short of input, for the decode team (io.h): written
+  // by the stream's reader before each chunk it reads.
+  std::atomic<bool> stream_short{true};
+
   // The stream's session, declared last so its workers are joined first on
   // unwind. One per pass.
   std::unique_ptr<fa::cpu::api::StreamAlignSession> stream;
@@ -1757,6 +1754,8 @@ int run_align(const AlignOptions& cli_options) {
       fa::cpu::threading::name_current_thread("fa-reader");
       try {
         for (;;) {
+          stream_short.store(stream->short_of_input(),
+                             std::memory_order_relaxed);
           if (!stream->wait_room())
             break;
           std::optional<ReadBatch> in = produce();
@@ -1855,6 +1854,8 @@ int run_align(const AlignOptions& cli_options) {
       io_plan.gz.helper = [hub, tid_base](unsigned ordinal) {
         return hub->call(tid_base + static_cast<int>(ordinal));
       };
+      stream_short.store(true, std::memory_order_relaxed);
+      io_plan.gz.short_of_input = &stream_short;
     }
 
     fa::cpu::io::SequenceReader reader(opt.reads_paths, &io_plan,
