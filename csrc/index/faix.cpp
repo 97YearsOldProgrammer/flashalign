@@ -5,7 +5,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <utility>
@@ -41,15 +44,138 @@ bool checked_product(uint64_t left, uint64_t right, uint64_t& out) {
   return true;
 }
 
+#if defined(__linux__) && defined(MADV_HUGEPAGE) && defined(MADV_NOHUGEPAGE)
+// The first line of a kernel setting file, or false.
+bool read_kernel_line(const char* path, char* line, int size) {
+  FILE* f = std::fopen(path, "r");
+  if (!f) return false;
+  const bool ok = std::fgets(line, size, f) != nullptr;
+  std::fclose(f);
+  return ok;
+}
+
+// The free memory the kernel holds in blocks of at least one huge page of `huge_bytes`,
+// counted in huge pages, over every node and zone of /proc/buddyinfo; -1 if unreadable.
+int64_t free_huge_pages(uint64_t huge_bytes) {
+  const long page = sysconf(_SC_PAGESIZE);
+  if (page <= 0) return -1;
+  int order = 0;
+  while ((static_cast<uint64_t>(page) << order) < huge_bytes && order < 30) ++order;
+  if ((static_cast<uint64_t>(page) << order) != huge_bytes) return -1;
+  FILE* f = std::fopen("/proc/buddyinfo", "r");
+  if (!f) return -1;
+  int64_t total = 0;
+  bool parsed = false;
+  char line[1024];
+  while (std::fgets(line, sizeof line, f)) {
+    // "Node N, zone NAME c0 c1 ...": cK free blocks of order K.
+    int node = 0, used = 0;
+    char zone[64];
+    if (std::sscanf(line, "Node %d, zone %63s%n", &node, zone, &used) != 2 || used == 0)
+      continue;
+    const char* p = line + used;
+    for (int k = 0; k < 64; ++k) {
+      char* end = nullptr;
+      const unsigned long long count = std::strtoull(p, &end, 10);
+      if (end == p) break;
+      p = end;
+      if (k >= order && k - order < 32)
+        total += static_cast<int64_t>(count) << (k - order);
+    }
+    parsed = true;
+  }
+  std::fclose(f);
+  return parsed ? total : -1;
+}
+
+// A fault counts as slow by the time it takes beyond this.
+constexpr std::chrono::nanoseconds kHugeSlowFault = std::chrono::milliseconds(1);
+// This much slow time over all blocks ends the ask.
+constexpr std::chrono::nanoseconds kHugeSlowBudget = std::chrono::milliseconds(50);
+// The free lists must hold the blocks wanted plus 1/kHugeMargin of them.
+constexpr int64_t kHugeMargin = 4;
+// The bounds above are for huge pages of this size; the ask is made for no other.
+constexpr uintptr_t kHugeBytes = uintptr_t{2} << 20;
+
+// Huge pages for the image: asked for before the fill, when the kernel gives them only on
+// request and its free lists hold enough, and faulted in by the fill, each reader touching
+// the blocks of a range just before it fills the range. The faults are timed: once the kernel
+// has spent too long assembling blocks, the blocks not yet faulted in go back to small pages.
+// Any failure leaves small pages.
+class HugePageAsk {
+ public:
+  HugePageAsk(void* base, uint64_t bytes) {
+    char line[256];
+    if (!read_kernel_line("/sys/kernel/mm/transparent_hugepage/enabled", line, sizeof line) ||
+        std::strstr(line, "[madvise]") == nullptr)
+      return;
+    if (!read_kernel_line("/sys/kernel/mm/transparent_hugepage/hpage_pmd_size", line,
+                          sizeof line))
+      return;
+    char* end = nullptr;
+    const unsigned long long huge = std::strtoull(line, &end, 10);
+    if (end == line || huge != kHugeBytes) return;
+    const uintptr_t lo = reinterpret_cast<uintptr_t>(base);
+    const uintptr_t first = (lo + kHugeBytes - 1) & ~(kHugeBytes - 1);
+    const uintptr_t last = (lo + bytes) & ~(kHugeBytes - 1);
+    if (last <= first) return;
+    const int64_t blocks = static_cast<int64_t>((last - first) / kHugeBytes);
+    const int64_t free_pages = free_huge_pages(kHugeBytes);
+    if (free_pages < 0 || free_pages * kHugeMargin < blocks * (kHugeMargin + 1)) return;
+    if (madvise(reinterpret_cast<void*>(first), last - first, MADV_HUGEPAGE) != 0) return;
+    first_ = first;
+    last_ = last;
+    on_.store(true, std::memory_order_relaxed);
+  }
+
+  // Before the `n` bytes at `p` are filled: faults in the huge pages they lie on, by a write
+  // to the range's first byte and to the first byte of each block that starts inside it.
+  void before_fill(char* p, size_t n) {
+    if (!on_.load(std::memory_order_relaxed)) return;
+    const uintptr_t lo = std::max(reinterpret_cast<uintptr_t>(p), first_);
+    const uintptr_t hi = std::min(reinterpret_cast<uintptr_t>(p) + n, last_);
+    for (uintptr_t a = lo; a < hi && on_.load(std::memory_order_relaxed);
+         a = (a | (kHugeBytes - 1)) + 1) {
+      const auto t0 = std::chrono::steady_clock::now();
+      *reinterpret_cast<volatile char*>(a) = 0;
+      const auto t = std::chrono::steady_clock::now() - t0;
+      if (t > kHugeSlowFault) add_slow(t - kHugeSlowFault);
+    }
+  }
+
+ private:
+  // Past the budget the ask ends: the blocks not yet faulted in go back to small pages.
+  void add_slow(std::chrono::nanoseconds over) {
+    if (slow_ns_.fetch_add(over.count(), std::memory_order_relaxed) + over.count() <=
+        kHugeSlowBudget.count())
+      return;
+    if (ended_.exchange(true, std::memory_order_relaxed)) return;
+    (void)madvise(reinterpret_cast<void*>(first_), last_ - first_, MADV_NOHUGEPAGE);
+    on_.store(false, std::memory_order_relaxed);
+  }
+
+  uintptr_t first_ = 0, last_ = 0;
+  std::atomic<bool> on_{false};
+  std::atomic<bool> ended_{false};
+  std::atomic<int64_t> slow_ns_{0};
+};
+#else
+struct HugePageAsk {
+  HugePageAsk(void*, uint64_t) {}
+  void before_fill(char*, size_t) {}
+};
+#endif
+
 // Reads the index image into the anonymous mapping load() hands out, with large parallel
 // preads. A file mapping would page in the table one fault at a time on first use, and its
 // clean pages can be reclaimed under memory pressure and faulted back mid-run; anonymous
 // memory is neither (minimap2 likewise reads its .mmi into malloc'd memory). The caller
-// then makes the image read-only and drops the page-cache copy. The reader count is bounded
+// then makes the image read-only. The reader count is bounded
 // by `n_threads` when > 0, else the default thread count. The image is the `image_size`
-// bytes at `file_offset`: the whole file, or one part of a multi-part container.
+// bytes at `file_offset`: the whole file, or one part of a multi-part container. Each reader
+// tells `huge_pages` before it fills a range.
 bool read_file_image(int fd, void* base, uint64_t file_offset,
-                     uint64_t image_size, int n_threads) {
+                     uint64_t image_size, int n_threads, HugePageAsk& huge_pages) {
   constexpr uint64_t kSlice = 64ull << 20;
   constexpr size_t kRead = 8u << 20;
   if (image_size == 0) return true;
@@ -68,6 +194,7 @@ bool read_file_image(int fd, void* base, uint64_t file_offset,
         while (off < end) {
           const size_t want =
               static_cast<size_t>(std::min<uint64_t>(kRead, end - off));
+          huge_pages.before_fill(out + off, want);
           const ssize_t n = ::pread(fd, out + off, want,
                                     static_cast<off_t>(file_offset + off));
           if (n <= 0) {
@@ -507,18 +634,13 @@ FaixIndex FaixIndex::load_image(
         void* base = mmap(nullptr, file_size, PROT_READ | PROT_WRITE,
                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (base == MAP_FAILED) return fail(FaixLoadError::OutOfMemory);
-        if (!read_file_image(file.fd, base, image_offset, read_bytes, n_threads)) {
+        HugePageAsk huge_pages(base, image_bytes - reference_bytes);
+        if (!read_file_image(file.fd, base, image_offset, read_bytes, n_threads, huge_pages)) {
             munmap(base, file_size);
             return fail(FaixLoadError::ReadFailed);
         }
         // Read-only from here on, so a stray write faults.
         (void)mprotect(base, file_size, PROT_READ);
-#ifdef POSIX_FADV_DONTNEED
-        // The page cache holds a second copy of what was just read; drop it.
-        (void)posix_fadvise(file.fd, static_cast<off_t>(image_offset),
-                            static_cast<off_t>(read_bytes),
-                            POSIX_FADV_DONTNEED);
-#endif
         const auto unmap_fail = [&](FaixLoadError error) {
           munmap(base, file_size);
           return fail(error);
