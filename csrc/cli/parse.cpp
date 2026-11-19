@@ -1294,6 +1294,12 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
         throw UsageError("--max-chain-occ must be >= 0");
     if (opt.occ_dist && *opt.occ_dist < 0)
         throw UsageError("-e must be >= 0");
+    if (opt.max_vote_occ && *opt.max_vote_occ < 0)
+        throw UsageError("--max-vote-occ must be >= 0");
+    if (opt.min_support && *opt.min_support < 0)
+        throw UsageError("--min-support must be >= 0");
+    if (opt.dp_min_score && *opt.dp_min_score < 0)
+        throw UsageError("-S must be >= 0");
     // Without -x the index or the default sets the preset: cli/align.cpp
     // runs these once it is settled.
     if (opt.preset_source != "builtin")
