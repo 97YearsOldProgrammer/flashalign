@@ -795,8 +795,7 @@ std::string resolved_config_text(const AlignOptions& opt,
         src(opt.occ_dist.has_value(), "preset"));
 
   if (is_rna && rna != nullptr) {
-    row("rna_min_intron", i2s(rna->min_intron),
-        src(opt.min_intron && *opt.min_intron > 0, "preset"));
+    row("rna_min_intron", i2s(rna->min_intron), "preset");
     row("rna_max_intron", i2s(rna->max_intron),
         src(opt.max_intron && *opt.max_intron > 0, "preset"));
     row("rna_junction_bed",
@@ -1208,8 +1207,6 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
   if (opt.dp_max_gap)
     u.dp_max_gap = *opt.dp_max_gap;
   // Passed as given; the resolver validates the intron bounds.
-  if (opt.min_intron)
-    u.rna_min_intron = *opt.min_intron;
   if (opt.max_intron)
     u.rna_max_intron = *opt.max_intron;
   if (opt.rna_junction_bed)

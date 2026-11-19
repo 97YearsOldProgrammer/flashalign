@@ -89,7 +89,7 @@ enum class OptionId {
     // align: band geometry (minimap2 -r) and maximum gap (minimap2 -g).
     DpBw, DpMaxGap,
     // RNA intron bounds, strand and junction annotation
-    MinIntron, MaxIntron, SpliceStrand, RnaJunctionBed, RnaJunctionBonus,
+    MaxIntron, SpliceStrand, RnaJunctionBed, RnaJunctionBonus,
     // Secondary retention ratio (-p), the RNA retention band
     // (--rival-min-diff) and the catalogue depth and realization budget (-N)
     PriRatio, SpliceRivalMinDiff, SpliceMaxLoci,
@@ -230,9 +230,8 @@ struct AlignOptions {
     std::optional<int> vote_diag_bin_width;
     std::optional<int> vote_diag_slope_den;
     std::optional<int> vote_diag_width_max;
-    // RNA intron bounds; -G takes a k/m/g suffix and drops a -r typed before
-    // it.
-    std::optional<int> min_intron;
+    // -G, the maximum intron; it takes a k/m/g suffix and drops a -r typed
+    // before it.
     std::optional<int> max_intron;
     // -u {f,b,r,n} (RNA only), stored as forward, auto, reverse or none.
     // auto is the preset default; none scores no splice motif and writes no

@@ -181,10 +181,6 @@ const std::vector<OptionSpec>& specs_table() {
          "INT", SEC_ALIGN,
          "score bonus when alignment extends to the end of the query sequence [-1]", "", kBaseAlign},
 
-        // RNA presets only.
-        {OptionId::MinIntron, '\0', "--min-intron", kInt, kStable, A,
-         "INT", SEC_SPLICE,
-         "min intron length [20]"},
         // As minimap2's -G, it also sets both -r values; between -G and -r
         // the later typed wins.
         {OptionId::MaxIntron, 'G', "", kSize, kStable, A,
@@ -968,10 +964,6 @@ void settle_preset_options(AlignOptions& opt) {
             option_stage_refusal(opt.given_options, opt.preset))
         throw UsageError(*refusal);
     if (!rna) {
-        if (opt.min_intron) {
-            throw UsageError(
-                "--min-intron is valid only with splice or splice:hq");
-        }
         if (opt.max_intron) {
             throw UsageError(
                 "-G is valid only with splice or splice:hq");
@@ -994,10 +986,6 @@ void settle_preset_options(AlignOptions& opt) {
           opt.dna_secondary_max = *opt.rna_max_loci - 1;
         opt.rna_max_loci.reset();
     }
-    // Intron bounds must satisfy 0 < min <= max.
-    if (opt.min_intron && *opt.min_intron <= 0) {
-        throw UsageError("--min-intron must be > 0");
-    }
     if (opt.max_intron && *opt.max_intron <= 0) {
         throw UsageError("-G must be > 0");
     }
@@ -1008,10 +996,6 @@ void settle_preset_options(AlignOptions& opt) {
         throw UsageError("--rival-min-diff must be >= 0");
     if (opt.rna_max_loci && *opt.rna_max_loci < 1)
         throw UsageError("-N must be >= 1");
-    if (opt.min_intron && *opt.min_intron > 0 && opt.max_intron && *opt.max_intron > 0 &&
-        *opt.max_intron < *opt.min_intron) {
-        throw UsageError("-G must be >= --min-intron");
-    }
 }
 
 }  // namespace fa::cpu::cli
@@ -1203,7 +1187,6 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
             opt.vote_diag_width_max = width_max;
             break;
         }
-        case OptionId::MinIntron:  opt.min_intron = parse_int(val, arg); break;
         // -G is a size ("200k"), as in minimap2. It also sets both -r
         // values (options/options.cpp), so a -r typed before it is
         // dropped and only a later one applies.

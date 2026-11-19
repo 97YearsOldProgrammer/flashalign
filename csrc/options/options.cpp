@@ -788,7 +788,7 @@ void apply_splice_overrides(::fa::cpu::lr::DnaLongOptions& mapping,
     ::fa::cpu::lr::rna::RnaLongOptions* rna, const UserOverrides& user) {
   if (user.rna_min_intron && *user.rna_min_intron <= 0) {
     throw std::invalid_argument(
-        "--min-intron must be > 0 (got " +
+        "the minimum intron length must be > 0 (got " +
         std::to_string(*user.rna_min_intron) + ")");
   }
   if (user.rna_max_intron && *user.rna_max_intron <= 0) {
@@ -813,7 +813,7 @@ void apply_splice_overrides(::fa::cpu::lr::DnaLongOptions& mapping,
   if (rna->max_intron < rna->min_intron) {
     throw std::invalid_argument("-G (" +
                                 std::to_string(rna->max_intron) +
-                                ") must be >= --min-intron (" +
+                                ") must be >= the minimum intron length (" +
                                 std::to_string(rna->min_intron) + ")");
   }
   if (mapping.cigar_dp_match <= 0 || mapping.cigar_dp_match > 127) {
