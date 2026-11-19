@@ -645,6 +645,11 @@ bool lane_runs_stage(LaneStage stage, std::string_view preset);
 bool is_rna_preset(std::string_view preset);
 bool preset_is_valid(std::string_view preset);
 
+// A DNA preset's vote: the seeds per strand that vote (-v NUM1) and the
+// seeds a vote peak needs (--min-support).
+struct PresetVoteDefaults { int vote_seeds; int min_support; };
+PresetVoteDefaults preset_vote_defaults(std::string_view preset);
+
 // Preset (k, s) for building an index. A loaded index uses its own values.
 struct PresetSeeding { int k; int syncmer_s; };
 PresetSeeding resolve_preset_seeding(std::string_view preset);

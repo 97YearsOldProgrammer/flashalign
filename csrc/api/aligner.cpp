@@ -68,6 +68,11 @@ PresetSeeding resolve_preset_seeding(std::string_view preset) {
       ::fa::cpu::options::resolve_preset_seeding(preset);
   return PresetSeeding{s.k, s.syncmer_s};
 }
+PresetVoteDefaults preset_vote_defaults(std::string_view preset) {
+  const ::fa::cpu::options::PresetVoteDefaults d =
+      ::fa::cpu::options::preset_vote_defaults(preset);
+  return PresetVoteDefaults{d.vote_seeds, d.min_support};
+}
 bool is_assembly_preset(std::string_view preset) {
   return ::fa::cpu::options::is_assembly_preset(preset);
 }

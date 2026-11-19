@@ -53,6 +53,12 @@ struct PresetSeeding {
   int syncmer_s = 0;
 };
 PresetSeeding resolve_preset_seeding(std::string_view preset);
+// A DNA preset's -v NUM1 and --min-support defaults.
+struct PresetVoteDefaults {
+  int vote_seeds = 0;
+  int min_support = 0;
+};
+PresetVoteDefaults preset_vote_defaults(std::string_view preset);
 bool is_assembly_preset(std::string_view preset);
 bool is_overlap_preset(std::string_view preset);
 bool lane_runs_stage(LaneStage stage, std::string_view preset);

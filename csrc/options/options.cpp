@@ -205,6 +205,13 @@ static const DnaPresetProfile* find_dna_preset_profile(
   return nullptr;
 }
 
+// The seeds a vote peak needs: 3, or an overlap row's own where positive.
+static int dna_min_support(const DnaPresetProfile& profile) {
+  return profile.overlap.on && profile.overlap.min_support > 0
+             ? profile.overlap.min_support
+             : 3;
+}
+
 static const DnaPresetProfile& dna_preset_profile(DnaPresetKind kind) {
   for (const auto& profile : kDnaPresetProfiles) {
     if (profile.kind == kind) return profile;
@@ -226,7 +233,7 @@ static void set_dna_long_platform_fields(
     mapping.long_occ_cap = 200;
     mapping.query_tiles = profile.placement.query_tiles;
     mapping.vote_admission_ratio = lr::kDnaProductionVoteAdmissionRatio;
-    common.min_support = 3;
+    common.min_support = dna_min_support(profile);
     if (profile.overlap.on) {
       mapping.skip_self = true;
       mapping.all_chains = true;
@@ -234,8 +241,6 @@ static void set_dna_long_platform_fields(
       mapping.vote_admission_ratio = profile.overlap.vote_ratio;
       if (profile.overlap.min_chain_score > 0)
         mapping.min_chain_score = profile.overlap.min_chain_score;
-      if (profile.overlap.min_support > 0)
-        common.min_support = profile.overlap.min_support;
       mapping.dual = profile.overlap.dual;
     }
     // minimap2's min_ksw_len, the piece length of its gap-filling loop.
@@ -346,6 +351,13 @@ static bool is_dna_long_preset(std::string_view preset) {
 }
 bool preset_is_valid(std::string_view preset) {
     return is_dna_long_preset(preset) || is_rna_preset(preset);
+}
+
+PresetVoteDefaults preset_vote_defaults(std::string_view preset) {
+  const DnaPresetProfile* profile = find_dna_preset_profile(preset);
+  if (profile == nullptr)
+    throw std::logic_error("preset_vote_defaults: not a DNA preset");
+  return {profile->placement.vote_seeds, dna_min_support(*profile)};
 }
 
 PresetSeeding resolve_preset_seeding(std::string_view preset) {

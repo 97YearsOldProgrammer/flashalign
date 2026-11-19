@@ -133,7 +133,7 @@ const std::vector<OptionSpec>& specs_table() {
         // --vote-spacing.
         {OptionId::VoteSeeds, 'v', "", kPair, kStable, A,
          "NUM[,NUM]", SEC_PLACEMENT,
-         "seeds per strand that vote, query tiles per read [128,128]"},
+         "seeds per strand that vote (0 for all; at least --min-support), query tiles per read [128,128]"},
         // A read of length L votes into bins of clamp(L / NUM2, NUM1,
         // --dw-max) reference bases. NUM1 alone keeps the preset's NUM2, and
         // NUM2 0 fixes the width at NUM1. The splice presets take NUM1 alone;
@@ -958,6 +958,23 @@ void settle_preset_options(AlignOptions& opt) {
     if (rna && opt.vote_seeds)
         throw UsageError("-v is valid only with a DNA preset; the splice "
                          "presets take --vote-spacing");
+    // Fewer voters than a peak needs map almost nothing; minimap2's -v, its
+    // verbosity, is a common way to get here.
+    if (!rna && opt.vote_seeds && *opt.vote_seeds > 0) {
+        const auto vote = fa::cpu::api::preset_vote_defaults(opt.preset);
+        const int support = opt.min_support.value_or(vote.min_support);
+        if (*opt.vote_seeds < support) {
+            const std::string v = std::to_string(*opt.vote_seeds);
+            const std::string s = std::to_string(support);
+            throw UsageError(
+                "-v " + v + ": a vote peak needs --min-support " + s +
+                " seeds, but only " + v + " per strand would vote, so "
+                "almost no read would map; give -v " + s + " or more "
+                "(default " + std::to_string(vote.vote_seeds) +
+                "; 0 votes with every seed) or a lower --min-support. "
+                "minimap2's -v is its verbosity level: here that is --quiet");
+        }
+    }
     if (!rna && opt.vote_spacing)
         throw UsageError("--vote-spacing is valid only with an RNA preset");
     if (const auto refusal =
