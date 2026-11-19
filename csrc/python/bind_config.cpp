@@ -102,7 +102,7 @@ void append(std::ostringstream& out, const char* name,
     "Inversion Z-drop, the second -z value (row dp_inversion_zdrop).\n"        \
     "-1 = dp_zdrop; on a copy of Aligner.config, set it with dp_zdrop.")       \
   X(dp_end_bonus, "Alignment end bonus [--end-bonus]. -2 = preset-owned.")     \
-  X(rna_min_intron, "Minimum intron length [--min-intron]; splice only.")      \
+  X(rna_min_intron, "Minimum intron length; splice only.")                     \
   X(rna_max_intron,                                                            \
     "Maximum intron length [-G]; splice only. It also sets dp_bw and\n"        \
     "dp_bw_long, which a value of their own then replaces.")                   \

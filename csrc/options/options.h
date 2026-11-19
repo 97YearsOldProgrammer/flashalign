@@ -357,7 +357,7 @@ namespace rna {
 struct RnaLongOptions {
   // Seeding, occurrence, chaining and DP scoring shared with DNA.
   DnaLongOptions base;
-  // --min-intron / -G
+  // Intron bounds; -G sets the maximum.
   int min_intron = 20;
   int max_intron = 200000;
   int max_locus_chains = 6;

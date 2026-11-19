@@ -204,7 +204,7 @@ class Config:
 
     @property
     def rna_min_intron(self) -> int:
-        """Minimum intron length [--min-intron]; splice only."""
+        """Minimum intron length; splice only."""
 
     @rna_min_intron.setter
     def rna_min_intron(self, arg: int, /) -> None: ...
