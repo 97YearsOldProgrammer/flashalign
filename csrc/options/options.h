@@ -134,6 +134,11 @@ inline constexpr int kDnaHiFiOccCeiling = 500;
 inline constexpr int kDnaTileRescueOcc = 4095;
 inline constexpr int kDnaHiFiTileRescueOcc = 1024;
 
+// lr and lr:hq: the voters the chain MAPQ's vote floor (dna/dna.h
+// kDnaChainMapqVoteFloor, 40) presumes a query can field, the vote's 128
+// (DnaLongOptions vote_floor_capacity).
+inline constexpr int kDnaChainMapqVoteFloorVoters = 128;
+
 // minimap2's seed-repetitiveness discount (uniq_ratio from rep_len, hit.c) is
 // deliberately not applied: pen_s1 is the bare term (dna/mapq.cpp).
 
@@ -259,6 +264,24 @@ struct DnaLongOptions {
   // BWA-MEM's margin Phred on dp_max - dp_max2. The full guard is in
   // dna/dna.h.
   bool chain_mapq_hifi_margin = false;
+  // lr and lr:hq (dna/mapq.cpp): every vote ratio of the chain MAPQ reads the
+  // rank stage's folded tally (VotePeak::fold) instead of the recount; the
+  // vote floor, the vote cap and the verdicts keep the recount. Not settable.
+  bool chain_mapq_voter_fold = false;
+  // lr and lr:hq (dna/mapq.cpp vote_copy_walk): a record's n_sub adds the
+  // vote's undrained copies of its candidate; the vote keeps its ranked
+  // buckets for the walk. Not settable.
+  bool chain_mapq_undrained_nsub = false;
+  // lr and lr:hq (dna/mapq.cpp): a record with no DP pair caps its MAPQ by
+  // minimap2's mapq_alt read on the chain pair, one difference worth k chain
+  // units. Not settable.
+  bool chain_mapq_chain_alt = false;
+  // lr and lr:hq (dna/mapq.cpp): C = kDnaChainMapqVoteFloorVoters, 0
+  // elsewhere. The chain MAPQ's vote floor reads the winner's vote over
+  // min(1, S / C), S = max(1, (L - k + 1) 2 / (k - s + 1)) the closed
+  // syncmers expected on a query of L bases; a query with S >= C is
+  // unchanged. The vote cap reads the vote as counted. Not settable.
+  int vote_floor_capacity = 0;
   // HiFi only (dna/dna.h): the late inversion probe of a seam or
   // piece runs only where the read's opposite-lane fine seeds in the drop
   // window chain to kDnaInvLocalMinAnchors anchors.
@@ -278,10 +301,6 @@ struct DnaLongOptions {
   // -N: the secondaries both lanes keep, map-only projected and the -c lane
   // realized; one prices the MAPQ.
   int secondary_max = 5;
-  // A secondary-role region that splits, on a confirmed Z-drop or a fill over
-  // the matrix cap, ends at the cut: no continuation. lr and lr:hq install it;
-  // not settable.
-  bool rival_split_ends = false;
   // Each whole-query pass chains its pool twice, as minimap2's mm_map_frag:
   // first at cigar_dp_bw and cigar_dp_max_gap, then the anchors of the chains
   // with at least cigar_dp_split_min_anchors anchors scoring at least -m at

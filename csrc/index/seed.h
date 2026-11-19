@@ -375,7 +375,120 @@ inline size_t closed_syncmer_stream_reserve(int read_len,
     return std::max<size_t>(1, expected + expected / 8);
 }
 
-// Query closed-syncmer seeds in read order, thinned by key hash when cfg.downsample > 1.
+// The query stream for a window W = k - s + 1 <= 64, a chunk of positions at a time,
+// with no branch on the bases: (1) each position's k-mer state, whether it has k valid
+// bases, and the order of its rightmost s-mer; (2) the minimum of the last W orders, from
+// blocks of W positions (the suffix minimum of the block holding the window's left end and
+// the prefix minimum of the block holding its right end); (3) the positions whose leftmost
+// or rightmost s-mer holds that minimum; (4) their k-mers, palindromes excepted. The state
+// rolls through a non-ACGT base unreset: k valid bases in a row rewrite all of it, and the
+// window of a k-mer with k valid bases holds no older order. With kEncode, enc[i] =
+// nuc_encode(seq[i]) is written first. Seeds go to sink(seeds, n) in read order.
+template <bool kEncode, class BaseT, class Sink>
+inline void closed_syncmer_query_seed_chunks(
+    const char* seq,
+    BaseT* enc,
+    int read_len,
+    const ClosedSyncmerConfig& cfg,
+    int s,
+    Sink&& sink
+) {
+    constexpr int kChunk = 512;
+    constexpr int kHist = 64;  // orders kept from the previous chunk, >= W
+    const int k = cfg.k;
+    const int W = k - s + 1;
+    const uint64_t k_mask = htable_kmer_mask(k);
+    const int rc_shift = 2 * (k - 1);
+    const uint64_t s_mask = (1ULL << (2 * s)) - 1ULL;
+    const int s_shift = 2 * (k - s);
+    const uint32_t* otab = closed_syncmer_order_rank_table_for(s);
+    const uint64_t thinning = static_cast<uint64_t>(std::max(1, cfg.downsample));
+
+    uint64_t ord[kHist + kChunk];  // ord[kHist + i]: the order at chunk position i
+    uint64_t suf[kHist + kChunk];
+    uint64_t fwd_at[kChunk];
+    uint64_t rev_at[kChunk];
+    uint8_t full_at[kChunk];
+    int sel_at[kChunk];
+    QuerySeed picked[kChunk];
+    std::fill(ord, ord + kHist, 0);
+    uint64_t fwd = 0;
+    uint64_t rev = 0;
+    int run = 0;  // valid bases ending here
+
+    for (int c0 = 0; c0 < read_len; c0 += kChunk) {
+        const int n = std::min(kChunk, read_len - c0);
+        uint64_t* o = ord + kHist;
+        auto roll = [&](auto order_of) {
+            for (int i = 0; i < n; ++i) {
+                uint32_t code;
+                if constexpr (kEncode) {
+                    code = static_cast<uint32_t>(nuc_encode(seq[c0 + i]));
+                    enc[c0 + i] = static_cast<uint8_t>(code);
+                } else {
+                    code = static_cast<uint32_t>(static_cast<int32_t>(enc[c0 + i]));
+                }
+                const uint64_t b = code & 3u;
+                run = code <= 3u ? run + 1 : 0;
+                fwd = ((fwd << 2) | b) & k_mask;
+                rev = (rev >> 2) | ((3u - b) << rc_shift);
+                fwd_at[i] = fwd;
+                rev_at[i] = rev;
+                full_at[i] = run >= k;
+                o[i] = order_of(std::min(fwd & s_mask, rev >> s_shift));
+            }
+        };
+        if (otab) {
+            roll([otab](uint64_t sk) { return static_cast<uint64_t>(otab[sk]); });
+        } else {
+            roll([](uint64_t sk) { return sketch_order_hash(sk); });
+        }
+
+        // Blocks of W positions laid from the chunk's start, one more before it in the
+        // history: suf[j] is the minimum from j to its block's end, `lo` from its block's
+        // start to j. The window ending at j is one block, or the tail of one and the head
+        // of the next, so its minimum is min(suf[j - W + 1], lo).
+        const int end = kHist + n;
+        uint64_t lo = ord[kHist - 1];
+        for (int j = kHist - 1; j >= kHist - W; --j) suf[j] = lo = std::min(lo, ord[j]);
+        int sel_n = 0;
+        for (int b = kHist; b < end; b += W) {
+            const int e = std::min(b + W, end);
+            lo = ord[e - 1];
+            for (int j = e - 1; j >= b; --j) suf[j] = lo = std::min(lo, ord[j]);
+            lo = ord[b];
+            for (int j = b; j < e; ++j) {
+                lo = std::min(lo, ord[j]);
+                const uint64_t m = std::min(suf[j - W + 1], lo);
+                sel_at[sel_n] = j - kHist;
+                sel_n += full_at[j - kHist] & ((m == ord[j - W + 1]) | (m == ord[j]));
+            }
+        }
+
+        int picked_n = 0;
+        for (int q = 0; q < sel_n; ++q) {
+            const int i = sel_at[q];
+            const uint64_t f = fwd_at[i];
+            const uint64_t r = rev_at[i];
+            picked[picked_n] =
+                QuerySeed{std::min(f, r), c0 + i + 1 - k, static_cast<uint8_t>(r < f)};
+            picked_n += f != r;
+        }
+        if (thinning > 1) {
+            int thinned = 0;
+            for (int q = 0; q < picked_n; ++q) {
+                picked[thinned] = picked[q];
+                thinned += sketch_order_hash(picked[q].key) % thinning == 0;
+            }
+            picked_n = thinned;
+        }
+        sink(static_cast<const QuerySeed*>(picked), picked_n);
+        if (c0 + kChunk < read_len) std::copy(ord + n, ord + n + kHist, ord);
+    }
+}
+
+// Query closed-syncmer seeds in read order, thinned by key hash when cfg.downsample > 1,
+// passed to emit(seeds, n) in batches.
 template <class BaseT, class Emit>
 inline void for_each_closed_syncmer_query_seed(
     const BaseT* enc,
@@ -389,7 +502,6 @@ inline void for_each_closed_syncmer_query_seed(
         return;
     }
 
-    RollingKmerEncoder k_encoder(cfg.k);
     const int syncmer_window = cfg.k - s + 1;
     const int thinning = std::max(1, cfg.downsample);
     if (syncmer_window > 64) {
@@ -405,54 +517,13 @@ inline void for_each_closed_syncmer_query_seed(
                 sketch_order_hash(key) % static_cast<uint64_t>(thinning) != 0) {
                 continue;
             }
-            emit(QuerySeed{key, pos, static_cast<uint8_t>(is_rc ? 1 : 0)});
+            const QuerySeed seed{key, pos, static_cast<uint8_t>(is_rc ? 1 : 0)};
+            emit(&seed, 1);
         }
         return;
     }
 
-    // One rolling k-state yields each rightmost s-mer; the min/count window tracks the
-    // window minimum, and the order-rank table (when active) replaces the hash.
-    const int W = syncmer_window;
-    const uint32_t* otab = closed_syncmer_order_rank_table_for(s);
-    SyncmerMinCountWindow window;
-    window.reset(W);
-    uint64_t current_order = std::numeric_limits<uint64_t>::max();
-
-    for (int i = 0; i < read_len; ++i) {
-        const int32_t base = static_cast<int32_t>(enc[i]);
-        if (base < 0 || base > 3) {
-            k_encoder.reset();
-            window.reset(W);
-            current_order = std::numeric_limits<uint64_t>::max();
-            continue;
-        }
-        const bool full = k_encoder.push_base_unchecked(base);
-        if (k_encoder.valid_bases() >= s) {
-            const uint64_t sk = k_encoder.suffix_smer_key(s);
-            current_order = otab
-                ? static_cast<uint64_t>(otab[static_cast<size_t>(sk)])
-                : sketch_order_hash(sk);
-            window.push(current_order);
-        } else {
-            current_order = std::numeric_limits<uint64_t>::max();
-        }
-
-        if (!full) continue;
-        const uint64_t best_order = window.min_ord;
-        if (window.oldest() != best_order && current_order != best_order) {
-            continue;
-        }
-
-        if (k_encoder.key_is_palindrome()) continue;
-        const uint64_t key = k_encoder.key();
-        if (thinning > 1 &&
-            sketch_order_hash(key) % static_cast<uint64_t>(thinning) != 0) {
-            continue;
-        }
-        emit(QuerySeed{
-            key, i + 1 - cfg.k,
-            static_cast<uint8_t>(k_encoder.key_is_rc() ? 1 : 0)});
-    }
+    closed_syncmer_query_seed_chunks<false>(nullptr, enc, read_len, cfg, s, emit);
 }
 
 template <class BaseT>
@@ -473,9 +544,7 @@ inline void extract_closed_syncmer_query_seeds_into(
         enc,
         read_len,
         cfg,
-        [&](const QuerySeed& seed) {
-            out.push_back(seed);
-        });
+        [&](const QuerySeed* seeds, int n) { out.insert(out.end(), seeds, seeds + n); });
 }
 
 template <class Emit>
@@ -508,51 +577,7 @@ inline void encode_and_for_each_closed_syncmer_query_seed(
     }
 
     // As for_each_closed_syncmer_query_seed, with the 2-bit encoding folded into the pass.
-    RollingKmerEncoder k_encoder(cfg.k);
-    const int W = syncmer_window;
-    const uint32_t* otab = closed_syncmer_order_rank_table_for(s);
-    SyncmerMinCountWindow window;
-    window.reset(W);
-    uint64_t current_order = std::numeric_limits<uint64_t>::max();
-    const int thinning = std::max(1, cfg.downsample);
-
-    for (int i = 0; i < read_len; ++i) {
-        const int32_t base = nuc_encode(seq[static_cast<size_t>(i)]);
-        enc[static_cast<size_t>(i)] = static_cast<uint8_t>(base);
-        if (base < 0 || base > 3) {
-            k_encoder.reset();
-            window.reset(W);
-            current_order = std::numeric_limits<uint64_t>::max();
-            continue;
-        }
-
-        const bool full = k_encoder.push_base_unchecked(base);
-        if (k_encoder.valid_bases() >= s) {
-            const uint64_t sk = k_encoder.suffix_smer_key(s);
-            current_order = otab
-                ? static_cast<uint64_t>(otab[static_cast<size_t>(sk)])
-                : sketch_order_hash(sk);
-            window.push(current_order);
-        } else {
-            current_order = std::numeric_limits<uint64_t>::max();
-        }
-
-        if (!full) continue;
-        const uint64_t best_order = window.min_ord;
-        const bool best_at_left = window.oldest() == best_order;
-        const bool best_at_right = current_order == best_order;
-        if (!best_at_left && !best_at_right) continue;
-
-        if (k_encoder.key_is_palindrome()) continue;
-        const uint64_t key = k_encoder.key();
-        if (thinning > 1 &&
-            sketch_order_hash(key) % static_cast<uint64_t>(thinning) != 0) {
-            continue;
-        }
-        emit(QuerySeed{
-            key, i + 1 - cfg.k,
-            static_cast<uint8_t>(k_encoder.key_is_rc() ? 1 : 0)});
-    }
+    closed_syncmer_query_seed_chunks<true>(seq, enc.data(), read_len, cfg, s, emit);
 }
 
 inline void encode_and_extract_closed_syncmer_query_seeds_into(
@@ -573,9 +598,7 @@ inline void encode_and_extract_closed_syncmer_query_seeds_into(
         read_len,
         cfg,
         enc,
-        [&](const QuerySeed& seed) {
-            out.push_back(seed);
-        });
+        [&](const QuerySeed* seeds, int n) { out.insert(out.end(), seeds, seeds + n); });
 }
 
 // The reverse-complement lane is the forward stream with read_pos mirrored: same key, same

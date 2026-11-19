@@ -230,7 +230,6 @@ static bool extract_chain_closed_syncmer_occ_aware_seed_bundle_uniform_into(
     const KmerPostingView* seed_views = nullptr
 ) {
     out.clear();
-    (void)scratch;
     const int k = ctx.k;
     const SeedIndex& index = *ctx.index;
     const LongOccPolicyConfig& cfg = ctx.occ_policy;
@@ -245,30 +244,34 @@ static bool extract_chain_closed_syncmer_occ_aware_seed_bundle_uniform_into(
         max_seeds > 0
             ? std::min(max_seeds, n_kmers)
             : n_kmers);
-    auto make_candidate_from_view =
-        [&](const QuerySeed& seed, const KmerPostingView& view) {
-        ChainSyncmerOccCandidate cand;
-        cand.seed = seed;
-        cand.view = view;
-        const uint32_t occurrence = vote_seed_occurrence(ctx, view);
-        if (!view.found() || view.count == 0 || occurrence == 0) {
-            return cand;
+    // The view of each position of `input`: `seed_views`, when captured
+    // (ChainSeedLookupCache::warm), else probed here in input order.
+    const KmerPostingView* views = seed_views;
+    if (views == nullptr) {
+        std::vector<KmerPostingView>& probed = scratch.probed_views;
+        probed.resize(input.size());
+        for (size_t position = 0; position < input.size(); ++position) {
+            probed[position] = lookup_cache->lookup(index, input[position].key);
         }
-        cand.occurrence = occurrence;
-        cand.valid = occurrence_allowed_by_long_occ_policy(occurrence, cfg);
-        return cand;
+        views = probed.data();
+    }
+    // A tile's admitted pick by its position in `input`, with the fields the scan
+    // compares; its candidate is built only when the tile closes.
+    constexpr size_t kNoPick = std::numeric_limits<size_t>::max();
+    struct Pick {
+        size_t at = kNoPick;
+        uint32_t occurrence = 0;
+        int read_pos = 0;
+        int distance = 0;  // to the tile centre
     };
-
-    // `seed_views`, when captured (ChainSeedLookupCache::warm), holds the cached view for
-    // each position of `input`, read by position instead of by a probe.
-    auto make_candidate = [&](const QuerySeed& seed, size_t position) {
-        KmerPostingView view;
-        if (seed_views != nullptr) {
-            view = seed_views[position];
-        } else {
-            view = lookup_cache->lookup(index, seed.key);
-        }
-        return make_candidate_from_view(seed, view);
+    const auto pick_candidate = [&](const Pick& pick) {
+        ChainSyncmerOccCandidate cand;
+        if (pick.at == kNoPick) return cand;
+        cand.seed = input[pick.at];
+        cand.view = views[pick.at];
+        cand.occurrence = pick.occurrence;
+        cand.valid = true;
+        return cand;
     };
 
     out.selected_views.reserve(static_cast<size_t>(n_tiles));
@@ -318,9 +321,9 @@ static bool extract_chain_closed_syncmer_occ_aware_seed_bundle_uniform_into(
     const int64_t tiles64 = static_cast<int64_t>(n_tiles);
     const int64_t kmers64 = static_cast<int64_t>(std::max(1, n_kmers));
     int tile = 0;
-    ChainSyncmerOccCandidate first_admitted;
-    ChainSyncmerOccCandidate rarest_admitted;
-    ChainSyncmerOccCandidate centred_admitted;
+    Pick first_admitted;
+    Pick rarest_admitted;
+    Pick centred_admitted;
     std::array<uint32_t, kVoteSeedOccurrenceStrata> tile_strata{};
     uint32_t tile_admitted = 0;
     int tile_centre = syncmer_tile_centre(0, n_kmers, n_tiles);
@@ -342,35 +345,59 @@ static bool extract_chain_closed_syncmer_occ_aware_seed_bundle_uniform_into(
             ++tile;
         }
         if (tile != prev_tile) {
-          emit_tile(first_admitted, rarest_admitted, centred_admitted,
-                    tile_strata, tile_admitted);
+          emit_tile(pick_candidate(first_admitted),
+                    pick_candidate(rarest_admitted),
+                    pick_candidate(centred_admitted), tile_strata,
+                    tile_admitted);
           emit_rescue(tile_admitted);
-          first_admitted = ChainSyncmerOccCandidate{};
-          rarest_admitted = ChainSyncmerOccCandidate{};
-          centred_admitted = ChainSyncmerOccCandidate{};
+          first_admitted = Pick{};
+          rarest_admitted = Pick{};
+          centred_admitted = Pick{};
           tile_strata.fill(0);
           tile_admitted = 0;
           tile_centre = syncmer_tile_centre(tile, n_kmers, n_tiles);
         }
-        const ChainSyncmerOccCandidate cand = make_candidate(seed, position);
-        rescue.offer(cand, tile_centre);
-        if (cand.valid) {
-          if (!first_admitted.valid)
-            first_admitted = cand;
-          if (chain_syncmer_occ_candidate_better(cand, rarest_admitted)) {
-            rarest_admitted = cand;
-          }
-          if (chain_syncmer_occ_candidate_better_centred(
-                  cand, centred_admitted, tile_centre)) {
-            centred_admitted = cand;
-          }
-          ++tile_strata[static_cast<size_t>(
-              vote_seed_occurrence_stratum(cand.occurrence))];
-          ++tile_admitted;
+        // The seed as a candidate: UINT32_MAX for no postings, else admitted under
+        // the cap.
+        const KmerPostingView& view = views[position];
+        const uint32_t seed_occurrence = vote_seed_occurrence(ctx, view);
+        const bool present =
+            view.found() && view.count != 0 && seed_occurrence != 0;
+        const uint32_t occurrence =
+            present ? seed_occurrence : std::numeric_limits<uint32_t>::max();
+        const bool valid =
+            present && occurrence_allowed_by_long_occ_policy(occurrence, cfg);
+        if (!valid && occurrence != std::numeric_limits<uint32_t>::max()) {
+          // Only a seed over the cap can be the tile's rescue.
+          rescue.offer({seed, view, occurrence, false}, tile_centre);
         }
+        // As chain_syncmer_occ_candidate_better and its centred form, without
+        // branches: the lower occurrence, then (centred) the nearer the centre, then
+        // the lower read position.
+        const int distance = std::abs(seed.read_pos - tile_centre);
+        const bool take_first = valid & (first_admitted.at == kNoPick);
+        const bool take_rarest =
+            valid & ((rarest_admitted.at == kNoPick) |
+                     (occurrence < rarest_admitted.occurrence) |
+                     ((occurrence == rarest_admitted.occurrence) &
+                      (seed.read_pos < rarest_admitted.read_pos)));
+        const bool take_centred =
+            valid & ((centred_admitted.at == kNoPick) |
+                     (occurrence < centred_admitted.occurrence) |
+                     ((occurrence == centred_admitted.occurrence) &
+                      ((distance < centred_admitted.distance) |
+                       ((distance == centred_admitted.distance) &
+                        (seed.read_pos < centred_admitted.read_pos)))));
+        const Pick here{position, occurrence, seed.read_pos, distance};
+        if (take_first) first_admitted = here;
+        if (take_rarest) rarest_admitted = here;
+        if (take_centred) centred_admitted = here;
+        tile_strata[static_cast<size_t>(
+            vote_seed_occurrence_stratum(occurrence))] += valid;
+        tile_admitted += valid;
     }
-    emit_tile(first_admitted, rarest_admitted, centred_admitted, tile_strata,
-              tile_admitted);
+    emit_tile(pick_candidate(first_admitted), pick_candidate(rarest_admitted),
+              pick_candidate(centred_admitted), tile_strata, tile_admitted);
     emit_rescue(tile_admitted);
     out.views_ready = true;
     return true;
@@ -814,21 +841,38 @@ const std::vector<QuerySeed>* drop_query_repeats(
   const std::size_t n = seeds.size();
   if (cap <= 0 || frac <= 0.0f || n <= static_cast<std::size_t>(cap))
     return &seeds;
-  keys.clear();
-  keys.reserve(n);
-  for (const QuerySeed& seed : seeds)
-    keys.push_back(seed.key);
-  std::sort(keys.begin(), keys.end());
   // minimap2's float test, cnt > n * q_occ_frac.
   const float frac_floor = static_cast<float>(n) * frac;
+  const auto over = [&](std::size_t count) {
+    return count > static_cast<std::size_t>(cap) &&
+           static_cast<float>(count) > frac_floor;
+  };
+  // Seeds per key bucket. A key's count is at most its bucket's and the test
+  // rises with the count, so only a key in a bucket over the test can repeat.
+  constexpr int kBucketBits = 12;
+  const auto bucket = [](std::uint64_t key) {
+    return static_cast<std::size_t>((key * 0x9e3779b97f4a7c15ULL) >>
+                                    (64 - kBucketBits));
+  };
+  std::uint32_t counts[std::size_t{1} << kBucketBits] = {};
+  std::uint32_t most = 0;
+  for (const QuerySeed& seed : seeds)
+    most = std::max(most, ++counts[bucket(seed.key)]);
+  if (!over(most))
+    return &seeds;
+  // The keys of the buckets over the test, sorted.
+  keys.clear();
+  for (const QuerySeed& seed : seeds)
+    if (over(counts[bucket(seed.key)]))
+      keys.push_back(seed.key);
+  std::sort(keys.begin(), keys.end());
   // The repeated keys, compacted in order to the front of `keys`.
+  const std::size_t m = keys.size();
   std::size_t repeated = 0;
-  for (std::size_t begin = 0, i = 1; i <= n; ++i) {
-    if (i < n && keys[i] == keys[begin])
+  for (std::size_t begin = 0, i = 1; i <= m; ++i) {
+    if (i < m && keys[i] == keys[begin])
       continue;
-    const std::size_t count = i - begin;
-    if (count > static_cast<std::size_t>(cap) &&
-        static_cast<float>(count) > frac_floor)
+    if (over(i - begin))
       keys[repeated++] = keys[begin];
     begin = i;
   }
@@ -838,7 +882,8 @@ const std::vector<QuerySeed>* drop_query_repeats(
   kept.clear();
   kept.reserve(n);
   for (const QuerySeed& seed : seeds)
-    if (!std::binary_search(keys.begin(), keys.end(), seed.key))
+    if (!over(counts[bucket(seed.key)]) ||
+        !std::binary_search(keys.begin(), keys.end(), seed.key))
       kept.push_back(seed);
   dropped = n - kept.size();
   return &kept;

@@ -22,6 +22,21 @@ namespace fa {
 namespace cpu {
 namespace lr {
 
+// How many voters ahead of the walk a posting list is prefetched.
+constexpr size_t kVotePrefetchAhead = 8;
+// The postings the accumulate stage reduces to keys at a time.
+constexpr uint32_t kVoteKeyBlock = 64;
+
+// The head of a posting list, its first two cache lines; the hardware streams the rest.
+static inline void vote_prefetch_postings(const KmerPostingView &v) {
+  if (!v.found() || v.count == 0)
+    return;
+  const char *p = reinterpret_cast<const char *>(v.positions.data());
+  __builtin_prefetch(p);
+  if (v.count > 8)
+    __builtin_prefetch(p + 64);
+}
+
 // Accumulates distinct-query diagonal votes into scratch.buckets.
 static void
 vote_accumulate(const VoteWindowState &st, ChainWindowPeakScratch &scratch,
@@ -71,41 +86,60 @@ vote_accumulate(const VoteWindowState &st, ChainWindowPeakScratch &scratch,
     const uint32_t epoch = ++seed_epoch;
     int64_t cached_key = std::numeric_limits<int64_t>::min();
     ChainWindowBucketVote *cached = nullptr;
-    for (uint32_t i = 0; i < v.count; ++i) {
-      const uint64_t g = static_cast<uint64_t>(v.positions[i]);
-      advance_contig_cursor(st.chr_bounds, st.n_chr, g, chr_idx, chr_lo,
-                            chr_hi);
-      if (g < chr_lo || g >= chr_hi)
-        continue;
-      // A posting votes only in the lane it is compatible with: the oriented query k-mer
-      // must be the reference k-mer there. Tested after the cursor advance, which every
-      // posting must make.
-      if (!packed_ref_orientation_compatible(seed.z, v.positions.packed_at(i),
-                                             st.is_rc))
-        continue;
-      const int local = static_cast<int>(g - chr_lo);
-      // The read's own k-mer casts no vote, as minimap2's -D drops the anchors on the
-      // exact diagonal; a self hit off that diagonal still votes.
-      if (chr_idx == ctx.self_contig && !st.is_rc && local == seed.read_pos)
-        continue;
-      const int ref_start = local - seed.read_pos;
-      const int64_t bucket_key =
-          vote_pack_key(chr_idx, vote_floor_div(ref_start, st.W));
-      if (bucket_key != cached_key) {
-        cached = &buckets[bucket_key];
-        cached_key = bucket_key;
+    // A block of postings is reduced to the keys of those that vote, kept by a count
+    // rather than a branch, then voted in order.
+    int64_t keys[kVoteKeyBlock];
+    for (uint32_t block = 0; block < v.count; block += kVoteKeyBlock) {
+      const uint32_t block_end = std::min(v.count, block + kVoteKeyBlock);
+      uint32_t n_keys = 0;
+      for (uint32_t i = block; i < block_end; ++i) {
+        const uint64_t g = static_cast<uint64_t>(v.positions[i]);
+        advance_contig_cursor(st.chr_bounds, st.n_chr, g, chr_idx, chr_lo,
+                              chr_hi);
+        if (g < chr_lo || g >= chr_hi)
+          continue;
+        const int local = static_cast<int>(g - chr_lo);
+        // A posting votes only in the lane it is compatible with: the oriented query
+        // k-mer must be the reference k-mer there.
+        const bool compatible = packed_ref_orientation_compatible(
+            seed.z, v.positions.packed_at(i), st.is_rc);
+        // The read's own k-mer casts no vote, as minimap2's -D drops the anchors on
+        // the exact diagonal; a self hit off that diagonal still votes.
+        const bool self = chr_idx == ctx.self_contig && !st.is_rc &&
+                          local == seed.read_pos;
+        const int ref_start = local - seed.read_pos;
+        keys[n_keys] = vote_pack_key(chr_idx, vote_floor_div(ref_start, st.W));
+        n_keys += static_cast<uint32_t>(compatible) &
+                  static_cast<uint32_t>(!self);
       }
-      if (cached->voter_epoch != epoch) {
-        cached->support++;
-        cached->center++;
-        cached->score += seed_weight;
-        cached->voter_epoch = epoch;
+      for (uint32_t j = 0; j < n_keys; ++j)
+        buckets.prefetch(keys[j]);
+      for (uint32_t j = 0; j < n_keys; ++j) {
+        const int64_t bucket_key = keys[j];
+        if (bucket_key != cached_key) {
+          cached = &buckets[bucket_key];
+          cached_key = bucket_key;
+        }
+        if (cached->voter_epoch != epoch) {
+          cached->support++;
+          cached->center++;
+          cached->score += seed_weight;
+          cached->voter_epoch = epoch;
+        }
       }
     }
   };
   if (seed_view_override) {
-    // Views were resolved upstream, so this loop only accumulates.
-    for (const auto &sv : *seed_view_override) {
+    // Views were resolved upstream, so this loop only accumulates; the posting
+    // lists of the voters a few ahead are fetched meanwhile.
+    const std::vector<DnaLongSeedView> &views = *seed_view_override;
+    const size_t n_views = views.size();
+    for (size_t j = 0; j < std::min(n_views, kVotePrefetchAhead); ++j)
+      vote_prefetch_postings(views[j].view);
+    for (size_t j = 0; j < n_views; ++j) {
+      if (j + kVotePrefetchAhead < n_views)
+        vote_prefetch_postings(views[j + kVotePrefetchAhead].view);
+      const DnaLongSeedView &sv = views[j];
       visit_seed_view_for_vote(sv.seed, sv.view, sv.rescued);
     }
   } else {
@@ -136,6 +170,23 @@ static void vote_rank(const VoteWindowState& st,
     auto& buckets = scratch.buckets;
     auto& ranked = scratch.ranked;
     ranked.reserve(buckets.size());
+    // A bit per bucket, at its key's bin plus its contig times an odd number, modulo
+    // 2^b, sends a neighbour (bin + delta) to the bit delta away: a clear bit there
+    // proves it absent, so only a set bit is probed.
+    std::vector<uint64_t>& filter = scratch.rank_filter;
+    size_t filter_bits = 64;
+    while (filter_bits < 16 * buckets.size()) filter_bits <<= 1;
+    filter.assign(filter_bits / 64, 0);
+    const uint32_t filter_mask = static_cast<uint32_t>(filter_bits - 1);
+    const auto filter_bit = [](int64_t key) {
+        return static_cast<uint32_t>(key) +
+               static_cast<uint32_t>(static_cast<uint64_t>(key) >> 32) *
+                   0x9E3779B1u;
+    };
+    for (const auto& kv : buckets) {
+        const uint32_t b = filter_bit(kv.first) & filter_mask;
+        filter[b >> 6] |= uint64_t{1} << (b & 63);
+    }
     for (const auto& kv : buckets) {
         const int key_chr =
             static_cast<int>(static_cast<uint64_t>(kv.first) >> 32);
@@ -144,25 +195,25 @@ static void vote_rank(const VoteWindowState& st,
                 static_cast<uint32_t>(kv.first & 0xFFFFFFFF)));
         int score = kv.second.score;
         int support = kv.second.support;
+        const uint32_t own_bit = filter_bit(kv.first);
         for (int delta = -vote_radius; delta <= vote_radius; ++delta) {
             if (delta == 0) continue;
+            const uint32_t b =
+                (own_bit + static_cast<uint32_t>(delta)) & filter_mask;
+            if (((filter[b >> 6] >> (b & 63)) & 1) == 0) continue;
             const auto it = buckets.find(vote_pack_key(key_chr, key_bin + delta));
             if (it != buckets.end()) {
                 score += it->second.score;
                 support += it->second.support;
             }
         }
+        // Gate before ranking, so a high-scoring bucket below min_support cannot hide a
+        // well-supported diagonal.
+        if (support < min_support) continue;
         ranked.push_back({key_chr, key_bin, score, support, kv.second.center});
     }
-    // Gate before ranking, so a high-scoring bucket below min_support cannot hide a
-    // well-supported diagonal.
-    ranked.erase(
-        std::remove_if(ranked.begin(), ranked.end(),
-            [min_support](const ChainWindowRankedBucket& rb) {
-                return rb.support < min_support;
-            }),
-        ranked.end());
     std::make_heap(ranked.begin(), ranked.end(), VoteHeapBelow{&st});
+    if (st.ctx.vote_keep_ranked) scratch.ranked_all = ranked;
 }
 
 }}}  // namespace fa::cpu::lr
@@ -244,8 +295,12 @@ static void vote_emit_peaks_batched(const VoteWindowState& st,
         int chr;
         size_t first;
         size_t last;
+        int bin_lo;  // its entries' lowest and highest bins
+        int bin_hi;
     };
     std::vector<ChunkContig> chunk_contigs;
+    // Lists longer than this are searched rather than scanned.
+    constexpr uint32_t kRefineScanMax = 32;
     while (!ranked.empty() && static_cast<int>(out.size()) < st.limit) {
         chunk.clear();
         const int needed = st.limit - static_cast<int>(out.size());
@@ -284,71 +339,117 @@ static void vote_emit_peaks_batched(const VoteWindowState& st,
         chunk_contigs.clear();
         for (size_t o = 0; o < chunk_size; ++o) {
             const int chr = chunk[by_chr_bin[o]].chr;
+            const int bin = chunk[by_chr_bin[o]].bin;
             if (!chunk_contigs.empty() && chunk_contigs.back().chr == chr) {
                 chunk_contigs.back().last = o + 1;
+                chunk_contigs.back().bin_hi = bin;
                 continue;
             }
             chunk_contigs.push_back({st.chr_bounds[static_cast<size_t>(chr)],
                                      st.chr_bounds[static_cast<size_t>(chr + 1)],
-                                     chr, o, o + 1});
+                                     chr, o, o + 1, bin, bin});
         }
+        // The search reads a posting's bin from its position, exact while a local
+        // position fits an int, as the scan computes it.
+        bool chunk_contigs_int = true;
+        for (const ChunkContig& cc : chunk_contigs)
+            if (cc.hi - cc.lo > static_cast<uint64_t>(
+                                    std::numeric_limits<int>::max()))
+                chunk_contigs_int = false;
+        // A posting on contig cc of the chunk, at position g.
+        auto visit_posting = [&](const QuerySeed& seed,
+                                 const KmerPostingView& v, uint32_t i,
+                                 uint64_t g, const ChunkContig& cc) {
+            // The accumulate stage's strand test, so every statistic here counts
+            // compatible postings only.
+            if (!packed_ref_orientation_compatible(
+                    seed.z, v.positions.packed_at(i), st.is_rc))
+                return;
+            const int local = static_cast<int>(g - cc.lo);
+            const int ref_start = local - seed.read_pos;
+            const int bin = vote_floor_div(ref_start, st.W);
+            // First entry of this chromosome at or past bin - coarse_radius.
+            const int bin_lo = bin - coarse_radius;
+            size_t lo = cc.first, hi = cc.last;
+            while (lo < hi) {
+                const size_t mid = lo + (hi - lo) / 2;
+                if (chunk[by_chr_bin[mid]].bin < bin_lo)
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+            for (size_t o = lo; o < cc.last; ++o) {
+                const size_t c = by_chr_bin[o];
+                const int bin_distance = std::abs(bin - chunk[c].bin);
+                if (bin - chunk[c].bin < -coarse_radius) break;
+                if (bin_distance <= coarse_radius) {
+                    chunk_evidence_lo[c] =
+                        std::min(chunk_evidence_lo[c], seed.read_pos);
+                    chunk_evidence_hi[c] =
+                        std::max(chunk_evidence_hi[c], seed.read_pos);
+                }
+                if (bin_distance <= st.vote_radius) {
+                    chunk_ref_starts[c].push_back(ref_start);
+                    if (!seed_hit[c]) {
+                        seed_hit[c] = 1;
+                        seed_hit_entries.push_back(c);
+                    }
+                }
+            }
+        };
         // A posting list ascends: k stays on the first chunk contig ending past the
         // postings read so far, and a posting off the chunk's contigs reaches no entry.
+        // A long list is searched instead for each chunk contig's postings within
+        // coarse_radius bins of its entries, the only ones that reach an entry.
         auto visit_seed = [&](const QuerySeed& seed,
                               const KmerPostingView& v,
                               int /*seed_id*/) {
             if (!v.found() || v.count == 0) return;
-            size_t k = 0;
-            for (uint32_t i = 0; i < v.count; ++i) {
-                const uint64_t g = static_cast<uint64_t>(v.positions[i]);
-                if (g >= chunk_contigs[k].hi) {
-                    k = static_cast<size_t>(
-                        std::upper_bound(chunk_contigs.begin() +
-                                             static_cast<ptrdiff_t>(k + 1),
-                                         chunk_contigs.end(), g,
-                                         [](uint64_t x, const ChunkContig& cc) {
-                                             return x < cc.hi;
-                                         }) -
-                        chunk_contigs.begin());
-                    if (k == chunk_contigs.size()) break;
-                }
-                const ChunkContig& cc = chunk_contigs[k];
-                if (g < cc.lo) continue;
-                // The accumulate stage's strand test, so every statistic here counts
-                // compatible postings only.
-                if (!packed_ref_orientation_compatible(
-                        seed.z, v.positions.packed_at(i), st.is_rc))
-                    continue;
-                const int local = static_cast<int>(g - cc.lo);
-                const int ref_start = local - seed.read_pos;
-                const int bin = vote_floor_div(ref_start, st.W);
-                // First entry of this chromosome at or past bin - coarse_radius.
-                const int bin_lo = bin - coarse_radius;
-                size_t lo = cc.first, hi = cc.last;
-                while (lo < hi) {
-                    const size_t mid = lo + (hi - lo) / 2;
-                    if (chunk[by_chr_bin[mid]].bin < bin_lo)
-                        lo = mid + 1;
-                    else
-                        hi = mid;
-                }
-                for (size_t o = lo; o < cc.last; ++o) {
-                    const size_t c = by_chr_bin[o];
-                    const int bin_distance = std::abs(bin - chunk[c].bin);
-                    if (bin - chunk[c].bin < -coarse_radius) break;
-                    if (bin_distance <= coarse_radius) {
-                        chunk_evidence_lo[c] =
-                            std::min(chunk_evidence_lo[c], seed.read_pos);
-                        chunk_evidence_hi[c] =
-                            std::max(chunk_evidence_hi[c], seed.read_pos);
+            if (v.count > kRefineScanMax && chunk_contigs_int) {
+                uint32_t i = 0;
+                for (const ChunkContig& cc : chunk_contigs) {
+                    const int64_t from = std::max<int64_t>(
+                        0, (static_cast<int64_t>(cc.bin_lo) - coarse_radius) * st.W +
+                               seed.read_pos);
+                    const int64_t to = std::min<int64_t>(
+                        static_cast<int64_t>(cc.hi - cc.lo),
+                        (static_cast<int64_t>(cc.bin_hi) + coarse_radius + 1) * st.W +
+                            seed.read_pos);
+                    if (from >= to) continue;
+                    const uint64_t g_from = cc.lo + static_cast<uint64_t>(from);
+                    const uint64_t g_to = cc.lo + static_cast<uint64_t>(to);
+                    for (uint32_t n = v.count; i < n;) {
+                        const uint32_t mid = i + (n - i) / 2;
+                        if (static_cast<uint64_t>(v.positions[mid]) < g_from)
+                            i = mid + 1;
+                        else
+                            n = mid;
                     }
-                    if (bin_distance <= st.vote_radius) {
-                        chunk_ref_starts[c].push_back(ref_start);
-                        if (!seed_hit[c]) {
-                            seed_hit[c] = 1;
-                            seed_hit_entries.push_back(c);
-                        }
+                    for (; i < v.count; ++i) {
+                        const uint64_t g = static_cast<uint64_t>(v.positions[i]);
+                        if (g >= g_to) break;
+                        visit_posting(seed, v, i, g, cc);
                     }
+                    if (i == v.count) break;
+                }
+            } else {
+                size_t k = 0;
+                for (uint32_t i = 0; i < v.count; ++i) {
+                    const uint64_t g = static_cast<uint64_t>(v.positions[i]);
+                    if (g >= chunk_contigs[k].hi) {
+                        k = static_cast<size_t>(
+                            std::upper_bound(chunk_contigs.begin() +
+                                                 static_cast<ptrdiff_t>(k + 1),
+                                             chunk_contigs.end(), g,
+                                             [](uint64_t x, const ChunkContig& cc) {
+                                                 return x < cc.hi;
+                                             }) -
+                            chunk_contigs.begin());
+                        if (k == chunk_contigs.size()) break;
+                    }
+                    const ChunkContig& cc = chunk_contigs[k];
+                    if (g < cc.lo) continue;
+                    visit_posting(seed, v, i, g, cc);
                 }
             }
             // Unweighted vote: one unit per distinct query seed.
@@ -360,9 +461,17 @@ static void vote_emit_peaks_batched(const VoteWindowState& st,
             seed_hit_entries.clear();
         };
         if (exact_refine_seed_views) {
-          for (size_t seed_i = 0; seed_i < exact_refine_seed_views->size();
-               ++seed_i) {
-            const auto& selected = (*exact_refine_seed_views)[seed_i];
+          // Lists the vote did not walk are cold: their heads are fetched a few
+          // views ahead (a searched list is not read from its head).
+          const std::vector<DnaLongSeedView>& refine = *exact_refine_seed_views;
+          const auto prefetch = [&](size_t i) {
+            if (i < refine.size() && refine[i].view.count <= kRefineScanMax)
+              vote_prefetch_postings(refine[i].view);
+          };
+          for (size_t i = 0; i < kVotePrefetchAhead; ++i) prefetch(i);
+          for (size_t seed_i = 0; seed_i < refine.size(); ++seed_i) {
+            prefetch(seed_i + kVotePrefetchAhead);
+            const auto& selected = refine[seed_i];
             visit_seed(selected.seed, selected.view, static_cast<int>(seed_i));
           }
         } else if (retain_used_views) {
@@ -417,6 +526,7 @@ static void vote_emit_peaks_batched(const VoteWindowState& st,
             cp.support = chunk_seed_count[c];
             cp.center_support = std::min(rb.center, chunk_seed_count[c]);
             cp.vote_score = chunk_seed_count[c];
+            cp.fold = rb.support;
             cp.anchor.ref_start_bin = rb.bin;
             cp.anchor.ref_start_bin_width = st.W;
             cp.anchor.median_occurrence = median_occurrence;
@@ -581,6 +691,7 @@ static void vote_emit_peaks(const VoteWindowState& st,
         cp.support = contributing_seed_count;
         cp.center_support = std::min(rb.center, contributing_seed_count);
         cp.vote_score = contributing_score;
+        cp.fold = rb.support;
         cp.anchor.ref_start_bin = rb.bin;
         cp.anchor.ref_start_bin_width = st.W;
         cp.anchor.median_occurrence = median_occurrence;
@@ -731,7 +842,15 @@ std::vector<VotePeak> window_anchor_peaks(
   const int W = effective_vote_diag_bin_width(ctx, span);
   const int vote_radius = (span >= 128) ? 1 : 0;
   auto &buckets = scratch.buckets;
-  {
+  if (seed_view_override) {
+    // A bucket per posting at most: an index of that room keeps the lane's
+    // probes within a table its size, whatever an earlier lane needed.
+    size_t postings = 0;
+    for (const auto &sv : *seed_view_override)
+      if (sv.view.found())
+        postings += sv.view.count;
+    buckets.fit_index(postings);
+  } else {
     const size_t bucket_target = std::max<size_t>(8, active_seed_count * 2);
     if (buckets.bucket_count() < bucket_target) {
       buckets.reserve(bucket_target);

@@ -405,7 +405,7 @@ FaixMultipartTable load_faix_multipart_table(const std::string& path,
 
 FaixIndex FaixIndex::load_image(
     const std::string& path, uint64_t image_offset, uint64_t image_bytes,
-    FaixLoadStatus* status, int n_threads) {
+    FaixLoadStatus* status, int n_threads, bool read_reference) {
         FaixIndex idx;
         if (status) *status = {};
         const auto fail = [&](FaixLoadError error) {
@@ -497,12 +497,17 @@ FaixIndex FaixIndex::load_image(
         if (expected_bytes > image_bytes) return fail(FaixLoadError::Truncated);
         if (expected_bytes != image_bytes) return fail(FaixLoadError::InvalidLayout);
 
-        // An anonymous image of the file, not a file mapping (see read_file_image()).
-        const size_t file_size = static_cast<size_t>(image_bytes);
+        // An anonymous image of the file, not a file mapping (see read_file_image()). The
+        // reference section is the image's last; without `read_reference` it is neither read
+        // nor mapped.
+        const bool keep_reference = has_reference && read_reference;
+        const uint64_t read_bytes =
+            keep_reference ? image_bytes : image_bytes - reference_bytes;
+        const size_t file_size = static_cast<size_t>(read_bytes);
         void* base = mmap(nullptr, file_size, PROT_READ | PROT_WRITE,
                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (base == MAP_FAILED) return fail(FaixLoadError::OutOfMemory);
-        if (!read_file_image(file.fd, base, image_offset, image_bytes, n_threads)) {
+        if (!read_file_image(file.fd, base, image_offset, read_bytes, n_threads)) {
             munmap(base, file_size);
             return fail(FaixLoadError::ReadFailed);
         }
@@ -511,7 +516,7 @@ FaixIndex FaixIndex::load_image(
 #ifdef POSIX_FADV_DONTNEED
         // The page cache holds a second copy of what was just read; drop it.
         (void)posix_fadvise(file.fd, static_cast<off_t>(image_offset),
-                            static_cast<off_t>(image_bytes),
+                            static_cast<off_t>(read_bytes),
                             POSIX_FADV_DONTNEED);
 #endif
         const auto unmap_fail = [&](FaixLoadError error) {
@@ -552,7 +557,7 @@ FaixIndex FaixIndex::load_image(
             return unmap_fail(FaixLoadError::InvalidLayout);
         }
         cursor += h.name_bytes;
-        if (has_reference)
+        if (keep_reference)
             idx.packed_reference_ = reinterpret_cast<const uint8_t*>(cursor);
         idx.shard_mask_ = n_shards - 1;
         idx.mapped_base_ = base;
@@ -825,7 +830,7 @@ bool validate_chrom_offsets(
 namespace fa {
 namespace cpu {
 
-FaixOccDistribution faix_occ_distribution(const FaixIndex& index) {
+FaixOccDistribution faix_occ_distribution(const FaixIndex& index, int n_threads) {
   FaixOccDistribution dist;
   dist.counts.assign(kFaixOccHistogramBound, 0);
   const std::uint32_t* tags = index.tags_data();
@@ -833,20 +838,56 @@ FaixOccDistribution faix_occ_distribution(const FaixIndex& index) {
   if (index.empty() || tags == nullptr || payloads == nullptr)
     return dist;
   const std::uint64_t records = index.distinct_keys();
-  for (std::uint64_t r = 0; r < records; ++r) {
-    const std::uint32_t occ =
-        (tags[r] & kFaixTagMultiBit) == 0
-            ? 1u
-            : static_cast<std::uint32_t>(payloads[r] >> 32);
-    if (occ == 0)
-      continue; // structurally impossible; never counted
-    ++dist.n_distinct;
-    dist.total_postings += occ;
-    if (occ <= kFaixOccHistogramBound) {
-      ++dist.counts[occ - 1];
-    } else {
-      ++dist.tail[occ];
-    }
+  const int threads =
+      std::max(1, n_threads > 0 ? n_threads : threading::default_thread_count());
+  const std::uint64_t ranges =
+      std::max<std::uint64_t>(1, std::min<std::uint64_t>(threads, records));
+  // One contiguous range of records per item, each with its own counts; a key of one
+  // position is only counted, the others go to the range's histogram or tail.
+  struct Range {
+    std::vector<std::uint64_t> counts;
+    std::map<std::uint32_t, std::uint64_t> tail;
+    std::uint64_t singles = 0, multis = 0, multi_postings = 0;
+  };
+  std::vector<Range> parts(static_cast<std::size_t>(ranges));
+  const std::uint64_t step = records / ranges, extra = records % ranges;
+  threading::parallel_for(
+      threads, static_cast<std::int64_t>(ranges), [&](std::int64_t item, int) {
+        const std::uint64_t i = static_cast<std::uint64_t>(item);
+        Range& part = parts[static_cast<std::size_t>(i)];
+        part.counts.assign(kFaixOccHistogramBound, 0);
+        const std::uint64_t lo = i * step + std::min(i, extra);
+        const std::uint64_t hi = lo + step + (i < extra ? 1 : 0);
+        // The totals stay in locals for the pass: those of the ranges lie side by side.
+        std::uint64_t singles = 0, multis = 0, multi_postings = 0;
+        for (std::uint64_t r = lo; r < hi; ++r) {
+          if ((tags[r] & kFaixTagMultiBit) == 0) {
+            ++singles;
+            continue;
+          }
+          const std::uint32_t occ = static_cast<std::uint32_t>(payloads[r] >> 32);
+          if (occ == 0)
+            continue; // structurally impossible; never counted
+          ++multis;
+          multi_postings += occ;
+          if (occ <= kFaixOccHistogramBound) {
+            ++part.counts[occ - 1];
+          } else {
+            ++part.tail[occ];
+          }
+        }
+        part.singles = singles;
+        part.multis = multis;
+        part.multi_postings = multi_postings;
+      });
+  for (const Range& part : parts) {
+    for (std::uint32_t v = 0; v < kFaixOccHistogramBound; ++v)
+      dist.counts[v] += part.counts[v];
+    for (const auto& entry : part.tail)
+      dist.tail[entry.first] += entry.second;
+    dist.counts[0] += part.singles;
+    dist.n_distinct += part.singles + part.multis;
+    dist.total_postings += part.singles + part.multi_postings;
   }
   return dist;
 }
@@ -991,6 +1032,38 @@ bool FaixIndex::set_packed_reference_payload(
     return true;
 }
 
+#if defined(__x86_64__) && !defined(__POPCNT__) && (defined(__GNUC__) || defined(__clang__))
+#define FA_FAIX_POPCNT_DISPATCH 1
+#else
+#define FA_FAIX_POPCNT_DISPATCH 0
+#endif
+
+namespace {
+
+#if FA_FAIX_POPCNT_DISPATCH
+// The batch with the popcount instruction, for a CPU that has one. flatten inlines the batch
+// here and its stages are blocks of it, so no count is left to code compiled for the baseline.
+__attribute__((target("popcnt"), flatten)) void faix_lookup_batch_popcnt(
+    const uint32_t* tags, const uint64_t* payloads, const PackedRefPos* postings,
+    const uint64_t* chromosome_offsets, uint64_t chromosome_count,
+    const uint8_t* occupancy_bits, const uint64_t* rank_index,
+    const FaixShardEntry* shard_dir, uint64_t shard_mask, int shard_bits, int twok,
+    uint32_t rank_block_bits, const uint64_t* keys, size_t key_count,
+    KmerPostingView* out) {
+    faix_sharded_lookup_batch<true>(
+        tags, payloads, postings, chromosome_offsets, chromosome_count, occupancy_bits,
+        rank_index, shard_dir, shard_mask, shard_bits, twok, rank_block_bits, keys,
+        key_count, out);
+}
+
+bool cpu_has_popcnt() {
+    static const bool ok = __builtin_cpu_supports("popcnt") != 0;
+    return ok;
+}
+#endif
+
+}  // namespace
+
 void FaixIndex::lookup_batch(
     const uint64_t* keys,
     size_t n,
@@ -1001,7 +1074,11 @@ void FaixIndex::lookup_batch(
         for (size_t i = 0; i < n; ++i) out[i] = KmerPostingView{};
         return;
     }
-    faix_sharded_lookup_batch(
+    auto* batch = &faix_sharded_lookup_batch<false>;
+#if FA_FAIX_POPCNT_DISPATCH
+    if (cpu_has_popcnt()) batch = &faix_lookup_batch_popcnt;
+#endif
+    batch(
         tags_, payloads_, postings_, chr_offsets_, header_.contig_count,
         occupancy_bits_, rank_index_, shard_dir_, shard_mask_,
         static_cast<int>(header_.shard_bits), 2 * static_cast<int>(header_.k),

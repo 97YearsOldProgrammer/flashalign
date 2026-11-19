@@ -78,7 +78,8 @@ public:
   //
   // `n_threads` bounds the threads used to read the file and unpack the reference; <= 0
   // uses the default. When `reference_bases_needed` is false (DNA map-only PAF) the
-  // reference stays packed and only names and lengths are read from the index.
+  // index is loaded without its reference section and only names and lengths are read
+  // from it.
   // `image_offset` / `image_bytes` select one part of a multi-part index; both 0 means the
   // whole file. `packed_reference` (the DNA presets) keeps the needed bases packed in the
   // index, for the DNA context to unpack per region; the caller passes it only for an
@@ -345,7 +346,9 @@ private:
   std::vector<int> dual_order_;
   std::vector<int> dual_contig_rank_;
   std::shared_ptr<SeedIndex> index_ = std::make_shared<SeedIndex>();
-  // Occurrence distribution of the attached index, computed once per index.
+  // Occurrence distribution of the attached index, computed once per index on the
+  // threads the engine built, loaded or unpacked it with (<= 0 the default).
+  int index_threads_ = 0;
   std::shared_ptr<const ::fa::cpu::FaixOccDistribution> occ_dist_;
   const SeedIndex* occ_dist_source_ = nullptr;
   // Built by compose_rna_runtime(); read-only while mapping.

@@ -146,6 +146,9 @@ struct VotePeak {
   int support = 0;
   int center_support = 0;
   int vote_score = 0;
+  // The bucket's folded voter tally at the rank stage, before the refine recounts
+  // support (ChainWindowRankedBucket::support).
+  int fold = 0;
   LongWindowAnchor anchor;
   // The whole-read winner's per-read line d(q) = line_a + stretch(q, line_b_q20)
   // (vote/vote.h), set only on that winner, when its line passes the gate (line_gate).
@@ -426,6 +429,10 @@ struct LongReadSeedContext {
     // DNA, options/options.h skip_self: the contig that is the query read itself,
     // found by its exact name; -1 when the read is not in the index or the option is off.
     int self_contig = -1;
+    // The vote keeps its ranked buckets before the drain
+    // (ChainWindowPeakScratch::ranked_all), for the lr and lr:hq copy walk
+    // (dna/mapq.cpp vote_copy_walk).
+    bool vote_keep_ranked = false;
     const std::vector<std::string>* chr_names = nullptr;
 
     bool syncmer_occ_aware_active() const;

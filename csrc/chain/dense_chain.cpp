@@ -1527,15 +1527,14 @@ DenseRunResult dense_run_chain(const std::vector<DenseRun>& runs,
   predecessors.resize(static_cast<size_t>(count));
   std::vector<int32_t>& marks = scratch.marks;
   marks.assign(static_cast<size_t>(count), 0);
-  // Admissibility runs from A's end to B's start, so a long predecessor within
-  // reach can start more than max_dist_x back. The look-back window adds the longest run's
-  // r-extent so no admissible predecessor is dropped.
+  // dense_step admits dq <= max_dist_x and |dr - dq| <= bw, from A's end to B's start, so
+  // an admissible predecessor starts at most max_dist_x + bw + its own r-extent back. The
+  // linear scan's look-back window is that with the longest run's r-extent: none is dropped.
   int64_t max_run_r_len = 0;
   for (const DenseRun& run : runs)
     max_run_r_len = std::max<int64_t>(
         max_run_r_len, static_cast<int64_t>(run.r_end) - run.r_begin);
-  const int64_t window =
-      static_cast<int64_t>(params.max_dist_x) + max_run_r_len;
+  int64_t window = static_cast<int64_t>(params.max_dist_x) + max_run_r_len;
   // The break needs drift >= 0, which takes non-negative penalties (and dense_step's
   // clamp of the skip term on overlap).
   const bool prune_by_upper_bound =
@@ -1544,6 +1543,8 @@ DenseRunResult dense_run_chain(const std::vector<DenseRun>& runs,
   const bool use_exact =
       params.diag_min_runs >= 0 &&
       count >= static_cast<int64_t>(params.diag_min_runs);
+  if (!use_exact)
+    window += params.bw;
 
   // The arms hold references only, so an unused one allocates nothing.
   ExactArm exact(hot, params, scratch, static_cast<int32_t>(count));

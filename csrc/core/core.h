@@ -444,7 +444,7 @@ public:
 
   size_t size() const { return entries_.size(); }
   bool empty() const { return entries_.empty(); }
-  // Index capacity, as unordered_map::bucket_count.
+  // The index's allocated slots (at least the slots in use).
   size_t bucket_count() const { return slots_.size(); }
 
   // Bumps the generation instead of clearing the index, except on wrap-around.
@@ -459,15 +459,26 @@ public:
   // Room for n entries at load <= 0.5 without a rehash.
   void reserve(size_t n) {
     const size_t want = pow2_at_least(n == 0 ? 1 : n * 2);
-    if (want > slots_.size())
+    if (want > index_size_)
       rebuild_index(want);
     entries_.reserve(n);
+  }
+
+  // On an empty map: an index of exactly the room for n entries at load <= 0.5
+  // (from 16 slots), so its probes stay within that many slots. One smaller
+  // than the allocation takes its first slots, which clear() left stale.
+  void fit_index(size_t n) {
+    const size_t want = pow2_at_least(n < 8 ? 16 : n * 2);
+    if (want > slots_.size())
+      rebuild_index(want);
+    else
+      index_size_ = want;
   }
 
   // Get-or-insert a value-initialized Value. The reference is valid until the next insert.
   Value &operator[](int64_t key) {
     ensure_index();
-    size_t mask = slots_.size() - 1;
+    size_t mask = index_size_ - 1;
     size_t slot = hash(key) & mask;
     for (;;) {
       const uint64_t s = slots_[slot];
@@ -477,9 +488,9 @@ public:
         return entries_[slot_index(s)].second;
       slot = (slot + 1) & mask;
     }
-    if ((entries_.size() + 1) * 2 > slots_.size()) {
-      rebuild_index(slots_.size() * 2);
-      mask = slots_.size() - 1;
+    if ((entries_.size() + 1) * 2 > index_size_) {
+      rebuild_index(index_size_ * 2);
+      mask = index_size_ - 1;
       slot = hash(key) & mask;
       while (slot_live(slots_[slot]))
         slot = (slot + 1) & mask;
@@ -488,6 +499,12 @@ public:
     entries_.push_back(value_type{key, Value{}});
     slots_[slot] = pack(generation_, new_idx);
     return entries_.back().second;
+  }
+
+  // Prefetches the slot a probe of key starts at.
+  void prefetch(int64_t key) const {
+    if (index_size_ != 0)
+      __builtin_prefetch(&slots_[hash(key) & (index_size_ - 1)]);
   }
 
   iterator find(int64_t key) {
@@ -502,6 +519,7 @@ public:
   void swap(FlatInt64Map &o) {
     entries_.swap(o.entries_);
     slots_.swap(o.slots_);
+    std::swap(index_size_, o.index_size_);
     std::swap(generation_, o.generation_);
   }
 
@@ -526,14 +544,14 @@ private:
     return static_cast<uint32_t>(s & 0xFFFFFFFFu);
   }
   void ensure_index() {
-    if (slots_.empty())
+    if (index_size_ == 0)
       rebuild_index(16);
   }
 
   int64_t find_index(int64_t key) const {
-    if (slots_.empty())
+    if (index_size_ == 0)
       return -1;
-    const size_t mask = slots_.size() - 1;
+    const size_t mask = index_size_ - 1;
     size_t slot = hash(key) & mask;
     for (;;) {
       const uint64_t s = slots_[slot];
@@ -546,9 +564,17 @@ private:
   }
 
   // Rebuilds the index at new_cap (a power of two, at least 16) from the live entries.
+  // Live slots lie within the first index_size_, so a larger index within the
+  // allocation clears only its own slots.
   void rebuild_index(size_t new_cap) {
     new_cap = pow2_at_least(new_cap < 16 ? 16 : new_cap);
-    slots_.assign(new_cap, uint64_t{0});
+    if (new_cap > slots_.size())
+      slots_.assign(new_cap, uint64_t{0});
+    else
+      std::fill(slots_.begin(),
+                slots_.begin() + static_cast<std::ptrdiff_t>(new_cap),
+                uint64_t{0});
+    index_size_ = new_cap;
     if (generation_ == 0)
       generation_ = 1; // 0 marks an empty slot
     const size_t mask = new_cap - 1;
@@ -562,6 +588,7 @@ private:
 
   std::vector<value_type> entries_; // dense, insertion order
   std::vector<uint64_t> slots_;     // gen<<32 | entry index; live iff gen match
+  size_t index_size_ = 0;           // slots in use: the first of slots_
   uint32_t generation_ = 1;
 };
 

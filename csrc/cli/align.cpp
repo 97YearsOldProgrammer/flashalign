@@ -1114,8 +1114,8 @@ bool run_needs_cigar(const AlignOptions& opt) {
   return opt.format == "sam" || opt.paf_cigar;
 }
 
-// DNA map-only reads no reference bases, so its index load skips unpacking
-// the reference. CIGAR realization and RNA need them.
+// DNA map-only reads no reference bases, so its index load skips the
+// reference section. CIGAR realization and RNA need them.
 bool run_needs_reference_bases(const AlignOptions& opt) {
   return run_needs_cigar(opt) || fa::cpu::api::is_rna_preset(opt.preset);
 }

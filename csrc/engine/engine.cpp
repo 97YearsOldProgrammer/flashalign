@@ -45,6 +45,7 @@ LongReadEngine::LongReadEngine(std::unordered_map<std::string, std::string> geno
   cfg.build_threads = build_threads > 0
                           ? build_threads
                           : ::fa::cpu::threading::default_thread_count();
+  index_threads_ = cfg.build_threads;
   ::fa::cpu::FaixBuildStatus build_status;
   index_ = std::make_shared<SeedIndex>(
       build_seed_index(chr_encs_, cfg, &build_status));
@@ -77,8 +78,10 @@ LongReadEngine::from_index(std::unordered_map<std::string, std::string> genome,
   // s is set from the index below.
   obj->apply_chain_seed_constructor_config(0, chain_syncmer_downsample);
   FaixLoadStatus load_status;
-  obj->index_ = std::make_shared<SeedIndex>(load_seed_index(
-      index_path, &load_status, n_threads, image_offset, image_bytes));
+  obj->index_threads_ = n_threads;
+  obj->index_ = std::make_shared<SeedIndex>(
+      load_seed_index(index_path, &load_status, n_threads, image_offset,
+                      image_bytes, reference_bases_needed));
   if (obj->index_->empty()) {
     throw std::runtime_error("cannot load index " + index_path + ": " +
                              faix_load_error_message(load_status));
@@ -122,6 +125,7 @@ LongReadEngine::from_shared_index(std::shared_ptr<SeedIndex> index,
   }
   auto obj = std::make_unique<LongReadEngine>();
   obj->index_ = std::move(index);
+  obj->index_threads_ = config.common.num_threads;
   if (!(obj->index_->has_reference_payload() &&
         obj->index_->reference_chromosomes_u8(
             obj->chr_encs_, config.common.num_threads))) {
@@ -200,7 +204,7 @@ void LongReadEngine::resolve_index_occ_cap_into(
   if (!index_ || index_->empty()) return;
   if (!occ_dist_ || occ_dist_source_ != index_.get()) {
     occ_dist_ = std::make_shared<const ::fa::cpu::FaixOccDistribution>(
-        ::fa::cpu::faix_occ_distribution(*index_));
+        ::fa::cpu::faix_occ_distribution(*index_, index_threads_));
     occ_dist_source_ = index_.get();
   }
   const auto& previous = mapping.long_occ_index_resolution;
@@ -275,6 +279,7 @@ LongReadEngine::make_seed_context(
       !config.is_rna() &&
       (mapping.vote_admission_ratio > 0.0 || mapping.all_chains);
   ctx.tile_rescue_occ = mapping.dna_tile_rescue_occ;
+  ctx.vote_keep_ranked = !config.is_rna() && mapping.chain_mapq_undrained_nsub;
   ctx.chr_names = &chr_names_;
   return ctx;
 }
@@ -594,9 +599,12 @@ void LongReadEngine::bind_dual_order() {
       cfg_.common.enable_full_read_cigar;
   dctx.opts.cigar_replay_request = cigar_replay_request_for(cfg_.common);
   dctx.opts.chain_mapq_hifi_margin = mapping.chain_mapq_hifi_margin;
+  dctx.opts.chain_mapq_voter_fold = mapping.chain_mapq_voter_fold;
+  dctx.opts.chain_mapq_undrained_nsub = mapping.chain_mapq_undrained_nsub;
+  dctx.opts.chain_mapq_chain_alt = mapping.chain_mapq_chain_alt;
+  dctx.opts.vote_floor_capacity = mapping.vote_floor_capacity;
   dctx.opts.inversion_probe_local_gate = mapping.inversion_probe_local_gate;
   dctx.opts.secondary_max = mapping.secondary_max;
-  dctx.opts.rival_split_ends = mapping.rival_split_ends;
   dctx.opts.chain_syncmer_s = cfg_.index.syncmer_s;
   dctx.opts.chain_syncmer_downsample = cfg_.index.syncmer_downsample;
   dctx.opts.vote_admission_ratio = mapping.vote_admission_ratio;

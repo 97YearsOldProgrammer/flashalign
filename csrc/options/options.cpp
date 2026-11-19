@@ -255,6 +255,19 @@ static void set_dna_long_platform_fields(
         hifi_row ? lr::kDnaHiFiTileRescueOcc : lr::kDnaTileRescueOcc;
     // HiFi only: the chain MAPQ margin rule (dna/dna.h).
     mapping.chain_mapq_hifi_margin = profile.kind == DnaPresetKind::HiFi;
+    // lr and lr:hq only: the chain MAPQ's vote ratios read the voters' fold,
+    // its n_sub adds the vote's undrained copies, a record with no DP pair
+    // reads mapq_alt on its chain pair, and the vote floor reads the vote
+    // against the voters a query of its length can field (options.h
+    // chain_mapq_voter_fold, chain_mapq_undrained_nsub, chain_mapq_chain_alt,
+    // vote_floor_capacity).
+    const bool read_row =
+        profile.kind != DnaPresetKind::Asm && !profile.overlap.on;
+    mapping.chain_mapq_voter_fold = read_row;
+    mapping.chain_mapq_undrained_nsub = read_row;
+    mapping.chain_mapq_chain_alt = read_row;
+    mapping.vote_floor_capacity =
+        read_row ? lr::kDnaChainMapqVoteFloorVoters : 0;
     // HiFi only: the late inversion probe's local-chain gate
     // (dna/dna.h).
     mapping.inversion_probe_local_gate = profile.kind == DnaPresetKind::HiFi;
@@ -264,9 +277,6 @@ static void set_dna_long_platform_fields(
     mapping.chain_two_pass = profile.assembly.chain_two_pass;
     mapping.divergence_contrast = profile.assembly.divergence_contrast;
     mapping.vote_stretch = profile.assembly.vote_stretch;
-    // lr and lr:hq only: a rival region ends at its first split (dna/dna.h).
-    mapping.rival_split_ends =
-        profile.kind != DnaPresetKind::Asm && !profile.overlap.on;
     common.max_query_seeds_per_strand = profile.placement.vote_seeds;
     mapping.cigar_dp_match = profile.cigar_dp_match;
     mapping.cigar_dp_mismatch = profile.cigar_dp_mismatch;
@@ -382,8 +392,11 @@ static void set_splice_fields(
     mapping.base.vote_admission_ratio = 0.0;
     mapping.base.cigar_dp_min_ksw_len = 0;
     mapping.base.chain_mapq_hifi_margin = false;
+    mapping.base.chain_mapq_voter_fold = false;
+    mapping.base.chain_mapq_undrained_nsub = false;
+    mapping.base.chain_mapq_chain_alt = false;
+    mapping.base.vote_floor_capacity = 0;
     mapping.base.inversion_probe_local_gate = false;
-    mapping.base.rival_split_ends = false;
     mapping.base.dna_pool_gate_occ = 0;
     mapping.base.dna_tile_rescue_occ = 0;
     // The vote's cap rule with the RNA seed shape's f, the DNA floor and no

@@ -109,6 +109,14 @@ struct ResolvedDnaOptions {
   // Chain MAPQ, HiFi presets only: on the DP branch the margin dp_max -
   // dp_max2 over the dp2 owner replaces the ratio form.
   bool chain_mapq_hifi_margin = false;
+  // options/options.h chain_mapq_voter_fold.
+  bool chain_mapq_voter_fold = false;
+  // options/options.h chain_mapq_undrained_nsub.
+  bool chain_mapq_undrained_nsub = false;
+  // options/options.h chain_mapq_chain_alt.
+  bool chain_mapq_chain_alt = false;
+  // options/options.h vote_floor_capacity.
+  int vote_floor_capacity = 0;
   // HiFi presets only: a seam's or piece's late inversion probe runs only
   // over a local chain of the read's opposite-lane seeds in its drop window
   // (dna.h).
@@ -116,9 +124,6 @@ struct ResolvedDnaOptions {
   // -N, minimap2's best_n: the cap on secondary alignments in both lanes
   // (realization.cpp retain_regions).
   int secondary_max = 5;
-  // lr and lr:hq: a secondary-role region ends at its first split, with no
-  // continuation (realization.cpp plan_block_split).
-  bool rival_split_ends = false;
   // Chain MAPQ own-locus rules, both on: a chained shadow's vote counts for
   // the winner, and the chained shadow window grows with read length. No
   // option sets them.
@@ -193,6 +198,12 @@ struct DnaContext {
   // map_read when opts.occ_dist > 0, null otherwise. The vote and every pool
   // gate admit them as rescued seeds (RetainedSeedRef::rescued).
   const std::vector<std::uint8_t>* readmitted = nullptr;
+  // Under LongReadSeedContext::vote_keep_ranked: each lane's ranked vote buckets
+  // before the drain (ChainWindowPeakScratch::ranked_all) and both lanes' emitted
+  // peaks, set by map_read.
+  const std::vector<ChainWindowRankedBucket>* vote_ranked[2] = {nullptr,
+                                                                nullptr};
+  const std::vector<VotePeak>* vote_peaks = nullptr;
   // Told of the read's stage boundaries (map.cpp StageRelease), set by
   // map_read for every read.
   DnaStageListener* stage_listener = nullptr;
@@ -296,6 +307,8 @@ inline KmerPostingIntervalView posting_interval(
 
 struct RetainedSeedDensityEntry {
   PostingHandle view;
+  // A one-posting view's posting, read-local (ChainSeedLookupCache::singles).
+  PackedRefPos single = 0;
   // Some RetainedSeedRef of this key is rescued.
   bool rescued = false;
   bool retained = false;
@@ -389,17 +402,37 @@ class RetainedSeedDensity {
                                 std::uint32_t low,
                                 std::uint32_t high) const;
 
-  // Resolves n intervals for the same (chromosome, low, high) window; result i
-  // equals slice(index, entry_indices[i], chromosome, low, high). The binary
-  // searches of up to kSliceBatch entries are interleaved so their cache
-  // misses overlap.
-  void slice_batch(const SeedIndex& index,
-                   const std::uint32_t* entry_indices,
-                   std::size_t n,
-                   int chromosome,
-                   std::uint32_t low,
-                   std::uint32_t high,
-                   KmerPostingIntervalView* out);
+  // The per-window part of a slice, computed once for every entry sliced to
+  // one (chromosome, low, high).
+  struct SliceWindow {
+    int chromosome = -1;
+    std::uint32_t low = 0;
+    std::uint32_t high = 0;
+    bool valid = false;
+    bool empty = true;
+    // The index's directory is the validated one, every stored view's.
+    bool same_directory = false;
+    bool low_packed = false;
+    bool high_packed = false;
+    PackedRefPos packed_low = 0;
+    PackedRefPos packed_high = 0;
+  };
+  SliceWindow slice_window(const SeedIndex& index, int chromosome,
+                           std::uint32_t low, std::uint32_t high) const;
+
+  // Resolves n intervals of `window`; result i is the handle of
+  // slice(index, entry_indices[i], chromosome, low, high). The first bounds
+  // of up to kSliceBatch entries are interleaved so their cache misses
+  // overlap.
+  void slice_batch(const SeedIndex& index, const SliceWindow& window,
+                   const std::uint32_t* entry_indices, std::size_t n,
+                   PostingHandle* out) const;
+
+  // When the entry's list is one posting, its slice_batch result into `out`,
+  // by two comparisons on the entry's read-local copy of the posting, which
+  // the result's postings point at.
+  bool slice_single(const SliceWindow& window, std::uint32_t entry_index,
+                    PostingHandle& out) const;
 
  private:
   std::vector<RetainedSeedDensityEntry> entries_;
@@ -2147,7 +2180,11 @@ inline constexpr double kDnaChainMapqCoef = 40.0; // q_coef
 // another segment of the same read.
 inline constexpr double kDnaChainMapqMaskLevel = 0.5;
 // The vote floor under which pen_cm is discounted linearly, and the vote cap
-// q <= (int)(4.343 * w / 3).
+// q <= (int)(4.343 * w / 3); w is the winner's recount on every preset, where
+// lr and lr:hq read the vote ratios on folds. On lr and lr:hq the floor reads
+// w over min(1, S / 128), S the closed syncmers a query of its length can
+// field (options/options.h kDnaChainMapqVoteFloorVoters); the cap reads w as
+// counted.
 inline constexpr double kDnaChainMapqVoteFloor = 40.0;
 inline constexpr double kDnaChainMapqVoteCapCoef = 4.343;
 inline constexpr double kDnaChainMapqVoteCapDiv = 3.0;
@@ -2171,13 +2208,9 @@ inline constexpr double kDnaChainMapqHifiRivalStrengthMax = 1.0;
 // two-base gap (O1 + 2 E1), which one gap event (the HiFi homopolymer error)
 // explains.
 inline constexpr int kDnaChainMapqHifiSingleEventMapq = 9;
-// R6: the split-read cap; (a) the rival strength that triggers it; (b) the
-// minimum event count (mismatches + indel events) and mismatch share. (b)
-// applies with or without a seat.
+// R6: the split-read cap and the competing rival strength that triggers it.
 inline constexpr int kDnaChainMapqHifiSplitCapMapq = 3;
 inline constexpr double kDnaChainMapqHifiSplitRivalStrength = 0.4;
-inline constexpr int kDnaChainMapqHifiSubstitutionEvents = 20;
-inline constexpr double kDnaChainMapqHifiSubstitutionShare = 0.45;
 // Shadow rule, chained rivals: a chained rival is the winner's own locus when
 // its chain overlaps the winner's reference span over more than half the
 // shorter span, lies within that span extended by the slack on each side, and
@@ -2198,16 +2231,15 @@ inline constexpr int kDnaChainMapqChainShadowFraction = 5;
 inline constexpr int kDnaChainMapqPeakShadowFloorBp = 2000;
 inline constexpr int kDnaChainMapqPeakShadowFraction = 10;
 // The rule bits (header comment).
-inline constexpr int kDnaChainMapqStudyRelativeShareCap = 2;
 inline constexpr int kDnaChainMapqStudyRecordShadow = 8;
 inline constexpr int kDnaChainMapqStudyFamilyVouch = 64;
 inline constexpr int kDnaChainMapqStudyBlockRivals = 256;
 
 // The bits in force under the HiFi presets.
-inline constexpr int kDnaChainMapqStudy =
-    kDnaChainMapqStudyRelativeShareCap | kDnaChainMapqStudyRecordShadow |
-    kDnaChainMapqStudyFamilyVouch | kDnaChainMapqStudyBlockRivals;
-static_assert(kDnaChainMapqStudy == 330, "the HiFi MAPQ rule set");
+inline constexpr int kDnaChainMapqStudy = kDnaChainMapqStudyRecordShadow |
+                                          kDnaChainMapqStudyFamilyVouch |
+                                          kDnaChainMapqStudyBlockRivals;
+static_assert(kDnaChainMapqStudy == 328, "the HiFi MAPQ rule set");
 
 // The rule bits for a run: kDnaChainMapqStudy under the HiFi presets, else 0.
 inline constexpr int dna_chain_mapq_study_bits(bool hifi_margin_rule) noexcept {
@@ -2226,6 +2258,8 @@ struct DnaChainMapqRival {
   int q_begin = -1;
   int q_end = -1;
   int vote_evidence = 0;
+  // The candidate's VotePeak::fold; 0 without a catalogue candidate.
+  int fold = 0;
   bool chained = false;
   // The evidence's dp2 is this rival's DP score, as minimap2 attributes
   // dp_max2 to one rival; n_sub then counts it once under either rule.
@@ -2258,6 +2292,7 @@ struct DnaChainMapqEvidence {
   int winner_q_begin = -1;
   int winner_q_end = -1;
   int winner_vote = 0;
+  int winner_fold = 0; // the winner's VotePeak::fold
   int read_len = 0;
   // The winner's locus, for the shadow rule; see DnaChainMapqRival.
   int winner_contig = -1;
@@ -2295,25 +2330,28 @@ struct DnaChainMapqEvidence {
   //   chain_shadow_read_slack: see dna_chain_mapq_chain_shadow_slack.
   bool shadow_vote_credit = false;
   bool chain_shadow_read_slack = false;
+  // lr and lr:hq (options/options.h chain_mapq_voter_fold): rival and winner
+  // are read on their folds wherever the formula forms a vote ratio.
+  bool voter_fold = false;
+  // lr and lr:hq (options/options.h chain_mapq_chain_alt): the seed length a
+  // difference costs on the chain pair; 0 elsewhere.
+  int chain_alt_k = 0;
+  // lr and lr:hq (options/options.h chain_mapq_undrained_nsub): the vote's
+  // undrained copies of this record's candidate, added to n_sub; 0 elsewhere.
+  int undrained_copies = 0;
+  // lr and lr:hq (options/options.h vote_floor_capacity): C, 0 elsewhere, and
+  // min(1, S / C), the scale the vote floor reads the winner's vote over; the
+  // vote cap reads the vote as counted.
+  int vote_floor_capacity = 0;
+  double vote_floor_scale = 1.0;
   // HiFi margin rule (header comment), HiFi presets only: the margin
   // dp1_raw - dp2_raw is read against the scoring row below.
   bool hifi_margin_rule = false;
   int substitution_cost = 0; // A + B
   int gap_open1 = 0;         // O1
   int gap_extend1 = 0;       // E1
-  // R6: the family's block-owning records, and this record's mismatches (-1
-  // without accounting) and indel events (-1 without a CIGAR).
+  // R6: the family's block-owning records.
   int family_blocks = 1;
-  int record_mismatches = -1;
-  int record_ins_events = -1;
-  int record_del_events = -1;
-  // The rule bits (dna_chain_mapq_study_bits); the formula reads only bit 2.
-  // For it: this record's aligned bases, and the (mismatches, aligned bases)
-  // of the family's cleanest other accounted record, -1 when there is none.
-  int study_bits = 0;
-  int record_aligned_bases = -1;
-  int family_min_mismatches = -1;
-  int family_min_aligned = -1;
   // The record prints from a block part (DnaBlockPart). f1 and cnt are then
   // its whole chain's and sib_f2 the part's same-candidate subsc; pen_cm and
   // the map-only logarithm read part_score and part_anchors (minimap2's score
@@ -2369,8 +2407,7 @@ struct DnaChainMapqBreakdown {
   int hifi_margin_mapq = -1;
   // The seat (0 none, 1 the dp2 owner) and its margin on the rescaled pair
   // (R1 reads the pair before the rescale), the pen the margin rule uses,
-  // and the split-read cap applied (0 none, 1 rival strength, 2 substitution
-  // share, 3 both).
+  // and the split-read cap applied (0 none, 1 R6).
   int seat_kind = 0;
   double seat_m_eff = 0.0;
   double hifi_pen = 0.0;

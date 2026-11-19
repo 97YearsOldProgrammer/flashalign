@@ -433,7 +433,7 @@ void harvest_group_anchors(
   deferred.reserve(seeds.size());
   constexpr std::size_t kSliceBlock = RetainedSeedDensity::kSliceBatch;
   std::uint32_t block_entries[kSliceBlock];
-  KmerPostingIntervalView block_intervals[kSliceBlock];
+  PostingHandle block_intervals[kSliceBlock];
   // The seed index ranges an interval slices: every seed, or under
   // the vote per stretch the union of its members' query ranges, found by
   // binary search on the read positions, which ascend.
@@ -470,6 +470,9 @@ void harvest_group_anchors(
     // distinct entry is sliced once, in batches through slice_batch; seeds are
     // still processed in order.
     PassSlices& slices = pass_slices(seed_index.entry_count());
+    const RetainedSeedDensity::SliceWindow window = seed_index.slice_window(
+        *context.ref.index, contig, static_cast<std::uint32_t>(bounds.low),
+        static_cast<std::uint32_t>(bounds.high));
     deferred.clear();
     sweep.reset(first_admitter, last_admitter, ranged);
     for (const auto& [range_begin, range_end] : seed_ranges)
@@ -488,17 +491,20 @@ void harvest_group_anchors(
           slices.interval[entry] = {};
           continue;
         }
+        // A one-posting list is sliced here, so a batch holds longer lists.
+        if (seed_index.slice_single(window, entry, slices.interval[entry])) {
+          stamp = slices.pass;
+          continue;
+        }
         if (block_size == kSliceBlock) break;
         stamp = slices.pass;
         block_entries[block_size++] = entry;
       }
-      seed_index.slice_batch(*context.ref.index, block_entries, block_size,
-                             contig, static_cast<std::uint32_t>(bounds.low),
-                             static_cast<std::uint32_t>(bounds.high),
-                             block_intervals);
+      if (block_size != 0)
+        seed_index.slice_batch(*context.ref.index, window, block_entries,
+                               block_size, block_intervals);
       for (std::size_t lane = 0; lane < block_size; ++lane)
-        slices.interval[block_entries[lane]] =
-            posting_handle(block_intervals[lane]);
+        slices.interval[block_entries[lane]] = block_intervals[lane];
       for (std::size_t at = first; at < next; ++at) {
         const RetainedSeedRef& seed = seeds[at];
         const KmerPostingIntervalView interval =
