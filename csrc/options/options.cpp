@@ -277,9 +277,6 @@ static void set_dna_long_platform_fields(
     mapping.chain_two_pass = profile.assembly.chain_two_pass;
     mapping.divergence_contrast = profile.assembly.divergence_contrast;
     mapping.vote_stretch = profile.assembly.vote_stretch;
-    // lr and lr:hq only: a rival region ends at its first split (dna/dna.h).
-    mapping.rival_split_ends =
-        profile.kind != DnaPresetKind::Asm && !profile.overlap.on;
     common.max_query_seeds_per_strand = profile.placement.vote_seeds;
     mapping.cigar_dp_match = profile.cigar_dp_match;
     mapping.cigar_dp_mismatch = profile.cigar_dp_mismatch;
@@ -400,7 +397,6 @@ static void set_splice_fields(
     mapping.base.chain_mapq_chain_alt = false;
     mapping.base.vote_floor_capacity = 0;
     mapping.base.inversion_probe_local_gate = false;
-    mapping.base.rival_split_ends = false;
     mapping.base.dna_pool_gate_occ = 0;
     mapping.base.dna_tile_rescue_occ = 0;
     // The vote's cap rule with the RNA seed shape's f, the DNA floor and no

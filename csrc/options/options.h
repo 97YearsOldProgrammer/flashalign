@@ -300,10 +300,6 @@ struct DnaLongOptions {
   // -N: the secondaries both lanes keep, map-only projected and the -c lane
   // realized; one prices the MAPQ.
   int secondary_max = 5;
-  // A secondary-role region that splits, on a confirmed Z-drop or a fill over
-  // the matrix cap, ends at the cut: no continuation. lr and lr:hq install it;
-  // not settable.
-  bool rival_split_ends = false;
   // Each whole-query pass chains its pool twice, as minimap2's mm_map_frag:
   // first at cigar_dp_bw and cigar_dp_max_gap, then the anchors of the chains
   // with at least cigar_dp_split_min_anchors anchors scoring at least -m at

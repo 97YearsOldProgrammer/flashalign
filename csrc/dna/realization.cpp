@@ -121,8 +121,6 @@ struct BlockPlan {
   // local inversion (mm_test_zdrop code 2), as minimap2's r2->split_inv.
   bool split_inv = false;
   bool truncated_right = false;
-  // A segment of a secondary-role region.
-  bool rival = false;
 };
 
 // One interior Z-drop. `truncated`: the segment ends at the Z-drop cell.
@@ -482,9 +480,6 @@ bool plan_block_split(const DnaContext& context, BlockPlan& plan,
     start = original_end;
   // The segment's path now ends at the cut.
   plan.path.realization_end = start;
-  // A rival region ends at the cut.
-  if (plan.rival && context.opts.rival_split_ends)
-    return true;
 
   const int remaining = static_cast<int>(original_end - start);
   // With fewer than opt->min_cnt anchors left there is no continuation, as
@@ -1724,7 +1719,6 @@ DnaRegionOutcome realize_dna_regions(
     current.chromosome = item.contig;
     current.reverse = item.reverse;
     current.split_group = static_cast<int>(r);
-    current.rival = !region.owner;
     // The region's one anchor array, flagged in place as minimap2 flags a[];
     // each segment's path is a window of it.
     std::vector<chaining::Anchor> anchors = chain.anchors;
