@@ -829,10 +829,12 @@ constexpr std::string_view kAttachedValueSpellings[] = {"--secondary", "--cs",
 }  // namespace fa::cpu::cli
 
 /**** preset_checks ****/
-// The checks that read the preset; cli/align.cpp repeats them once an index has
-// settled a preset not given with -x.
+// The checks that read the preset, in settle_preset_options: after the parse
+// for a typed -x, in cli/align.cpp once the index or the default settled it.
 
 namespace fa::cpu::cli {
+
+namespace {
 
 void check_max_cands_range(const AlignOptions& opt) {
     if (!opt.max_cands) return;
@@ -843,8 +845,6 @@ void check_max_cands_range(const AlignOptions& opt) {
         throw UsageError("--max-cands must be within [1," +
                          std::to_string(ceiling) + "]");
 }
-
-namespace {
 
 // A stage's refusal, checked in this order. {preset} is the preset, {options}
 // every spelling of the stage and {is} "is" or "are" to agree with them.
@@ -875,8 +875,9 @@ void replace_all(std::string& text, std::string_view key,
         text.replace(at, key.size(), value);
 }
 
-}  // namespace
-
+// The refusal of an option in `given` whose stage (OptionSpec::stage) the lane
+// of `preset` does not run, or none. Every option of that stage is named, in
+// registry order.
 std::optional<std::string> option_stage_refusal(
     const std::set<OptionId>& given, const std::string& preset) {
     for (const StageRefusal& refusal : kStageRefusals) {
@@ -907,6 +908,81 @@ std::optional<std::string> option_stage_refusal(
         return text;
     }
     return std::nullopt;
+}
+
+}  // namespace
+
+// Options valid with one kind of preset only. options/options.cpp repeats
+// most of them for the API. Running it twice changes nothing.
+void settle_preset_options(AlignOptions& opt) {
+    check_max_cands_range(opt);
+    const bool rna = opt.preset == "splice" || opt.preset == "splice:hq";
+    // RNA presets have no adaptive vote-width model; -W NUM1 still sets their
+    // fixed width.
+    if (rna && (opt.vote_diag_slope_den || opt.vote_diag_width_max)) {
+        throw UsageError("-W's read-length divisor and --dw-max are valid "
+                         "only with a DNA preset");
+    }
+    if (rna && opt.dna_vote_admission_ratio) {
+        throw UsageError("--vote-ratio is valid only with a DNA preset");
+    }
+    if (rna && opt.min_chain_score)
+        throw UsageError("-m is valid only with a DNA preset");
+    if (rna && opt.max_cands)
+        throw UsageError("--max-cands is valid only with a DNA preset");
+    if (rna && opt.vote_seeds)
+        throw UsageError("-v is valid only with a DNA preset; the splice "
+                         "presets take --vote-spacing");
+    if (!rna && opt.vote_spacing)
+        throw UsageError("--vote-spacing is valid only with an RNA preset");
+    if (const auto refusal =
+            option_stage_refusal(opt.given_options, opt.preset))
+        throw UsageError(*refusal);
+    if (!rna) {
+        if (opt.min_intron) {
+            throw UsageError(
+                "--min-intron is valid only with splice or splice:hq");
+        }
+        if (opt.max_intron) {
+            throw UsageError(
+                "-G is valid only with splice or splice:hq");
+        }
+        if (opt.splice_strand) {
+            throw UsageError(
+                "-u is valid only with splice or splice:hq");
+        }
+        if (opt.rna_junction_bed)
+            throw UsageError(
+                "--junc-bed is valid only with splice or splice:hq");
+        if (opt.rna_junction_bonus)
+            throw UsageError(
+                "--junc-bonus is valid only with splice or splice:hq");
+        if (opt.rna_rival_min_diff)
+          throw UsageError(
+              "--rival-min-diff is valid only with splice or splice:hq");
+        // -N n is minimap2's best_n, whatever --secondary says.
+        if (opt.rna_max_loci)
+          opt.dna_secondary_max = *opt.rna_max_loci - 1;
+        opt.rna_max_loci.reset();
+    }
+    // Intron bounds must satisfy 0 < min <= max.
+    if (opt.min_intron && *opt.min_intron <= 0) {
+        throw UsageError("--min-intron must be > 0");
+    }
+    if (opt.max_intron && *opt.max_intron <= 0) {
+        throw UsageError("-G must be > 0");
+    }
+    if (opt.rna_junction_bonus &&
+        (*opt.rna_junction_bonus < 0 || *opt.rna_junction_bonus > 127))
+        throw UsageError("--junc-bonus must be within [0,127]");
+    if (opt.rna_rival_min_diff && *opt.rna_rival_min_diff < 0)
+        throw UsageError("--rival-min-diff must be >= 0");
+    if (opt.rna_max_loci && *opt.rna_max_loci < 1)
+        throw UsageError("-N must be >= 1");
+    if (opt.min_intron && *opt.min_intron > 0 && opt.max_intron && *opt.max_intron > 0 &&
+        *opt.max_intron < *opt.min_intron) {
+        throw UsageError("-G must be >= --min-intron");
+    }
 }
 
 }  // namespace fa::cpu::cli
@@ -1148,14 +1224,10 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
 }
 
 // After the full parse, so argument order does not matter: the operands, the
-// ranges, the options valid with one kind of preset only, and the rules that
-// combine options (-N 0, --cs and --MD imply -c, -N on a DNA preset).
+// ranges, the rules that combine options (-N 0, --cs and --MD imply -c) and,
+// for a typed -x, the options valid with one kind of preset only.
 void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
                           const std::vector<std::string>& positional) {
-    // Without -x the preset may come from the index: cli/align.cpp
-    // checks the range once it is settled.
-    if (opt.preset_source != "builtin")
-        check_max_cands_range(opt);
     // --show-config reads no sequence, so its operands are optional.
     if (positional.size() < 2 && !opt.show_config) {
         throw UsageError(
@@ -1182,16 +1254,6 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
     if (!fa::cpu::api::preset_is_valid(opt.preset)) {
         throw UsageError(preset_refusal(opt.preset));
     }
-    // Options valid for only one mode, checked after the full parse so
-    // argument order does not matter. options/options.cpp repeats most of
-    // them for the API.
-    const bool rna = opt.preset == "splice" || opt.preset == "splice:hq";
-    // RNA presets have no adaptive vote-width model; -W NUM1 still sets their
-    // fixed width.
-    if (rna && (opt.vote_diag_slope_den || opt.vote_diag_width_max)) {
-        throw UsageError("-W's read-length divisor and --dw-max are valid "
-                         "only with a DNA preset");
-    }
     if (secondary_off_by_n)
         opt.output_secondary = false;
     // --cs and --MD imply a CIGAR, as minimap2's --cs does.
@@ -1203,74 +1265,10 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
         throw UsageError("--max-chain-occ must be >= 0");
     if (opt.occ_dist && *opt.occ_dist < 0)
         throw UsageError("-e must be >= 0");
-    if (rna && opt.dna_vote_admission_ratio) {
-        throw UsageError("--vote-ratio is valid only with a DNA preset");
-    }
-    if (rna && opt.min_chain_score)
-        throw UsageError("-m is valid only with a DNA preset");
-    if (rna && opt.max_cands)
-        throw UsageError("--max-cands is valid only with a DNA preset");
-
-    if (rna && opt.vote_seeds)
-        throw UsageError("-v is valid only with a DNA preset; the splice "
-                         "presets take --vote-spacing");
-    // Without -x an index may record a splice preset; options/options.cpp
-    // refuses then.
-    if (!rna && opt.vote_spacing && opt.preset_source != "builtin")
-        throw UsageError("--vote-spacing is valid only with an RNA preset");
-    // Without -x the preset may come from the index: cli/align.cpp
-    // asks again once it is settled.
-    if (opt.preset_source != "builtin") {
-        if (const auto refusal =
-                option_stage_refusal(opt.given_options, opt.preset))
-            throw UsageError(*refusal);
-    }
-    // The 128-tile and 128-seed trace refusals are in cli/align.cpp.
-    if (!rna) {
-        if (opt.min_intron) {
-            throw UsageError(
-                "--min-intron is valid only with splice or splice:hq");
-        }
-        if (opt.max_intron) {
-            throw UsageError(
-                "-G is valid only with splice or splice:hq");
-        }
-        if (opt.splice_strand) {
-            throw UsageError(
-                "-u is valid only with splice or splice:hq");
-        }
-        if (opt.rna_junction_bed)
-            throw UsageError(
-                "--junc-bed is valid only with splice or splice:hq");
-        if (opt.rna_junction_bonus)
-            throw UsageError(
-                "--junc-bonus is valid only with splice or splice:hq");
-        if (opt.rna_rival_min_diff)
-          throw UsageError(
-              "--rival-min-diff is valid only with splice or splice:hq");
-        // -N n is minimap2's best_n, whatever --secondary says.
-        if (opt.rna_max_loci)
-          opt.dna_secondary_max = *opt.rna_max_loci - 1;
-        opt.rna_max_loci.reset();
-    }
-    // Intron bounds must satisfy 0 < min <= max.
-    if (opt.min_intron && *opt.min_intron <= 0) {
-        throw UsageError("--min-intron must be > 0");
-    }
-    if (opt.max_intron && *opt.max_intron <= 0) {
-        throw UsageError("-G must be > 0");
-    }
-    if (opt.rna_junction_bonus &&
-        (*opt.rna_junction_bonus < 0 || *opt.rna_junction_bonus > 127))
-        throw UsageError("--junc-bonus must be within [0,127]");
-    if (opt.rna_rival_min_diff && *opt.rna_rival_min_diff < 0)
-        throw UsageError("--rival-min-diff must be >= 0");
-    if (opt.rna_max_loci && *opt.rna_max_loci < 1)
-        throw UsageError("-N must be >= 1");
-    if (opt.min_intron && *opt.min_intron > 0 && opt.max_intron && *opt.max_intron > 0 &&
-        *opt.max_intron < *opt.min_intron) {
-        throw UsageError("-G must be >= --min-intron");
-    }
+    // Without -x the index or the default sets the preset: cli/align.cpp
+    // runs these once it is settled.
+    if (opt.preset_source != "builtin")
+        settle_preset_options(opt);
 }
 
 }  // namespace

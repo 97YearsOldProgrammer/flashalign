@@ -1353,7 +1353,8 @@ void run_show_config(const AlignOptions& opt, const ResolvedInputs& in) {
 } // namespace
 
 int run_align(const AlignOptions& cli_options) {
-  // Only the preset is rewritten, when a .faix supplies it.
+  // Only the preset, when a .faix supplies it, and -N, once the preset is
+  // settled, are rewritten.
   AlignOptions opt = cli_options;
   refuse_sam_text_reads(opt.reads_paths);
   const ResolvedInputs in = resolve_inputs(opt);
@@ -1381,10 +1382,9 @@ int run_align(const AlignOptions& cli_options) {
     opt.preset = in.index_preset;
     opt.preset_source = "index";
   }
-  // parse.cpp's checks that read the preset, for the preset an index records.
-  check_max_cands_range(opt);
-  if (const auto refusal = option_stage_refusal(opt.given_options, opt.preset))
-    throw UsageError(*refusal);
+  // parse.cpp ran these for a typed -x.
+  if (opt.preset_source != "explicit")
+    settle_preset_options(opt);
   // RNA mapping needs the reference bases even without a CIGAR. Checked
   // after the preset is settled and before --show-config, so a dry run
   // refuses what a real run would.

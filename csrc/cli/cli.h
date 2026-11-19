@@ -304,15 +304,12 @@ struct IndexOptions {
 };
 
 AlignOptions parse_align_args(int argc, char** argv, int start);
-// Throws UsageError unless --max-cands is within the lane bound's range for
-// opt.preset: 1..kMaxCatalogueLaneBound, or 1..kAllChainsLaneBound where
-// an overlap preset selects the all-chains lane.
-void check_max_cands_range(const AlignOptions& opt);
-// The refusal of an option in `given` whose stage (OptionSpec::stage) the lane
-// of `preset` does not run, or none. Every option of that stage is named, in
-// registry order.
-std::optional<std::string> option_stage_refusal(
-    const std::set<OptionId>& given, const std::string& preset);
+// The checks that read opt.preset, once it is settled; throws UsageError. An
+// option of a stage the preset's lane does not run, or of the other kind of
+// preset, is refused, --max-cands outside the lane bound's range too
+// (1..kMaxCatalogueLaneBound, or 1..kAllChainsLaneBound on an overlap
+// preset); on a DNA preset -N becomes dna_secondary_max.
+void settle_preset_options(AlignOptions& opt);
 IndexOptions parse_index_args(int argc, char** argv, int start);
 
 }  // namespace fa::cpu::cli
