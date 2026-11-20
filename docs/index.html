@@ -102,6 +102,9 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
 </section>
 <section class="Sh">
 <h1 class="Sh" id="OPTIONS"><a class="permalink" href="#OPTIONS">OPTIONS</a></h1>
+<p class="Pp">A long option's value may follow it as the next argument or after
+    `=', as in minimap2: <b>--end-bonus 100</b> and <b>--end-bonus=100</b> are
+    the same.</p>
 <section class="Ss">
 <h2 class="Ss" id="Indexing_options"><a class="permalink" href="#Indexing_options">Indexing
   options</a></h2>
@@ -155,12 +158,21 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       [5000]. It bounds how far base alignment extends toward a read end, and
       under a DNA preset two pieces of a read join into one record only across
       gaps of at most <i>NUM</i>. Under a DNA preset chaining links anchors
-      across at most the larger of it and <b>-r</b>'s second value, so values
-      under that band leave the chain unchanged. Under a splice preset it bounds
-      base alignment and is also the maximum query gap of the fine chain; there
-      <b>-G</b> bounds introns. Untyped, <b>lr</b> and <b>lr:hq</b> use 5000,
-      the assembly presets 10000 and the splice presets 2000. <i>NUM</i> may be
-      ending with k/K/m/M/g/G.</dd>
+      across at most the larger of it and <b>-r</b>'s second value, so under lr
+      and lr:hq values under that band leave the chain unchanged; under the
+      assembly presets it is also the reach of the first of two chain passes,
+      the larger of it and <b>-r</b>'s first value; under ava-ont and ava-hifi a
+      chain link is also taken only within <i>NUM</i> on both the query and the
+      target, as in minimap2, so every value acts there. Under a splice preset
+      it bounds base alignment and is also the maximum query gap of the fine
+      chain; there <b>-G</b> bounds introns. Untyped, <b>lr</b>, <b>lr:hq</b>,
+      ava-ont and ava-hifi use 5000, the assembly presets 10000 and the splice
+      presets 2000. Under a DNA preset the region tested for an inversion
+      (<b>-z</b>), the length of an inverted middle, and the score above which a
+      chain on the other strand is aligned (0.8 times it) use the preset's own
+      maximum gap, which <b>-g</b> does not change: 10000 under <b>lr:hq</b> and
+      <b>ava-hifi</b>, otherwise the untyped value. <i>NUM</i> may be ending
+      with k/K/m/M/g/G.</dd>
   <dt id="r"><a class="permalink" href="#r"><b>-r
     <i>NUM1</i>[,<i>NUM2</i>]</b></a></dt>
   <dd>Bandwidth for base alignment, and for gap filling and chaining
@@ -172,13 +184,20 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       candidate contributes every anchor of its window, which widens by at most
       the band, and the chain links anchors within the band across at most the
       band, or <b>-g</b> where that is larger, whatever the read length. So
-      <i>NUM2</i> acts on placement, and so also on plain PAF output.
+      <i>NUM2</i> acts on placement, and so also on plain PAF output. Under the
+      assembly presets each candidate comes from the vote of one 1 Mb stretch of
+      the query, and its window is that stretch on its diagonal, widened by
+      <i>NUM2</i> and 512 bases on both sides, harvested from the seeds within
+      <i>NUM2</i> of the stretch; the chain runs twice, as in minimap2: first
+      within <i>NUM1</i>, keeping the chains of at least 3 anchors that score at
+      least <b>-m</b>, then within <i>NUM2</i> over their anchors.
       <b>ava-ont</b> and <b>ava-hifi</b> refuse <b>-r</b>; their chains band at
-      20000. A single value sets <i>NUM1</i> only. Each value may be ending with
-      k/K/m/M/g/G, and <i>NUM1</i> may not exceed <i>NUM2</i>. Under a splice
-      preset <i>NUM1</i> is the diagonal band of the fine chain and <i>NUM2</i>
-      only bounds <i>NUM1</i>; neither bands base alignment there, and <b>-G</b>
-      sets both [200000,200000].</dd>
+      20000, and each candidate contributes every anchor of its window, which
+      does not widen. A single value sets <i>NUM1</i> only. Each value may be
+      ending with k/K/m/M/g/G, and <i>NUM1</i> may not exceed <i>NUM2</i>. Under
+      a splice preset <i>NUM1</i> is the diagonal band of the fine chain and
+      <i>NUM2</i> only bounds <i>NUM1</i>; neither bands base alignment there,
+      and <b>-G</b> sets both [200000,200000].</dd>
   <dt id="m"><a class="permalink" href="#m"><b>-m</b><i>&#x00A0;INT</i></a></dt>
   <dd>Discard alignments with chaining score &lt;<i>INT</i> [40; 100 on ava-ont,
       ava-hifi]. Chaining score equals the approximate number of matching bases
@@ -202,16 +221,15 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dd>Retain at most <i>INT</i> secondary alignments [5]. Under a DNA preset
       both lanes keep up to <i>INT</i> per read whether or not they are printed;
       with a CIGAR they are aligned and the best of them prices the mapping
-      quality, and without one each is written from its whole chain. Under
-      <b>lr</b> and <b>lr:hq</b>, a secondary alignment ends where its alignment
-      first splits, at a Z-drop or at a gap too large to align. No secondary
-      alignment is kept past <i>INT</i>. <b>-N0</b> is
-    <b>--secondary=no</b>.</dd>
+      quality, and without one each is written from its whole chain. No
+      secondary alignment is kept past <i>INT</i>. <b>-N0</b> is
+      <b>--secondary=no</b>.</dd>
   <dt id="rival"><a class="permalink" href="#rival"><b>--rival-min-diff</b><i>&#x00A0;INT</i></a></dt>
   <dd>Absolute chain-score band that retains a rival beside <b>-p</b> [30].
       Splice presets only.</dd>
   <dt id="min"><a class="permalink" href="#min"><b>--min-support</b><i>&#x00A0;INT</i></a></dt>
-  <dd>Minimal number of seeds on a vote peak [3].</dd>
+  <dd>Minimal number of seeds on a vote peak [3], and so the least <b>-v</b>
+      value other than 0.</dd>
   <dt id="max"><a class="permalink" href="#max"><b>--max-vote-occ</b><i>&#x00A0;INT</i></a></dt>
   <dd>Ignore a seed whose reference occurrence is above <i>INT</i> when voting,
       under a DNA preset when chaining too, and under a splice preset in every
@@ -250,7 +268,9 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       that occurs more than 4095 times, as minimap2's option of the same name
       does; 0 turns this off [0; 500 under splice and splice:hq]. Every stage
       that applies the cap takes the kept seeds. Under the DNA presets it is off
-      unless given, and unmeasured.</dd>
+      unless given: measured there, it brought back read ends the chain loses
+      but added wrong records at mapping quality 30 and above, so it is kept
+      off.</dd>
   <dt id="v"><a class="permalink" href="#v"><b>-v
     <i>NUM1</i>[,<i>NUM2</i>]</b></a></dt>
   <dd>Seeds per strand that vote, and query tiles per read [128,128]. The read
@@ -265,12 +285,17 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       for its admission to the catalogue, 1 to 4096, of which admission by
       <b>--vote-ratio</b> compares at most 2048; under <b>lr:hq</b> the blocks
       of a split read are also measured in these tiles when their
-      mapping-quality rivals are chosen. A single value sets <i>NUM1</i> only.
-      Neither <b>--min-support</b> nor <b>--max-cands</b> scales with
-      <i>NUM1</i>; a vote peak needs <b>--min-support</b> votes, so a
-      <i>NUM1</i> below that places few reads or none. The Python field for
-      <i>NUM1</i> is <b>Config.max_query_seeds</b>. DNA presets only; the splice
-      presets take <b>--vote-spacing</b>.</dd>
+      mapping-quality rivals are chosen. Under the assembly presets the query is
+      voted per 1 Mb stretch, each stretch with its own <i>NUM1</i> seeds per
+      strand, its own <i>NUM2</i> tiles and the bin width of <b>-W</b> at its
+      own length. A single value sets <i>NUM1</i> only. Neither
+      <b>--min-support</b> nor <b>--max-cands</b> scales with <i>NUM1</i>. A
+      <i>NUM1</i> other than 0 must be at least <b>--min-support</b>, since a
+      vote peak needs that many voters, and a smaller one is refused; 0 votes
+      with every seed. minimap2's <b>-v</b> is its verbosity level; here that is
+      <b>--quiet</b>. The Python field for <i>NUM1</i> is
+      <b>Config.max_query_seeds</b>. DNA presets only; the splice presets take
+      <b>--vote-spacing</b>.</dd>
   <dt id="W"><a class="permalink" href="#W"><b>-W
     <i>NUM1</i>[,<i>NUM2</i>]</b></a></dt>
   <dd>Width in reference bases of the diagonal bin a seed votes into, and the
@@ -290,9 +315,11 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
       contig and strand of the read once. Elsewhere, unset, it is 16 when vote
       peaks are admitted by their ratio to the best (<b>--vote-ratio</b>), where
       it only bounds the cost, and 4 when <b>--vote-ratio</b> is 0, where it
-      selects; a value replaces whichever applies. With a CIGAR the secondary
-      alignments come from these candidates' chains, so a wider bound can add
-      secondaries. DNA presets only.</dd>
+      selects; a value replaces whichever applies. Under the assembly presets
+      the bound is per strand of each 1 Mb stretch, and a query contig whose
+      candidates exceed 32767 is refused. With a CIGAR the secondary alignments
+      come from these candidates' chains, so a wider bound can add secondaries.
+      DNA presets only.</dd>
 </dl>
 </section>
 <section class="Ss">
@@ -338,11 +365,11 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dd>Minimal peak DP alignment score to output [80]. Under a splice preset it
       is also the floor of a supplementary piece, which needs 3 anchors and 40
       matching bases besides; the primary is exempt. Under a DNA preset an
-      alignment also needs at least <b>-m</b> (40) matching bases; a value of 0
-      or less turns off the score test, not the base count. Plain PAF output,
-      which has no DP, is not filtered by this score; under a DNA preset it
-      prints no record whose chaining score is below <b>-m</b>. The long form is
-      <b>--min-dp-score</b>.</dd>
+      alignment also needs at least <b>-m</b> (40) matching bases; 0 turns off
+      the score test, not the base count. Plain PAF output, which has no DP, is
+      not filtered by this score; under a DNA preset it prints no record whose
+      chaining score is below <b>-m</b>. The long form is
+    <b>--min-dp-score</b>.</dd>
   <dt id="score"><a class="permalink" href="#score"><b>--score-N</b><i>&#x00A0;INT</i></a></dt>
   <dd>Penalty of a mismatch involving ambiguous bases [2].</dd>
   <dt id="end"><a class="permalink" href="#end"><b>--end-bonus</b><i>&#x00A0;INT</i></a></dt>
@@ -354,12 +381,6 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
 <h2 class="Ss" id="Splice_options"><a class="permalink" href="#Splice_options">Splice
   options</a></h2>
 <dl class="Bl-tag">
-  <dt id="min~2"><a class="permalink" href="#min~2"><b>--min-intron</b><i>&#x00A0;INT</i></a></dt>
-  <dd>Minimal reference gap that chaining accepts as an intron [20]; a shorter
-      gap is left to base alignment as a deletion. It does not decide the `N'
-      CIGAR operator: base alignment writes a gap as `N' once the second gap
-      penalty makes the long gap cheaper (see <b>-O</b> and <b>-E</b>). Splice
-      presets only.</dd>
   <dt id="G"><a class="permalink" href="#G"><b>-G</b><i>&#x00A0;NUM</i></a></dt>
   <dd>Maximum gap on the reference (effective with a splice preset), that is the
       maximum intron length [200k]. It also sets both values of <b>-r</b>, as in
@@ -399,7 +420,8 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
     <i>FILE</i></b></a></dt>
   <dd>Output alignments to <i>FILE</i> [stdout].</dd>
   <dt id="c"><a class="permalink" href="#c"><b>-c</b></a></dt>
-  <dd>Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag. PAF
+  <dd>Generate CIGAR. In PAF, the CIGAR is written to the `cg' custom tag.
+      Indels sit at the leftmost position of a repeat, as in minimap2. PAF
       without <b>-c</b> is placement-only: it runs no base-level dynamic
       programming, so its coordinates and its <b>AS:i</b> differ from those of a
       base-level alignment. <b>-c</b>, <b>--cs</b> and <b>--MD</b> turn
@@ -459,14 +481,23 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dd>Number of threads [all-2]: mapping runs on the machine's hardware threads
       less the reader and the writer. An explicit value is the whole mapping
       budget, and decompression of compressed input borrows from it rather than
-      adding to it: -t/8 threads, from 1 to 8, when every read input qualifies
-      (BGZF or BAM of at least 16 MiB at any -t of 2 or more; other gzip of at
-      least 64 MiB from -t 32) and <b>--batch-window</b> is above 1.</dd>
+      adding to it: up to -t/4 threads, from 1 to 8, at any -t of 2 or more,
+      when every read input qualifies (BGZF or BAM of at least 16 MiB; other
+      gzip of at least 64 MiB). The reader thread decompresses what it can, and
+      the borrowed threads decompress only while the mapping threads are short
+      of reads; otherwise they map. With -t 1 the reader, the mapper and the
+      writer take turns on one thread.</dd>
   <dt id="K,"><a class="permalink" href="#K,"><b>-K, --batch-bp
     <i>NUM</i></b></a></dt>
-  <dd>Number of bases loaded into memory to process in a mini-batch [500M]. As
-      with <b>-I</b>, a k/K/m/M/g/G suffix is accepted. Output bytes and output
-      order do not depend on it.</dd>
+  <dd>Number of query bases held in memory from read to written [500M]. The
+      reader waits at this bound, and the mapping threads take reads from all
+      that is held, so a larger value gives them more to choose from when reads
+      are uneven, for more memory. As with <b>-I</b>, a k/K/m/M/g/G suffix is
+      accepted. Output bytes and output order do not depend on it. At -t 1 the
+      reads are mapped one mini-batch of this size at a time. One case is known
+      where the bound costs time, about a tenth: reads sorted by coordinate, as
+      many threads as the machine has, and SAM piped to another program on the
+      same machine; fewer threads avoid it.</dd>
   <dt id="show"><a class="permalink" href="#show"><b>--show-config</b></a></dt>
   <dd>Print the fully resolved configuration to stdout and exit 0. It reads no
       reference base and no read, so <b>flashalign align -x lr:hq
@@ -481,7 +512,7 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dd>Print a summary of the run to stderr: reads and bases, mapped reads,
       records written, wall time, throughput and peak memory.</dd>
   <dt id="progress"><a class="permalink" href="#progress"><b>--progress</b></a></dt>
-  <dd>Print per-batch progress to stderr.</dd>
+  <dd>Print progress to stderr, a line for every <b>-K</b> bases written.</dd>
   <dt id="quiet~2"><a class="permalink" href="#quiet~2"><b>--quiet</b></a></dt>
   <dd>Suppress non-error logging, including the three lines a run ends with on
       stderr: the version, the command line, and the real time, CPU time and
@@ -489,11 +520,6 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dt id="a"><a class="permalink" href="#a"><b>-a</b></a></dt>
   <dd>Generate CIGAR and output alignments in the SAM format. FlashAlign outputs
       in PAF by default.</dd>
-  <dt id="batch"><a class="permalink" href="#batch"><b>--batch-window</b><i>&#x00A0;INT</i></a></dt>
-  <dd>Number of batches in flight in the compute stage [the preset's: 1 on asm5,
-      asm10 and asm20, 3 otherwise]. With 1, all threads finish a batch before
-      the next one starts. Output bytes and order are identical for every
-    value.</dd>
   <dt id="io"><a class="permalink" href="#io"><b>--io-staging</b><i>&#x00A0;MIB</i></a></dt>
   <dd>Ceiling, in MiB, on the decompressed gzip input staged ahead of the
       reader; 0 scales it with <b>-t</b> [0]. A non-zero value must be at least
@@ -515,24 +541,25 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
 <dl class="Bl-tag">
   <dt id="lr"><a class="permalink" href="#lr"><b>lr</b></a></dt>
   <dd>Align noisy long reads of ~10% error rate to a reference genome. This is
-      the default mode. (<b>-k21</b> <b>-s9 --min-support 3 -A4 -B8 -O8,48
-      -E4,1</b> <b>-z800,200 --score-N 2 -r500,20000 -m40 -p0.8</b>
-      <b>-S80</b>).</dd>
+      the default mode, and the preset for Oxford Nanopore reads of any
+      chemistry, including v14 reads at ~99% accuracy, which minimap2 maps with
+      lr:hq. (<b>-k21</b> <b>-s9 --min-support 3 -A4 -B8 -O8,48 -E4,1</b>
+      <b>-z800,200 --score-N 2 -r500,20000 -m40 -p0.8</b> <b>-S80</b>).</dd>
   <dt id="lr:hq"><a class="permalink" href="#lr:hq"><b>lr:hq</b></a></dt>
-  <dd>Align accurate long reads (error rate &lt;1%), such as PacBio HiFi reads,
-      to a reference genome (<b>-k21</b> <b>-s5 --min-support 3 -A3 -B12 -O18,78
-      -E6,1</b> <b>-z1200,600 --score-N 3 -r500,20000 -g5000 -m40 -p0.8
-      -W48,64</b> <b>-S200</b>). Its alignments are scored with minimap2's
-      map-hifi scoring (<b>-A1</b> <b>-B4</b> <b>-O6,26</b> <b>-E2,1</b>,
-      <b>-S200</b>).</dd>
+  <dd>Align PacBio high-fidelity (HiFi) reads to a reference genome (<b>-k21</b>
+      <b>-s5 --min-support 3 -A3 -B12 -O18,78 -E6,1</b> <b>-z1200,600 --score-N
+      3 -r500,20000 -g5000 -m40 -p0.8 -W48,64</b> <b>-S200</b>). Its alignments
+      are scored with minimap2's map-hifi scoring (<b>-A1</b> <b>-B4</b>
+      <b>-O6,26</b> <b>-E2,1</b>, <b>-S200</b>). Unlike minimap2's lr:hq, it is
+      not meant for Oxford Nanopore reads: those take lr.</dd>
   <dt id="splice"><a class="permalink" href="#splice"><b>splice</b></a></dt>
   <dd>Long-read spliced alignment (<b>-k15</b> <b>-s10 --min-support 2 -A1 -B2
-      -O2,32 -E1,0 -z200,100 -S80</b> <b>--min-intron 20 -g2000 -G200k -ub
-      --junc-bonus 9 -p0.8</b> <b>-N5</b>). In the splice mode a long deletion
-      is taken as an intron and represented as the `<b>N</b>' CIGAR operator,
-      and <b>-m</b> is refused. For Nanopore direct RNA, index with <b>-k14</b>
-      (<b>flashalign index -x splice -k 14 ref.fa</b>) and align with <b>-x
-      splice -u f</b>.</dd>
+      -O2,32 -E1,0 -z200,100 -S80</b> <b>-g2000 -G200k -ub --junc-bonus 9
+      -p0.8</b> <b>-N5</b>). In the splice mode a long deletion is taken as an
+      intron and represented as the `<b>N</b>' CIGAR operator, and <b>-m</b> is
+      refused. For Nanopore direct RNA, index with <b>-k14</b> (<b>flashalign
+      index -x splice -k 14 ref.fa</b>) and align with <b>-x splice -u
+    f</b>.</dd>
   <dt id="splice:hq"><a class="permalink" href="#splice:hq"><b>splice:hq</b></a></dt>
   <dd>Spliced alignment for accurate long RNA-seq reads such as PacBio Iso-Seq
       (<b>-xsplice</b> <b>-B4 -O6,24</b> <b>-W48</b>). It differs from
@@ -542,8 +569,9 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
   <dt id="asm5"><a class="permalink" href="#asm5"><b>asm5</b></a></dt>
   <dd>Experimental. Long assembly to reference mapping (<b>-k21</b> <b>-s9 -A1
       -B19 -O39,81 -E3,1 -z200,200 --score-N 1 -r1000,100000</b> <b>-S200
-      -v4096,2048</b>). Use this preset if the average divergence is not much
-      higher than 0.1%.</dd>
+      -v4096,2048</b>). The query is voted, catalogued and harvested per 1 Mb
+      stretch (see <b>-v</b> and <b>-r</b>), as are asm10's and asm20's. Use
+      this preset if the average divergence is not much higher than 0.1%.</dd>
   <dt id="asm10"><a class="permalink" href="#asm10"><b>asm10</b></a></dt>
   <dd>Experimental. Long assembly to reference mapping (<b>-xasm5</b> <b>-B9
       -O16,41</b> <b>-E2,1</b>). Use this if the average divergence is around
@@ -861,8 +889,8 @@ flashalign align <b>-c</b> [<b>-x</b> <i>preset</i>] <i>ref.fa</i>
 </div>
 <table class="foot">
   <tr>
-    <td class="foot-date">21 October 2026</td>
-    <td class="foot-os">flashalign-0.4.0</td>
+    <td class="foot-date">19 November 2026</td>
+    <td class="foot-os">flashalign-0.5.0</td>
   </tr>
 </table>
 </body>
