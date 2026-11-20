@@ -2,7 +2,7 @@
 \section{Results}
 
 
-We evaluated the mapping accuracy on simulated reads and measured the throughput performance on real data. We tested \flash{} v0.4.0, \mmtwo{} v2.31-r1302 \citep{li2018minimap2}, minibwa v0.7 \citep{li2026minibwa} and Winnowmap2 v2.03 \citep{jain2020winnowmap,jain2022winnowmap2}, with each tool's recommended preset over HiFi and ONT long reads. Minibwa over ONT long reads mapping accuracy evaluation is not shown, since their GitHub suggested it does not work for long noisy reads \citep{minibwa2026github}. All tools were run on a Linux workstation with an AMD Ryzen Threadripper 9970X 64-thread CPU at 5.0\,GHz.
+We evaluated the mapping accuracy on simulated reads and measured the throughput performance on real data. We tested \flash{} v0.5.1, \mmtwo{} v2.31-r1302 \citep{li2018minimap2}, minibwa v0.7 \citep{li2026minibwa} and Winnowmap2 v2.03 \citep{jain2020winnowmap,jain2022winnowmap2}, with each tool's recommended preset over HiFi and ONT long reads. Minibwa over ONT long reads mapping accuracy evaluation is not shown, since their GitHub suggested it does not work for long noisy reads \citep{minibwa2026github}. All tools were run on a Linux workstation with an AMD Ryzen Threadripper 9970X 64-thread CPU at 5.0\,GHz.
 
 \subsection{Mapping accuracy on simulated long reads}
 \label{sec:res-dna}
@@ -32,7 +32,7 @@ We used the LRGASP simulated reads \citep{pardopalacios2024lrgasp} for making th
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
  & R & P & F1 & R & P & F1\\
 \midrule
-\flash{} & \textbf{0.797} & 0.938 & \textbf{0.862} & \textbf{0.756} & 0.931 & \textbf{0.835}\\
+\flash{} & \textbf{0.798} & 0.939 & \textbf{0.863} & \textbf{0.757} & 0.932 & \textbf{0.836}\\
 \mmtwo{} & 0.785 & \textbf{0.944} & 0.857 & 0.749 & \textbf{0.941} & 0.834\\
 minibwa & 0.776 & 0.916 & 0.841 & 0.740 & 0.925 & 0.822\\
 Winnowmap2 & 0.745 & 0.924 & 0.825 & 0.730 & 0.933 & 0.819\\
@@ -48,11 +48,11 @@ Winnowmap2 & 0.745 & 0.924 & 0.825 & 0.730 & 0.933 & 0.819\\
 \toprule
  & \flash{} & \mmtwo{}\\
 \midrule
-\# aligned reads & 19\,969\,270 & 19\,783\,800\\
-\# chimeric alignments & 7\,030 & 6\,635\\
-\# non-spliced alignments & 4\,216\,935 & 4\,242\,046\\
-\# aligned introns & 79\,892\,314 & 79\,290\,562\\
-\# novel introns & 11\,464 & 26\,079\\
+\# aligned reads & 19\,969\,704 & 19\,783\,800\\
+\# chimeric alignments & 7\,112 & 6\,635\\
+\# non-spliced alignments & 4\,209\,937 & 4\,242\,046\\
+\# aligned introns & 79\,931\,324 & 79\,290\,562\\
+\# novel introns & 14\,120 & 26\,079\\
 \% exact introns & 96.2 & 96.1\\
 \% approx.\ introns & 99.1 & 99.1\\
 \bottomrule
@@ -63,7 +63,7 @@ Winnowmap2 & 0.745 & 0.924 & 0.825 & 0.730 & 0.933 & 0.819\\
 
 We used several open source real reads dataset to evaluate our throughput performance on long reads compared to other aligners. For long genomic reads, we used the HG002 PacBio HiFi reads (\url{https://bit.ly/hg002-hprc-revio}), the HG002 Nanopore R10 reads (\nolinkurl{s3://ont-open-data/giab_2023}) and the HG002 Nanopore R10.4.1 ultra-long reads (HPRC bucket \nolinkurl{s3://human-pangenomics}, submission \texttt{UCSC\_GIAB\_R1041\_nanopore}, \texttt{HG002\_R1041\_UL}). For spliced long reads, we used the H69 cell line reads of the LongBench dataset \citep{you2025longbench} (\nolinkurl{s3://longbench-data/raw/fastq/}): PacBio Kinnex and ONT PCR-cDNA to GRCh38 with GENCODE~44.
 
-\flash{} is the fastest tool for handling long genomic reads (Figure~\ref{fig:perf}). It is 1.7 to 2.6 times as fast as \mmtwo{} and the fastest tool on all three tested long-read datasets. The voting mechanism allows chaining to become much more versatile. On long spliced RNA reads, \flash{} is equal to or faster than \mmtwo{}. This is because the voting mechanism allows \flash{} to align spliced reads of longer length faster than \mmtwo{}. The longer the reads in the dataset, the faster \flash{} behaves on the spliced RNA dataset.
+\flash{} is the fastest tool for handling long genomic reads (Figure~\ref{fig:perf}). It is 1.9 to 2.7 times as fast as \mmtwo{} and the fastest tool on all three tested long-read datasets. The voting mechanism allows chaining to become much more versatile. On long spliced RNA reads, \flash{} is equal to or faster than \mmtwo{}. This is because the voting mechanism allows \flash{} to align spliced reads of longer length faster than \mmtwo{}. The longer the reads in the dataset, the faster \flash{} behaves on the spliced RNA dataset.
 
 
 \subsection{Structural variant calling}

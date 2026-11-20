@@ -10,7 +10,7 @@ lane (it imports the harness, `--bench-repo`). Fig. 3 (throughput and memory) is
 drawn bars against the table.
 
 **Evaluation.** Every number comes from the evaluation harness used for the paper, which is
-not part of this release, on the datasets named in the paper, with FlashAlign 0.4.0 and the
+not part of this release, on the datasets named in the paper, with FlashAlign 0.5.1 and the
 peer versions stated in the text. The simulation protocols are described in the paper.
 
 **Citing.** Until the preprint is posted, cite the software: doi:10.5281/zenodo.22985251.

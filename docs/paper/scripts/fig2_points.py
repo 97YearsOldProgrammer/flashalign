@@ -91,14 +91,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lanes", type=Path, required=True)
     ap.add_argument("--bench-repo", type=Path, required=True,
-                    help="checkout providing bench.mapeval_collect")
+                    help="checkout providing bench.mapq.mapeval_collect")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--thin", type=int, default=None,
                     help="eval2roc -s override (harness default 100)")
     args = ap.parse_args()
 
     sys.path.insert(0, str(args.bench_repo))
-    from bench.mapeval_collect import COLUMNS, DEFAULT_THIN, QRow, derive_points
+    try:
+        from bench.mapq.mapeval_collect import COLUMNS, DEFAULT_THIN, QRow, derive_points
+    except ImportError:  # a checkout from before the bench/mapq/ layout
+        from bench.mapeval_collect import COLUMNS, DEFAULT_THIN, QRow, derive_points
     thin = args.thin if args.thin is not None else DEFAULT_THIN
 
     runs = {}  # (ref, tool, readset) -> (rows, total, criterion)

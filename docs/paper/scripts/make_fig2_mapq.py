@@ -58,10 +58,10 @@ DNA_XLIM = (1e-8, 1e-1)
 # in that panel. After the draw every legend box is measured against every drawn
 # curve of its own panel and the render dies if one touches (LEGEND_PAD, in
 # printed points) -- so a re-measured lane cannot quietly slide under the key.
-# The six-entry ONT panels (b, d) sit upper-left, in the empty low-error corner;
-# (b) tightens its border pad and (d) also shortens its sample line: at the house
-# 2.1 em the six-entry box reaches past the flashalign (UL) curve and NONE of the
-# nine anchors clears in (d) -- the panel has no empty 0.53 x 0.39 rectangle.
+# The six-entry ONT panels (b, d) tighten their border pad. (b) sits upper-left,
+# in the empty low-error corner; in (d) the flashalign curves run through that
+# corner, and the key sits lower-left, the low-error low-yield corner, at the
+# house sample length.
 LEGEND_BASE = dict(frameon=False, fontsize=6, handlelength=2.1, handletextpad=0.45,
                    labelspacing=0.05, borderaxespad=0.8, markerfirst=False, numpoints=1)
 LEGEND_PAD = 1.5
@@ -70,7 +70,7 @@ PANELS = [
     ("Simulated HiFi reads to CHM13", "(a)", "Simulated long reads to CHM13", ("(HiFi)",), DNA_XLIM, (90, 100), 2, "tool", {"loc": "lower right"}),
     ("Simulated ONT reads to CHM13", "(b)", "Simulated long reads to CHM13", ("(ONT)", "(UL)"), DNA_XLIM, (88, 100), 2, "tool", {"loc": "upper left", "borderpad": 0.15, "borderaxespad": 0.3}),
     ("Simulated HiFi reads to HG002", "(c)", "Simulated long reads to HG002", ("(HiFi)",), DNA_XLIM, (0, 100), 10, "tool", {"loc": "lower right"}),
-    ("Simulated ONT reads to HG002", "(d)", "Simulated long reads to HG002", ("(ONT)", "(UL)"), DNA_XLIM, (0, 100), 10, "tool", {"loc": "upper left", "handlelength": 1.4, "borderpad": 0.15, "borderaxespad": 0.3}),
+    ("Simulated ONT reads to HG002", "(d)", "Simulated long reads to HG002", ("(ONT)", "(UL)"), DNA_XLIM, (0, 100), 10, "tool", {"loc": "lower left", "borderpad": 0.15}),
     ("Simulated long RNA reads to human", "(e)", "Simulated long RNA reads to human", None, None, (75, 100), 5, "tool_arm", {"loc": "lower right"}),
     ("Simulated long RNA reads to mouse", "(f)", "Simulated long RNA reads to mouse", None, None, (70, 100), 5, "tool_arm", {"loc": "lower right"}),
 ]
