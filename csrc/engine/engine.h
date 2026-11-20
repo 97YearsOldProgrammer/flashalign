@@ -1,4 +1,4 @@
-// The long-read engine: owns the index, the reference and the resolved options; its per-read and windowed align templates over a lane backend.
+// The long-read engine: owns the index, the reference and the resolved options; its per-read and stream align templates over a lane backend.
 #pragma once
 
 #include "../core/core.h"
@@ -22,6 +22,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -34,8 +35,8 @@
 
 /**** aligner ****/
 // The long-read engine: owns the index and the reference, holds the resolved options and
-// maps reads through the DNA or RNA backend. WindowedAlignSession runs it over a stream of
-// batches.
+// maps reads through the DNA or RNA backend. StreamAlignSession runs it over a stream of
+// chunks.
 
 namespace fa {
 namespace cpu {
@@ -355,16 +356,15 @@ private:
   LongReadSeedContext rna_seed_ctx_;
 };
 
-// Maps a stream of read batches on a BatchWindow of threading::kBatchWindow batches, so
-// workers move on to the next batch instead of waiting for the slowest read of the current
-// one; it takes a read of a batch younger than the oldest only while the bases in flight
-// stay within `max_bases`. Results equal align_batch's for the same batch: they are stored
-// at each read's original index and batches come back in submission order. The calling
-// thread submits and collects; it does not map reads.
+// Maps a stream of read chunks on a ChunkStream under one bound on the bases alive, so
+// workers move on to the next chunk instead of waiting for the slowest read of the current
+// one. Results equal align_batch's whatever the chunking and the bound: they are stored at
+// each read's original index and chunks come back in submission order. One reader thread
+// calls wait_room(), submit() and close(); one writer thread calls collect() and release().
 template <class Backend>
-class WindowedAlignSession {
+class StreamAlignSession {
 public:
-  // One batch in flight. The session owns the reads until collect() returns them.
+  // One chunk in the stream. The session owns the reads until collect() returns them.
   struct Batch {
     std::vector<std::string> reads;
     std::vector<AlignResult> results; // one per read, at its original index
@@ -378,24 +378,28 @@ public:
   };
 
   // `engine` must outlive the session and must not be reconfigured while it exists.
-  // `n_threads` is the number of scratch slots, i.e. threads that may map reads. The window
+  // `n_threads` is the number of scratch slots, i.e. threads that may map reads. The stream
   // owns tids [0, n_threads - n_helpers); the other `n_helpers` tids belong to threads of
-  // another stage that call try_help(). At least one worker is always the window's own.
-  WindowedAlignSession(const LongReadEngine &engine, int n_threads, int n_helpers,
-                       std::uint64_t max_bases)
+  // another stage that call try_help(). At least one worker is always the stream's own.
+  // `max_alive` bounds the bases alive.
+  StreamAlignSession(const LongReadEngine &engine, int n_threads, int n_helpers,
+                     std::uint64_t max_alive)
       : engine_(&engine), n_threads_(n_threads < 1 ? 1 : n_threads),
         n_helpers_(clamp_helpers(n_threads_, n_helpers)),
         worker_scratch_(static_cast<size_t>(n_threads_)),
-        window_(n_threads_ - n_helpers_, ::fa::cpu::threading::kBatchWindow,
-                max_bases) {}
+        stream_(n_threads_ - n_helpers_, max_alive) {}
 
-  WindowedAlignSession(const WindowedAlignSession &) = delete;
-  WindowedAlignSession &operator=(const WindowedAlignSession &) = delete;
+  StreamAlignSession(const StreamAlignSession &) = delete;
+  StreamAlignSession &operator=(const StreamAlignSession &) = delete;
 
-  // Queues a batch and returns at once. Precondition: in_flight() < window().
-  // `read_name_hashes` is empty or holds one hash per read, `self_contigs` is empty or
-  // holds one contig_id() per read, and `name_ranks` is empty or holds one
-  // contig_dual_rank() per read.
+  // False after abort().
+  bool wait_room() { return stream_.wait_room(); }
+  // Reader thread, before a wait_room(): ChunkStream::short_of_input().
+  bool short_of_input() { return stream_.short_of_input(); }
+
+  // Queues a chunk, which weighs its reads' bases. `read_name_hashes` is empty or holds one
+  // hash per read, `self_contigs` is empty or holds one contig_id() per read, and
+  // `name_ranks` is empty or holds one contig_dual_rank() per read.
   void submit(std::vector<std::string> reads,
               std::vector<std::uint32_t> read_name_hashes = {},
               std::vector<int> self_contigs = {},
@@ -407,42 +411,43 @@ public:
     batch->name_ranks = std::move(name_ranks);
     batch->results.resize(batch->reads.size());
     lpt_read_order(batch->reads, n_threads_, batch->order);
-    // The window holds the Batch until collect(), so the pointer stays valid.
+    std::uint64_t bases = 0;
+    for (const std::string &read : batch->reads)
+      bases += read.size();
+    // The stream holds the Batch until collect(), so the pointer stays valid.
     Batch *state = batch.get();
     const std::int64_t items = static_cast<std::int64_t>(batch->order.size());
-    window_.submit(
-        items,
-        [this, state](std::int64_t position, int tid) {
-          map_one(*state, position, tid);
-        },
-        [state](std::int64_t position) {
-          const int i = state->order[static_cast<size_t>(position)];
-          return static_cast<std::uint64_t>(
-              state->reads[static_cast<size_t>(i)].size());
-        },
-        std::move(batch));
+    stream_.submit(items, bases,
+                   [this, state](std::int64_t position, int tid) {
+                     map_one(*state, position, tid);
+                   },
+                   std::move(batch));
   }
 
-  // Waits for the oldest batch and returns it, or rethrows its first exception.
-  // Precondition: in_flight() > 0.
+  void close() { stream_.close(); }
+
+  // The oldest chunk once mapped, or null at the end of the stream or after abort();
+  // rethrows the chunk's first exception. Its bases stay alive until release().
   std::unique_ptr<Batch> collect() {
-    std::unique_ptr<Batch> batch = window_.collect();
-    return batch;
+    std::optional<std::unique_ptr<Batch>> batch = stream_.collect();
+    if (!batch)
+      return nullptr;
+    return std::move(*batch);
   }
 
-  // Maps at most one read from a thread outside the session (BatchWindow::run_one). `tid`
+  void release(std::uint64_t bases) { stream_.release(bases); }
+  void abort() { stream_.abort(); }
+
+  // Maps at most one read from a thread outside the session (ChunkStream::run_one). `tid`
   // must be one of the helper tids reserved by the constructor, so each scratch slot has
   // one writer.
   bool try_help(int tid) {
     assert(tid >= n_threads_ - n_helpers_ && tid < n_threads_);
-    return window_.run_one(tid);
+    return stream_.run_one(tid);
   }
 
-  std::size_t in_flight() const { return window_.in_flight(); }
-  std::size_t window() const { return window_.window(); }
-
 private:
-  // Leaves the window at least one worker, so batches finish even if helpers stop calling.
+  // Leaves the stream at least one worker, so chunks finish even if helpers stop calling.
   static int clamp_helpers(int n_threads, int n_helpers) {
     if (n_helpers < 0)
       return 0;
@@ -473,7 +478,7 @@ private:
   int n_helpers_; // tids reserved for try_help()
   std::vector<typename Backend::WorkerScratch> worker_scratch_;
   // Declared last: its workers use the members above, so it must be destroyed first.
-  ::fa::cpu::threading::BatchWindow<std::unique_ptr<Batch>> window_;
+  ::fa::cpu::threading::ChunkStream<std::unique_ptr<Batch>> stream_;
 };
 
 } // namespace lr

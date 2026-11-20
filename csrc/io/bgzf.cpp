@@ -3,7 +3,8 @@
 // Threads:
 //   reader   the one caller of read(); owns `cur`, `tail`, `finished` and its
 //            scratch. When the run it needs is not ready it cuts and inflates
-//            that run itself if no worker has claimed it, and otherwise waits.
+//            that run itself if no worker has claimed it. Otherwise, under a
+//            loan, it cuts the next one; in a private team it waits.
 //   workers  each cuts and inflates one run at a time while the demand gate
 //            (header) is open; otherwise it runs one unit of the caller's
 //            work through `helper`, or sleeps.
@@ -59,8 +60,8 @@ constexpr uint64_t kRunMaxOutput = 32u << 20;
 constexpr uint64_t kInputReadaheadBytes = 32ull << 20;
 constexpr uint64_t kInputDropLagBytes = 64ull << 20;
 constexpr uint64_t kInputDropStepBytes = 64ull << 20;
-// Workers keep at most this many runs cut and not yet consumed, the reader's
-// own included, unless the reader is waiting.
+// A private team's workers keep at most this many runs cut and not yet
+// consumed, the reader's own included, unless the reader is waiting.
 constexpr uint64_t kRunsAhead = 2;
 
 struct Block {
@@ -113,6 +114,8 @@ struct BgzfByteSource::Impl {
   uint64_t size = 0;
   unsigned workers = 1;
   std::function<bool(unsigned)> helper;
+  // The caller's, under a loan: its workers cut ahead only while it is set.
+  const std::atomic<bool>* short_of_input = nullptr;
 
   // ---- token holder only ----
   uint64_t input_dropped_to = 0;
@@ -158,7 +161,11 @@ struct BgzfByteSource::Impl {
   }
   // `pending` counts a run whose cut is in progress.
   bool worker_wanted_locked(uint64_t pending = 0) const {
-    return reader_waiting || next_seq + pending - read_seq < kRunsAhead;
+    if (reader_waiting)
+      return true;
+    if (short_of_input != nullptr)
+      return short_of_input->load(std::memory_order_relaxed);
+    return next_seq + pending - read_seq < kRunsAhead;
   }
 
   // ---- the job: cut one run, then inflate it ----
@@ -363,7 +370,8 @@ struct BgzfByteSource::Impl {
       if (abort)
         return;
       if (can_cut_locked()) {
-        if (worker_wanted_locked()) {
+        // Wanted, or a loaned worker the caller has no work for.
+        if (worker_wanted_locked() || (helper && helper_was_empty)) {
           cutting = true;
           run_job(lock, sc);
           helper_was_empty = false;
@@ -466,8 +474,9 @@ struct BgzfByteSource::Impl {
           }
           break;
         }
-        // Only the run the reader needs, and only when no worker has it.
-        if (read_seq == next_seq && can_cut_locked()) {
+        // The run the reader needs when no worker has it; under a loan, else
+        // the next one. A private team's workers cut ahead while it waits.
+        if ((helper || read_seq == next_seq) && can_cut_locked()) {
           cutting = true;
           run_job(lock, reader_scratch);
           continue;
@@ -541,6 +550,8 @@ BgzfByteSource::BgzfByteSource(const std::string& path,
   }
   self->workers = std::max(1u, wanted);
   self->helper = options.helper;
+  if (options.helper)
+    self->short_of_input = options.short_of_input;
   self->ring.resize(2 * (static_cast<size_t>(self->workers) + 1));
 
   self->threads.reserve(self->workers);

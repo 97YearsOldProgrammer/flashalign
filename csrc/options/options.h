@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -356,7 +357,7 @@ namespace rna {
 struct RnaLongOptions {
   // Seeding, occurrence, chaining and DP scoring shared with DNA.
   DnaLongOptions base;
-  // --min-intron / -G
+  // Intron bounds; -G sets the maximum.
   int min_intron = 20;
   int max_intron = 200000;
   int max_locus_chains = 6;
@@ -644,9 +645,17 @@ bool lane_runs_stage(LaneStage stage, std::string_view preset);
 bool is_rna_preset(std::string_view preset);
 bool preset_is_valid(std::string_view preset);
 
+// A DNA preset's vote: the seeds per strand that vote (-v NUM1) and the
+// seeds a vote peak needs (--min-support).
+struct PresetVoteDefaults { int vote_seeds; int min_support; };
+PresetVoteDefaults preset_vote_defaults(std::string_view preset);
+
 // Preset (k, s) for building an index. A loaded index uses its own values.
 struct PresetSeeding { int k; int syncmer_s; };
 PresetSeeding resolve_preset_seeding(std::string_view preset);
+
+// The stream's chunk in bases, at most -K: small beside -K, big enough to map longest first.
+inline constexpr std::int64_t kStreamChunkBp = 20'000'000;
 
 // Every accepted preset name, for error messages; the experimental ones last.
 std::string accepted_preset_names();

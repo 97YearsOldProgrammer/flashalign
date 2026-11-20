@@ -795,8 +795,7 @@ std::string resolved_config_text(const AlignOptions& opt,
         src(opt.occ_dist.has_value(), "preset"));
 
   if (is_rna && rna != nullptr) {
-    row("rna_min_intron", i2s(rna->min_intron),
-        src(opt.min_intron && *opt.min_intron > 0, "preset"));
+    row("rna_min_intron", i2s(rna->min_intron), "preset");
     row("rna_max_intron", i2s(rna->max_intron),
         src(opt.max_intron && *opt.max_intron > 0, "preset"));
     row("rna_junction_bed",
@@ -1028,32 +1027,28 @@ private:
   std::function<bool(int)> target_;
 };
 
-// The smallest -t at which gzip decoding that is not BGZF borrows mapping
-// threads. BGZF borrows them from -t 2 whenever the inputs are all eligible.
-constexpr int kDecodeLoanMinThreads = 32;
-
-// Threads the decode team borrows from the -t budget: -t/8, clamped to [1, 8].
+// Threads the decode team borrows from the -t budget: -t/4, clamped to [1, 8].
+// A borrowed thread maps unless the stream is short of input, and one of a
+// gzip team of two or more scans for member starts instead of inflating.
 int decode_loan_threads(int num_threads) {
-  const int wanted = num_threads / 8;
+  const int wanted = num_threads / 4;
   if (wanted < 1)
     return 1;
   return wanted > 8 ? 8 : wanted;
 }
 
-// A loan needs every input to be eligible for a parallel source the run
-// allows (`gz`: member-parallel gzip; `bgzf`: block-parallel BGZF, BAM
-// included); otherwise the loaned threads would sit idle while the serial
-// reader runs.
-bool decode_loan_can_be_fed(const std::vector<std::string>& reads_paths,
-                            bool gz, bool bgzf) {
+// A loan needs every input to be eligible for a parallel source
+// (member-parallel gzip; block-parallel BGZF, BAM included); otherwise the
+// loaned threads would sit idle while the serial reader runs.
+bool decode_loan_can_be_fed(const std::vector<std::string>& reads_paths) {
   if (reads_paths.empty())
     return false;
   for (const std::string& path : reads_paths) {
-    if (bgzf && ::fa::cpu::io::bgzf_eligible(path))
+    if (::fa::cpu::io::bgzf_eligible(path))
       continue;
     // Generic-gzip BAM uses strict serial decoding, so it cannot feed a loan.
-    if (!(gz && ::fa::cpu::io::gz_member_parallel_eligible(path) &&
-          !::fa::cpu::io::path_is_bam(path)))
+    if (!::fa::cpu::io::gz_member_parallel_eligible(path) ||
+        ::fa::cpu::io::path_is_bam(path))
       return false;
   }
   return true;
@@ -1078,26 +1073,23 @@ int resolve_num_threads(const AlignOptions& opt) {
              : std::max(1, ::fa::cpu::threading::default_thread_count() - 2);
 }
 
-// The input decode plan, minus the loan callback. The parallel decoders
-// borrow mapping threads whenever the inputs can feed them, at any preset.
-// The member-parallel gzip decoder also needs -t >= kDecodeLoanMinThreads:
-// below that, serial decoding on the reader thread hides behind compute and
-// its extra work makes lending threads a net loss; its loan is then at least
-// four threads, so one thread stuck on a long read cannot starve the reader.
-// The BGZF decoder costs no extra work, and its reader inflates the run it
-// needs itself when no worker has claimed it, so it borrows from -t 2. -t 1
-// runs on one thread and lends nothing.
+// The input decode plan, minus the loan callbacks. The parallel decoders
+// borrow mapping threads whenever the inputs can feed them, at any preset,
+// from -t 2: who decodes is settled as the run goes. The reader inflates what
+// it needs itself when no loaned thread has it, and the loaned threads decode
+// ahead of it only while the stream is short of input (io.h), so decoding
+// costs the mapping threads nothing while they are the slower side, and one
+// thread stuck on a long read cannot starve the reader. -t 1 runs on one
+// thread and lends nothing.
 fa::cpu::io::IoPlan build_io_plan(const AlignOptions& opt, int num_threads) {
   fa::cpu::io::IoPlan plan;
   const fa::cpu::io::DecodeTids tids{num_threads,
                                      decode_loan_threads(num_threads)};
-  const bool room = tids.window() >= 1;
-  const bool gz = room && num_threads >= kDecodeLoanMinThreads;
-  const bool bgzf = room;
-  const bool fed = decode_loan_can_be_fed(opt.reads_paths, gz, bgzf);
-  plan.parallel_gz = gz && fed;
-  plan.parallel_bgzf = bgzf && fed;
-  if (!plan.parallel_gz && !plan.parallel_bgzf)
+  const bool fed =
+      tids.window() >= 1 && decode_loan_can_be_fed(opt.reads_paths);
+  plan.parallel_gz = fed;
+  plan.parallel_bgzf = fed;
+  if (!fed)
     return plan;
   plan.gz.workers = static_cast<unsigned>(decode_loan_threads(num_threads));
   plan.gz.staging_budget =
@@ -1215,8 +1207,6 @@ fa::cpu::api::UserOverrides build_user_overrides(const AlignOptions& opt) {
   if (opt.dp_max_gap)
     u.dp_max_gap = *opt.dp_max_gap;
   // Passed as given; the resolver validates the intron bounds.
-  if (opt.min_intron)
-    u.rna_min_intron = *opt.min_intron;
   if (opt.max_intron)
     u.rna_max_intron = *opt.max_intron;
   if (opt.rna_junction_bed)
@@ -1360,7 +1350,8 @@ void run_show_config(const AlignOptions& opt, const ResolvedInputs& in) {
 } // namespace
 
 int run_align(const AlignOptions& cli_options) {
-  // Only the preset is rewritten, when a .faix supplies it.
+  // Only the preset, when a .faix supplies it, and -N, once the preset is
+  // settled, are rewritten.
   AlignOptions opt = cli_options;
   refuse_sam_text_reads(opt.reads_paths);
   const ResolvedInputs in = resolve_inputs(opt);
@@ -1388,10 +1379,9 @@ int run_align(const AlignOptions& cli_options) {
     opt.preset = in.index_preset;
     opt.preset_source = "index";
   }
-  // parse.cpp's checks that read the preset, for the preset an index records.
-  check_max_cands_range(opt);
-  if (const auto refusal = option_stage_refusal(opt.given_options, opt.preset))
-    throw UsageError(*refusal);
+  // parse.cpp ran these for a typed -x.
+  if (opt.preset_source != "explicit")
+    settle_preset_options(opt);
   // RNA mapping needs the reference bases even without a CIGAR. Checked
   // after the preset is settled and before --show-config, so a dry run
   // refuses what a real run would.
@@ -1558,15 +1548,16 @@ int run_align(const AlignOptions& cli_options) {
   AlignmentOutputWriter output(opt.output_path, opt.format, genome,
                                opt.command_line, opt.read_group_line);
 
-  // -t 1 maps each batch on this thread. From -t 2 the batches go through
-  // one session, whose workers move on to the next batch instead of waiting
-  // for a batch's slowest read; output order is unchanged.
+  // -t 1 maps each batch of -K bases on this thread. From -t 2 the reads go
+  // through one stream, whose workers move on to the next chunk instead of
+  // waiting for a chunk's slowest read, and -K bounds the bases from read to
+  // written. Output order is the same.
   const int num_threads = dna_aligner->config().common.num_threads;
+  const bool on_stream = num_threads >= 2;
 
   // State shared across passes over the reads (one pass per index part).
   // The reader is rebound per pass; the output context is bound once, after
-  // the header. batch_bp bounds buffered input and the bases in flight when
-  // a worker reaches past the oldest batch, not alignment cost.
+  // the header. batch_bp bounds buffered input, not alignment cost.
   const int64_t batch_bp = opt.batch_bp;
   std::unique_ptr<fa::cpu::io::BatchReader> batch_reader;
   std::optional<AlignmentOutputContext> output_context;
@@ -1586,12 +1577,13 @@ int run_align(const AlignOptions& cli_options) {
     std::vector<fa::cpu::AlignResult> results;
   };
 
-  // The records of each in-flight batch, whose sequences were moved into the
-  // session. Between collect_windowed() calls its size equals in_flight(),
-  // including after a batch throws. Caller thread only.
-  std::deque<std::vector<fa::cpu::io::FastxRecord>> windowed_records;
-  // Declared last so its workers are joined first on unwind. One per pass.
-  std::unique_ptr<fa::cpu::api::WindowedAlignSession> session;
+  // Whether the stream is short of input, for the decode team (io.h): written
+  // by the stream's reader before each chunk it reads.
+  std::atomic<bool> stream_short{true};
+
+  // The stream's session, declared last so its workers are joined first on
+  // unwind. One per pass.
+  std::unique_ptr<fa::cpu::api::StreamAlignSession> stream;
 
   auto produce = [&]() -> std::optional<ReadBatch> {
     auto records = batch_reader->next(seen);
@@ -1602,10 +1594,9 @@ int run_align(const AlignOptions& cli_options) {
     return batch;
   };
 
-  // The compute stage runs on the caller thread while the reader and writer
-  // stages overlap it. The batch's sequences are moved into the aligner and
-  // back rather than copied. Workers see a read's name only as its X31 hash
-  // (seed/seed.h), which breaks exact ties as minimap2's qname does.
+  // A batch's sequences are moved into the aligner and back rather than
+  // copied. Workers see a read's name only as its X31 hash (seed/seed.h),
+  // which breaks exact ties as minimap2's qname does.
   const auto read_name_hashes =
       [](const std::vector<fa::cpu::io::FastxRecord>& records) {
         std::vector<std::uint32_t> hashes;
@@ -1660,7 +1651,7 @@ int run_align(const AlignOptions& cli_options) {
       };
 
   // -t 1: the batch mapped on this thread.
-  auto process_serial = [&](ReadBatch in) -> std::optional<AlignedBatch> {
+  auto process_serial = [&](ReadBatch in) -> AlignedBatch {
     std::vector<std::string> seqs;
     seqs.reserve(in.records.size());
     for (auto& rec : in.records)
@@ -1676,61 +1667,19 @@ int run_align(const AlignOptions& cli_options) {
     for (size_t i = 0; i < seqs.size(); ++i)
       in.records[i].seq = std::move(seqs[i]);
     done.records = std::move(in.records);
-    return std::make_optional(std::move(done));
-  };
-
-  // Takes the oldest batch from the session and puts its sequences back into
-  // its records. Caller thread only.
-  auto collect_windowed = [&]() -> AlignedBatch {
-    // Pop before collect(), which drops its batch before rethrowing that
-    // batch's exception, so the two queues stay in step.
-    AlignedBatch out;
-    out.records = std::move(windowed_records.front());
-    windowed_records.pop_front();
-    fa::cpu::api::AlignedReadBatch done;
-    try {
-      done = session->collect();
-    } catch (const fa::cpu::lr::CandidateIdOverflow& refused) {
-      throw name_refused_contig(out.records, refused);
-    }
-    for (size_t i = 0; i < done.reads.size(); ++i)
-      out.records[i].seq = std::move(done.reads[i]);
-    out.results = std::move(done.results);
-    return out;
-  };
-
-  // Submits a batch and collects the oldest once the window is full, so
-  // in_flight() never exceeds it.
-  auto process_windowed = [&](ReadBatch in) -> std::optional<AlignedBatch> {
-    std::vector<std::string> seqs;
-    seqs.reserve(in.records.size());
-    for (auto& rec : in.records)
-      seqs.push_back(std::move(rec.seq));
-    std::vector<std::uint32_t> name_hashes = read_name_hashes(in.records);
-    std::vector<int> self_contigs = read_self_contigs(in.records);
-    std::vector<int> name_ranks = read_name_ranks(in.records, seqs);
-    windowed_records.push_back(std::move(in.records));
-    session->submit(std::move(seqs), std::move(name_hashes),
-                    std::move(self_contigs), std::move(name_ranks));
-    if (session->in_flight() < session->window())
-      return std::nullopt;
-    return std::make_optional(collect_windowed());
-  };
-
-  // At end of input, drains the window oldest-first.
-  auto flush_windowed = [&]() -> std::optional<AlignedBatch> {
-    if (session->in_flight() == 0)
-      return std::nullopt;
-    return std::make_optional(collect_windowed());
+    return done;
   };
 
   fa::cpu::output::SamEmitOptions emit_opts;
   emit_opts.hard_clip_supp = !opt.soft_clip_supp;
   emit_opts.emit_secondary = opt.output_secondary;
 
-  // Writer stage, on its own thread: counters and record output, in input
-  // order. Over a multi-part index the counters sum over passes, except input
-  // bases, which are counted on the first pass only.
+  // Bases written since the last --progress line.
+  int64_t progress_bp = 0;
+
+  // Writer stage: counters and record output, in input order. Over a
+  // multi-part index the counters sum over passes, except input bases, which
+  // are counted on the first pass only.
   auto consume = [&](AlignedBatch batch) {
     const auto& records = batch.records;
     const auto& results = batch.results;
@@ -1738,6 +1687,7 @@ int run_align(const AlignOptions& cli_options) {
       const auto& result = results[i];
       if (current_part == 0)
         summary.bases += static_cast<int64_t>(records[i].seq.size());
+      progress_bp += static_cast<int64_t>(records[i].seq.size());
       if (result.mapped()) {
         ++summary.mapped_reads;
         const int64_t introns =
@@ -1765,7 +1715,10 @@ int run_align(const AlignOptions& cli_options) {
       summary.records +=
           write_alignment_records(*output_context, records[i], result);
     }
-    if (opt.progress && !opt.quiet) {
+    // A chunk of the stream is small: one line per -K bases written.
+    if (opt.progress && !opt.quiet &&
+        (!on_stream || progress_bp >= batch_bp)) {
+      progress_bp = 0;
       if (in.multipart) {
         std::cerr << "[flashalign] part " << (current_part + 1) << "/"
                   << part_spans.size() << ": aligned " << seen
@@ -1775,6 +1728,91 @@ int run_align(const AlignOptions& cli_options) {
                   << summary.records << " records\n";
       }
     }
+  };
+
+  // The stream: a reader thread reads a chunk whenever the bases alive are
+  // under -K and submits it; this thread writes the chunks in order and
+  // releases their bases.
+  auto run_stream = [&]() {
+    // The records of the chunks in the stream, whose sequences were moved into
+    // it: pushed before each submit, popped at each collect, so the front is
+    // the oldest chunk's.
+    std::mutex stream_records_mutex;
+    std::deque<std::vector<fa::cpu::io::FastxRecord>> stream_records;
+    const auto take_front_records = [&] {
+      std::lock_guard<std::mutex> lock(stream_records_mutex);
+      std::vector<fa::cpu::io::FastxRecord> records =
+          std::move(stream_records.front());
+      stream_records.pop_front();
+      return records;
+    };
+    std::exception_ptr reader_exc;
+    std::thread reader([&] {
+      fa::cpu::threading::name_current_thread("fa-reader");
+      try {
+        for (;;) {
+          stream_short.store(stream->short_of_input(),
+                             std::memory_order_relaxed);
+          if (!stream->wait_room())
+            break;
+          std::optional<ReadBatch> in = produce();
+          if (!in)
+            break;
+          std::vector<std::string> seqs;
+          seqs.reserve(in->records.size());
+          for (auto& rec : in->records)
+            seqs.push_back(std::move(rec.seq));
+          std::vector<std::uint32_t> name_hashes = read_name_hashes(in->records);
+          std::vector<int> self_contigs = read_self_contigs(in->records);
+          std::vector<int> name_ranks = read_name_ranks(in->records, seqs);
+          {
+            std::lock_guard<std::mutex> lock(stream_records_mutex);
+            stream_records.push_back(std::move(in->records));
+          }
+          stream->submit(std::move(seqs), std::move(name_hashes),
+                         std::move(self_contigs), std::move(name_ranks));
+        }
+        stream->close();
+      } catch (...) {
+        reader_exc = std::current_exception();
+        stream->abort();
+      }
+    });
+    std::exception_ptr writer_exc;
+    try {
+      for (;;) {
+        std::optional<fa::cpu::api::AlignedReadBatch> done;
+        // A chunk that throws is dropped by collect(), so its records go too.
+        try {
+          done = stream->collect();
+        } catch (const fa::cpu::lr::CandidateIdOverflow& refused) {
+          throw name_refused_contig(take_front_records(), refused);
+        } catch (...) {
+          take_front_records();
+          throw;
+        }
+        if (!done)
+          break;
+        AlignedBatch out;
+        out.records = take_front_records();
+        std::uint64_t bases = 0;
+        for (size_t i = 0; i < done->reads.size(); ++i) {
+          bases += done->reads[i].size();
+          out.records[i].seq = std::move(done->reads[i]);
+        }
+        out.results = std::move(done->results);
+        consume(std::move(out));
+        stream->release(bases);
+      }
+    } catch (...) {
+      writer_exc = std::current_exception();
+      stream->abort();
+    }
+    reader.join();
+    if (writer_exc)
+      std::rethrow_exception(writer_exc);
+    if (reader_exc)
+      std::rethrow_exception(reader_exc);
   };
 
   // One pass over the reads per index part. The previous part is freed
@@ -1813,6 +1851,8 @@ int run_align(const AlignOptions& cli_options) {
       io_plan.gz.helper = [hub, tid_base](unsigned ordinal) {
         return hub->call(tid_base + static_cast<int>(ordinal));
       };
+      stream_short.store(true, std::memory_order_relaxed);
+      io_plan.gz.short_of_input = &stream_short;
     }
 
     fa::cpu::io::SequenceReader reader(opt.reads_paths, &io_plan,
@@ -1825,17 +1865,16 @@ int run_align(const AlignOptions& cli_options) {
           opt.paf_cigar,
           opt.copy_comment, emit_opts, own_sam_tag_keys(opt)));
     }
-    batch_reader = std::make_unique<fa::cpu::io::BatchReader>(reader, batch_bp);
+    batch_reader = std::make_unique<fa::cpu::io::BatchReader>(
+        reader, on_stream ? std::min(fa::cpu::options::kStreamChunkBp, batch_bp)
+                          : batch_bp);
 
-    // A worker takes a read of a batch younger than the oldest only while the
-    // bases in flight stay within -K, so batches of a few whole contigs keep
-    // about one batch's bases in flight.
-    if (num_threads >= 2)
-      session = dna_aligner->make_windowed_session(
+    if (on_stream)
+      stream = dna_aligner->make_stream_session(
           tids.loan(), static_cast<std::uint64_t>(batch_bp));
     // From here the decode team's idle threads map reads.
-    if (session != nullptr && tids.loan() > 0) {
-      fa::cpu::api::WindowedAlignSession* target = session.get();
+    if (stream != nullptr && tids.loan() > 0) {
+      fa::cpu::api::StreamAlignSession* target = stream.get();
       helper_hub.install([target](int tid) { return target->try_help(tid); });
     }
     // Revokes the loan before the session is torn down, on unwind too.
@@ -1848,20 +1887,18 @@ int run_align(const AlignOptions& cli_options) {
     // index; the session never uses it.
     fa::cpu::threading::join_persistent_pool();
 
-    // Reader, compute and writer run concurrently, with at most
-    // threading::kLiveBatches batches alive from read to written. Output
-    // order is independent of batching, threads and the window. -t 1 runs all
-    // three stages on this thread.
-    if (num_threads >= 2) {
-      fa::cpu::threading::run_pipeline<ReadBatch, AlignedBatch>(
-          produce, process_windowed, consume, flush_windowed);
+    // Reader, compute and writer run concurrently, under -K bases alive from
+    // read to written. Output order is independent of batching, chunking and
+    // threads. -t 1 runs all three stages on this thread.
+    if (stream != nullptr) {
+      run_stream();
     } else {
       fa::cpu::threading::run_pipeline_serial<ReadBatch, AlignedBatch>(
           produce, process_serial, consume);
     }
     // Revoke the loan before the session goes.
     helper_hub.revoke();
-    session.reset();
+    stream.reset();
     batch_reader.reset();
   }
   output.close();

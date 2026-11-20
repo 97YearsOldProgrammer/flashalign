@@ -280,8 +280,9 @@ minimap2 chains twice, its second pass with a range-maximum query (RMQ).
    [=*21*,*9*] and index them. A closed syncmer is a k-mer whose minimal s-mer sits at one of its
    two ends, so about 2/(k-s+1) of the k-mers are seeds.
 
-2. Read **-K** [=*500M*] query bases per batch; the mapping threads draw from two batches at once.
-   For each query sequence, do step 3 through 9. Output bytes and order do not depend on **-K**.
+2. Hold up to **-K** [=*500M*] query bases in memory from read to written; the mapping threads
+   take reads from all that is held. For each query sequence, do step 3 through 9. Output bytes
+   and order do not depend on **-K**.
 
 3. Look up the syncmers of the query in the index to find the seeds, and ignore, when voting and
    chaining, a seed whose reference occurrence is above **--max-vote-occ** [=*200*; unset, the

@@ -307,9 +307,11 @@ int64_t read_whole_record(kseq_t* ks, const ByteSource& src) {
 }
 
 void uppercase_inplace(std::string& seq) {
-    // Soft-masked (lowercase) bases compare equal to uppercase ones.
+    // Soft-masked (lowercase) bases compare equal to uppercase ones. ASCII letters only,
+    // whatever the locale: a range test, which the compiler vectorizes.
     for (char& ch : seq) {
-        ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+        const unsigned char u = static_cast<unsigned char>(ch);
+        ch = static_cast<char>(static_cast<unsigned>(u - 'a') < 26u ? u - 32 : u);
     }
 }
 

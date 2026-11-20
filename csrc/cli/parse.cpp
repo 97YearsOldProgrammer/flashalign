@@ -133,7 +133,7 @@ const std::vector<OptionSpec>& specs_table() {
         // --vote-spacing.
         {OptionId::VoteSeeds, 'v', "", kPair, kStable, A,
          "NUM[,NUM]", SEC_PLACEMENT,
-         "seeds per strand that vote, query tiles per read [128,128]"},
+         "seeds per strand that vote (0 for all; at least --min-support), query tiles per read [128,128]"},
         // A read of length L votes into bins of clamp(L / NUM2, NUM1,
         // --dw-max) reference bases. NUM1 alone keeps the preset's NUM2, and
         // NUM2 0 fixes the width at NUM1. The splice presets take NUM1 alone;
@@ -181,10 +181,6 @@ const std::vector<OptionSpec>& specs_table() {
          "INT", SEC_ALIGN,
          "score bonus when alignment extends to the end of the query sequence [-1]", "", kBaseAlign},
 
-        // RNA presets only.
-        {OptionId::MinIntron, '\0', "--min-intron", kInt, kStable, A,
-         "INT", SEC_SPLICE,
-         "min intron length [20]"},
         // As minimap2's -G, it also sets both -r values; between -G and -r
         // the later typed wins.
         {OptionId::MaxIntron, 'G', "", kSize, kStable, A,
@@ -263,7 +259,7 @@ const std::vector<OptionSpec>& specs_table() {
          "number of threads [all-2]"},
         {OptionId::BatchBp, 'K', "--batch-bp", kSize, kStable, A,
          "NUM", SEC_IO,
-         "minibatch size for mapping [500M]"},
+         "bases in memory from read to written [500M]"},
         {OptionId::ShowConfig, '\0', "--show-config", kNone, kStable, A,
          "", SEC_IO,
          "print the resolved configuration and exit"},
@@ -803,36 +799,67 @@ TokenStream expand_short_bundles(
     return out;
 }
 
-// Consumes the value after `opt`. A registered spelling or "--" in that
-// position means the value is missing (`-t --quiet`); anything else, such as
-// a negative number or "-", is a value. An attached value is always accepted.
+// A long option and the value attached to it with '=', as in minimap2
+// (--end-bonus=100); the token itself and no value otherwise.
+struct LongToken {
+    std::string spelling;
+    std::optional<std::string> attached;
+};
+
+LongToken split_long_token(const std::string& arg) {
+    const std::size_t eq = arg.find('=');
+    if (arg.size() < 3 || arg.compare(0, 2, "--") != 0 ||
+        eq == std::string::npos)
+        return {arg, std::nullopt};
+    return {arg.substr(0, eq), arg.substr(eq + 1)};
+}
+
+// Consumes the value after `opt`. A registered spelling, with or without an
+// attached value, or "--" in that position means the value is missing
+// (`-t --quiet`); anything else, such as a negative number or "-", is a value.
+// A value glued to its letter is always accepted.
 std::string require_value(
     std::size_t& i, const TokenStream& ts, const std::string& opt,
     unsigned mode) {
     if (i + 1 >= ts.size()) throw UsageError("missing value for " + opt);
     const std::string& next = ts.tokens[i + 1];
     if (!ts.attached[i + 1] &&
-        (next == "--" || find_option_spec(next, mode) != nullptr)) {
+        (next == "--" ||
+         find_option_spec(split_long_token(next).spelling, mode) != nullptr)) {
         throw UsageError(opt + " expects a value");
     }
     return ts.tokens[++i];
 }
 
-// The align spellings that take a value attached with '=', as in minimap2:
-// --secondary=yes|no and --dual=yes|no, which also take it separate, and
-// --cs=short|long, which takes it only attached (a bare --cs is short).
-constexpr std::string_view kAttachedValueSpellings[] = {"--secondary", "--cs",
-                                                        "--dual"};
+// The value of `spec`: attached with '=', else the next token. --cs takes
+// its value only attached, which its dispatch reads; any other option that
+// takes no value refuses one.
+std::string option_value(std::size_t& i, const TokenStream& ts,
+                         const OptionSpec& spec, const LongToken& tok,
+                         unsigned mode) {
+    if (spec.kind == ValueKind::None) {
+        if (tok.attached && spec.id != OptionId::Cs)
+            throw UsageError(tok.spelling + " takes no value (got " +
+                             ts.tokens[i] + ")");
+        return {};
+    }
+    if (!tok.attached) return require_value(i, ts, tok.spelling, mode);
+    if (tok.attached->empty())
+        throw UsageError("missing value for " + tok.spelling);
+    return *tok.attached;
+}
 
 }  // namespace
 
 }  // namespace fa::cpu::cli
 
 /**** preset_checks ****/
-// The checks that read the preset; cli/align.cpp repeats them once an index has
-// settled a preset not given with -x.
+// The checks that read the preset, in settle_preset_options: after the parse
+// for a typed -x, in cli/align.cpp once the index or the default settled it.
 
 namespace fa::cpu::cli {
+
+namespace {
 
 void check_max_cands_range(const AlignOptions& opt) {
     if (!opt.max_cands) return;
@@ -843,8 +870,6 @@ void check_max_cands_range(const AlignOptions& opt) {
         throw UsageError("--max-cands must be within [1," +
                          std::to_string(ceiling) + "]");
 }
-
-namespace {
 
 // A stage's refusal, checked in this order. {preset} is the preset, {options}
 // every spelling of the stage and {is} "is" or "are" to agree with them.
@@ -875,8 +900,9 @@ void replace_all(std::string& text, std::string_view key,
         text.replace(at, key.size(), value);
 }
 
-}  // namespace
-
+// The refusal of an option in `given` whose stage (OptionSpec::stage) the lane
+// of `preset` does not run, or none. Every option of that stage is named, in
+// registry order.
 std::optional<std::string> option_stage_refusal(
     const std::set<OptionId>& given, const std::string& preset) {
     for (const StageRefusal& refusal : kStageRefusals) {
@@ -907,6 +933,86 @@ std::optional<std::string> option_stage_refusal(
         return text;
     }
     return std::nullopt;
+}
+
+}  // namespace
+
+// Options valid with one kind of preset only. options/options.cpp repeats
+// most of them for the API. Running it twice changes nothing.
+void settle_preset_options(AlignOptions& opt) {
+    check_max_cands_range(opt);
+    const bool rna = opt.preset == "splice" || opt.preset == "splice:hq";
+    // RNA presets have no adaptive vote-width model; -W NUM1 still sets their
+    // fixed width.
+    if (rna && (opt.vote_diag_slope_den || opt.vote_diag_width_max)) {
+        throw UsageError("-W's read-length divisor and --dw-max are valid "
+                         "only with a DNA preset");
+    }
+    if (rna && opt.dna_vote_admission_ratio) {
+        throw UsageError("--vote-ratio is valid only with a DNA preset");
+    }
+    if (rna && opt.min_chain_score)
+        throw UsageError("-m is valid only with a DNA preset");
+    if (rna && opt.max_cands)
+        throw UsageError("--max-cands is valid only with a DNA preset");
+    if (rna && opt.vote_seeds)
+        throw UsageError("-v is valid only with a DNA preset; the splice "
+                         "presets take --vote-spacing");
+    // Fewer voters than a peak needs map almost nothing; minimap2's -v, its
+    // verbosity, is a common way to get here.
+    if (!rna && opt.vote_seeds && *opt.vote_seeds > 0) {
+        const auto vote = fa::cpu::api::preset_vote_defaults(opt.preset);
+        const int support = opt.min_support.value_or(vote.min_support);
+        if (*opt.vote_seeds < support) {
+            const std::string v = std::to_string(*opt.vote_seeds);
+            const std::string s = std::to_string(support);
+            throw UsageError(
+                "-v " + v + ": a vote peak needs --min-support " + s +
+                " seeds, but only " + v + " per strand would vote, so "
+                "almost no read would map; give -v " + s + " or more "
+                "(default " + std::to_string(vote.vote_seeds) +
+                "; 0 votes with every seed) or a lower --min-support. "
+                "minimap2's -v is its verbosity level: here that is --quiet");
+        }
+    }
+    if (!rna && opt.vote_spacing)
+        throw UsageError("--vote-spacing is valid only with an RNA preset");
+    if (const auto refusal =
+            option_stage_refusal(opt.given_options, opt.preset))
+        throw UsageError(*refusal);
+    if (!rna) {
+        if (opt.max_intron) {
+            throw UsageError(
+                "-G is valid only with splice or splice:hq");
+        }
+        if (opt.splice_strand) {
+            throw UsageError(
+                "-u is valid only with splice or splice:hq");
+        }
+        if (opt.rna_junction_bed)
+            throw UsageError(
+                "--junc-bed is valid only with splice or splice:hq");
+        if (opt.rna_junction_bonus)
+            throw UsageError(
+                "--junc-bonus is valid only with splice or splice:hq");
+        if (opt.rna_rival_min_diff)
+          throw UsageError(
+              "--rival-min-diff is valid only with splice or splice:hq");
+        // -N n is minimap2's best_n, whatever --secondary says.
+        if (opt.rna_max_loci)
+          opt.dna_secondary_max = *opt.rna_max_loci - 1;
+        opt.rna_max_loci.reset();
+    }
+    if (opt.max_intron && *opt.max_intron <= 0) {
+        throw UsageError("-G must be > 0");
+    }
+    if (opt.rna_junction_bonus &&
+        (*opt.rna_junction_bonus < 0 || *opt.rna_junction_bonus > 127))
+        throw UsageError("--junc-bonus must be within [0,127]");
+    if (opt.rna_rival_min_diff && *opt.rna_rival_min_diff < 0)
+        throw UsageError("--rival-min-diff must be >= 0");
+    if (opt.rna_max_loci && *opt.rna_max_loci < 1)
+        throw UsageError("-N must be >= 1");
 }
 
 }  // namespace fa::cpu::cli
@@ -1098,7 +1204,6 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
             opt.vote_diag_width_max = width_max;
             break;
         }
-        case OptionId::MinIntron:  opt.min_intron = parse_int(val, arg); break;
         // -G is a size ("200k"), as in minimap2. It also sets both -r
         // values (options/options.cpp), so a -r typed before it is
         // dropped and only a later one applies.
@@ -1148,14 +1253,10 @@ void dispatch_align_option(AlignOptions& opt, bool& secondary_off_by_n,
 }
 
 // After the full parse, so argument order does not matter: the operands, the
-// ranges, the options valid with one kind of preset only, and the rules that
-// combine options (-N 0, --cs and --MD imply -c, -N on a DNA preset).
+// ranges, the rules that combine options (-N 0, --cs and --MD imply -c) and,
+// for a typed -x, the options valid with one kind of preset only.
 void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
                           const std::vector<std::string>& positional) {
-    // Without -x the preset may come from the index: cli/align.cpp
-    // checks the range once it is settled.
-    if (opt.preset_source != "builtin")
-        check_max_cands_range(opt);
     // --show-config reads no sequence, so its operands are optional.
     if (positional.size() < 2 && !opt.show_config) {
         throw UsageError(
@@ -1182,16 +1283,6 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
     if (!fa::cpu::api::preset_is_valid(opt.preset)) {
         throw UsageError(preset_refusal(opt.preset));
     }
-    // Options valid for only one mode, checked after the full parse so
-    // argument order does not matter. options/options.cpp repeats most of
-    // them for the API.
-    const bool rna = opt.preset == "splice" || opt.preset == "splice:hq";
-    // RNA presets have no adaptive vote-width model; -W NUM1 still sets their
-    // fixed width.
-    if (rna && (opt.vote_diag_slope_den || opt.vote_diag_width_max)) {
-        throw UsageError("-W's read-length divisor and --dw-max are valid "
-                         "only with a DNA preset");
-    }
     if (secondary_off_by_n)
         opt.output_secondary = false;
     // --cs and --MD imply a CIGAR, as minimap2's --cs does.
@@ -1203,74 +1294,16 @@ void settle_align_options(AlignOptions& opt, bool secondary_off_by_n,
         throw UsageError("--max-chain-occ must be >= 0");
     if (opt.occ_dist && *opt.occ_dist < 0)
         throw UsageError("-e must be >= 0");
-    if (rna && opt.dna_vote_admission_ratio) {
-        throw UsageError("--vote-ratio is valid only with a DNA preset");
-    }
-    if (rna && opt.min_chain_score)
-        throw UsageError("-m is valid only with a DNA preset");
-    if (rna && opt.max_cands)
-        throw UsageError("--max-cands is valid only with a DNA preset");
-
-    if (rna && opt.vote_seeds)
-        throw UsageError("-v is valid only with a DNA preset; the splice "
-                         "presets take --vote-spacing");
-    // Without -x an index may record a splice preset; options/options.cpp
-    // refuses then.
-    if (!rna && opt.vote_spacing && opt.preset_source != "builtin")
-        throw UsageError("--vote-spacing is valid only with an RNA preset");
-    // Without -x the preset may come from the index: cli/align.cpp
-    // asks again once it is settled.
-    if (opt.preset_source != "builtin") {
-        if (const auto refusal =
-                option_stage_refusal(opt.given_options, opt.preset))
-            throw UsageError(*refusal);
-    }
-    // The 128-tile and 128-seed trace refusals are in cli/align.cpp.
-    if (!rna) {
-        if (opt.min_intron) {
-            throw UsageError(
-                "--min-intron is valid only with splice or splice:hq");
-        }
-        if (opt.max_intron) {
-            throw UsageError(
-                "-G is valid only with splice or splice:hq");
-        }
-        if (opt.splice_strand) {
-            throw UsageError(
-                "-u is valid only with splice or splice:hq");
-        }
-        if (opt.rna_junction_bed)
-            throw UsageError(
-                "--junc-bed is valid only with splice or splice:hq");
-        if (opt.rna_junction_bonus)
-            throw UsageError(
-                "--junc-bonus is valid only with splice or splice:hq");
-        if (opt.rna_rival_min_diff)
-          throw UsageError(
-              "--rival-min-diff is valid only with splice or splice:hq");
-        // -N n is minimap2's best_n, whatever --secondary says.
-        if (opt.rna_max_loci)
-          opt.dna_secondary_max = *opt.rna_max_loci - 1;
-        opt.rna_max_loci.reset();
-    }
-    // Intron bounds must satisfy 0 < min <= max.
-    if (opt.min_intron && *opt.min_intron <= 0) {
-        throw UsageError("--min-intron must be > 0");
-    }
-    if (opt.max_intron && *opt.max_intron <= 0) {
-        throw UsageError("-G must be > 0");
-    }
-    if (opt.rna_junction_bonus &&
-        (*opt.rna_junction_bonus < 0 || *opt.rna_junction_bonus > 127))
-        throw UsageError("--junc-bonus must be within [0,127]");
-    if (opt.rna_rival_min_diff && *opt.rna_rival_min_diff < 0)
-        throw UsageError("--rival-min-diff must be >= 0");
-    if (opt.rna_max_loci && *opt.rna_max_loci < 1)
-        throw UsageError("-N must be >= 1");
-    if (opt.min_intron && *opt.min_intron > 0 && opt.max_intron && *opt.max_intron > 0 &&
-        *opt.max_intron < *opt.min_intron) {
-        throw UsageError("-G must be >= --min-intron");
-    }
+    if (opt.max_vote_occ && *opt.max_vote_occ < 0)
+        throw UsageError("--max-vote-occ must be >= 0");
+    if (opt.min_support && *opt.min_support < 0)
+        throw UsageError("--min-support must be >= 0");
+    if (opt.dp_min_score && *opt.dp_min_score < 0)
+        throw UsageError("-S must be >= 0");
+    // Without -x the index or the default sets the preset: cli/align.cpp
+    // runs these once it is settled.
+    if (opt.preset_source != "builtin")
+        settle_preset_options(opt);
 }
 
 }  // namespace
@@ -1300,18 +1333,8 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
             end_of_options = true;
             continue;
         }
-        // SPELLING=VALUE, for the spellings of kAttachedValueSpellings.
-        std::string_view spelling = arg;
-        std::optional<std::string> attached;
-        for (const std::string_view name : kAttachedValueSpellings) {
-            if (arg.size() > name.size() && arg[name.size()] == '=' &&
-                arg.compare(0, name.size(), name) == 0) {
-                spelling = name;
-                attached = arg.substr(name.size() + 1);
-                break;
-            }
-        }
-        const OptionSpec* spec = find_option_spec(spelling, ModeAlign);
+        const LongToken tok = split_long_token(arg);
+        const OptionSpec* spec = find_option_spec(tok.spelling, ModeAlign);
         if (spec == nullptr) {
             if (arg.size() > 1 && arg[0] == '-') {
                 throw UsageError("unknown align option: " + arg +
@@ -1322,28 +1345,21 @@ AlignOptions parse_align_args(int argc, char** argv, int start) {
             continue;
         }
         opt.given_options.insert(spec->id);
-        // --secondary accepts its value attached or separate.
+        const std::string val = option_value(i, ts, *spec, tok, ModeAlign);
         if (spec->id == OptionId::Secondary) {
-            const std::string answer =
-                attached ? *attached : require_value(i, ts, arg, ModeAlign);
-            if (answer != "yes" && answer != "no")
+            if (val != "yes" && val != "no")
                 throw UsageError("--secondary must be yes or no");
-            opt.output_secondary = answer == "yes";
+            opt.output_secondary = val == "yes";
             continue;
         }
         if (spec->id == OptionId::Dual) {
-            const std::string answer =
-                attached ? *attached : require_value(i, ts, arg, ModeAlign);
-            if (answer != "yes" && answer != "no")
+            if (val != "yes" && val != "no")
                 throw UsageError("--dual must be yes or no");
-            opt.dual = answer == "yes";
+            opt.dual = val == "yes";
             continue;
         }
-        std::string val;
-        if (spec->kind != ValueKind::None) {
-            val = require_value(i, ts, arg, ModeAlign);
-        }
-        dispatch_align_option(opt, secondary_off_by_n, arg, attached, spec, val);
+        dispatch_align_option(opt, secondary_off_by_n, tok.spelling,
+                              tok.attached, spec, val);
     }
     settle_align_options(opt, secondary_off_by_n, positional);
     return opt;
@@ -1365,7 +1381,8 @@ IndexOptions parse_index_args(int argc, char** argv, int start) {
             end_of_options = true;
             continue;
         }
-        const OptionSpec* spec = find_option_spec(arg, ModeIndex);
+        const LongToken tok = split_long_token(arg);
+        const OptionSpec* spec = find_option_spec(tok.spelling, ModeIndex);
         if (spec == nullptr) {
             // A bare "-" is stdin.
             if (arg.size() > 1 && arg[0] == '-') {
@@ -1375,21 +1392,20 @@ IndexOptions parse_index_args(int argc, char** argv, int start) {
             positional.push_back(arg);
             continue;
         }
-        std::string val;
-        if (spec->kind != ValueKind::None)
-            val = require_value(i, ts, arg, ModeIndex);
+        const std::string val = option_value(i, ts, *spec, tok, ModeIndex);
+        const std::string& name = tok.spelling;
         switch (spec->id) {
             case OptionId::Help:
                 print_index_help(std::cout);
                 std::exit(0);
-            case OptionId::K:        opt.k = parse_int(val, arg); break;
+            case OptionId::K:        opt.k = parse_int(val, name); break;
             case OptionId::Preset:   opt.preset = val; break;
             // Unlike minimap2, where -s is the minimum DP score.
-            case OptionId::SyncmerS: opt.syncmer_s = parse_int(val, arg); break;
-            case OptionId::Threads:  opt.threads = parse_int(val, arg); break;
+            case OptionId::SyncmerS: opt.syncmer_s = parse_int(val, name); break;
+            case OptionId::Threads:  opt.threads = parse_int(val, name); break;
             case OptionId::IdxNoSeq: opt.no_seq = true; break;
             case OptionId::IndexBatchBp:
-                opt.batch_bp = parse_size(val, arg);
+                opt.batch_bp = parse_size(val, name);
                 break;
             case OptionId::Quiet:    opt.quiet = true; break;
             default:

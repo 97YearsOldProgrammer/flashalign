@@ -89,7 +89,7 @@ enum class OptionId {
     // align: band geometry (minimap2 -r) and maximum gap (minimap2 -g).
     DpBw, DpMaxGap,
     // RNA intron bounds, strand and junction annotation
-    MinIntron, MaxIntron, SpliceStrand, RnaJunctionBed, RnaJunctionBonus,
+    MaxIntron, SpliceStrand, RnaJunctionBed, RnaJunctionBonus,
     // Secondary retention ratio (-p), the RNA retention band
     // (--rival-min-diff) and the catalogue depth and realization budget (-N)
     PriRatio, SpliceRivalMinDiff, SpliceMaxLoci,
@@ -197,9 +197,11 @@ struct AlignOptions {
     std::string preset = "lr";
     std::string preset_source = "builtin";
     std::optional<int> threads;
-    // The reader closes a batch after the cumulative input length reaches this
-    // budget. A single over-budget read forms a singleton batch.
-    int64_t batch_bp = 500'000'000;   // -K: bp per alignment batch [default 500M]
+    // -K [default 500M]: from -t 2, the bound on the bases alive from read to
+    // written; at -t 1, the bases per batch. The reader closes a batch or chunk
+    // after the cumulative input length reaches its budget; a single
+    // over-budget read forms a singleton.
+    int64_t batch_bp = 500'000'000;
     // --io-staging: MiB of decompressed input the parallel gzip decoder may
     // hold ahead of the reader, as a ceiling; 0 scales it with -t.
     int io_staging_mib = 0;
@@ -228,9 +230,8 @@ struct AlignOptions {
     std::optional<int> vote_diag_bin_width;
     std::optional<int> vote_diag_slope_den;
     std::optional<int> vote_diag_width_max;
-    // RNA intron bounds; -G takes a k/m/g suffix and drops a -r typed before
-    // it.
-    std::optional<int> min_intron;
+    // -G, the maximum intron; it takes a k/m/g suffix and drops a -r typed
+    // before it.
     std::optional<int> max_intron;
     // -u {f,b,r,n} (RNA only), stored as forward, auto, reverse or none.
     // auto is the preset default; none scores no splice motif and writes no
@@ -302,15 +303,12 @@ struct IndexOptions {
 };
 
 AlignOptions parse_align_args(int argc, char** argv, int start);
-// Throws UsageError unless --max-cands is within the lane bound's range for
-// opt.preset: 1..kMaxCatalogueLaneBound, or 1..kAllChainsLaneBound where
-// an overlap preset selects the all-chains lane.
-void check_max_cands_range(const AlignOptions& opt);
-// The refusal of an option in `given` whose stage (OptionSpec::stage) the lane
-// of `preset` does not run, or none. Every option of that stage is named, in
-// registry order.
-std::optional<std::string> option_stage_refusal(
-    const std::set<OptionId>& given, const std::string& preset);
+// The checks that read opt.preset, once it is settled; throws UsageError. An
+// option of a stage the preset's lane does not run, or of the other kind of
+// preset, is refused, --max-cands outside the lane bound's range too
+// (1..kMaxCatalogueLaneBound, or 1..kAllChainsLaneBound on an overlap
+// preset); on a DNA preset -N becomes dna_secondary_max.
+void settle_preset_options(AlignOptions& opt);
 IndexOptions parse_index_args(int argc, char** argv, int start);
 
 }  // namespace fa::cpu::cli

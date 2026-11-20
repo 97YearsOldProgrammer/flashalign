@@ -2,6 +2,8 @@
 //
 // Threads:
 //   reader   the one caller of read(); owns `held`, `held_off` and `cut_in_data`.
+//            Under a loan (`helper`) the pending head is the reader's: it
+//            inflates it itself, a chunk a call, and runs the head's fix-up.
 //   scanner  preads the file and publishes candidate member starts (offsets of
 //            1f 8b 08). Speculation only: correctness never depends on it.
 //   workers  each runs one job at a time: inflating a Segment, repairing a
@@ -32,7 +34,10 @@
 //   Pieces cost CPU a straight inflate does not, so they are opened only while
 //   the reader is short of bytes (want_speculation_locked), and only ahead of
 //   every real producer, since a real producer stops only where a piece is
-//   open. Otherwise one real producer inflates the chain front to back.
+//   open. Otherwise one real producer inflates the chain front to back. Under
+//   a loan that producer is the reader: a worker never inflates the head, and
+//   starts nothing ahead of the reader unless the caller is short of input or
+//   has no work for it (team_ahead_locked).
 //
 // One mutex, mu, guards all shared state except the page-cache advice, which
 // has its own (advise_mu) because chain jobs on several threads issue it. The
@@ -55,8 +60,8 @@
 //   space_cv  the current piece's producer waits for the reader to free room.
 //
 // Liveness:
-//   1. The chain is claimed before any speculation: first the head (to inflate
-//      or fix it up), then the rest of the chain.
+//   1. The chain is claimed before any speculation: first the head (to fix it
+//      up and, in a private team, to inflate it), then the rest of the chain.
 //   2. A speculative producer never blocks: at its cap or the speculative
 //      budget it suspends, keeping its inflate state in the Segment. A piece
 //      that is not the head also suspends at every chunk where the head needs
@@ -68,11 +73,11 @@
 //      scanning thread does not inflate until scan_done, so the cap is one
 //      lower until then.
 //   4. Without a helper the head's producer blocks at its cap only on the
-//      reader, which is draining that piece. With a helper it parks instead,
-//      and claim_locked holds the head back until read() frees room and wakes
-//      work_cv. A sentinel head is claimable at any size: its owner's first
-//      act is the fix-up, which allocates nothing and makes every byte
-//      deliverable.
+//      reader, which is draining that piece. With a helper no worker produces
+//      the head: one whose piece becomes the head leaves it at its next chunk,
+//      and read() inflates a pending head itself, a sentinel one after its
+//      fix-up, and runs an ended head's fix-up. So the reader never waits for
+//      a worker that is inside `helper`.
 //   5. The head's history is always known: it is the tail of the piece the
 //      reader just finished, captured when that piece landed or rebuilt by its
 //      fix-up. So a sentinel head's fix-up is always claimable.
@@ -380,6 +385,12 @@ struct MemberParallelGzByteSource::Impl {
   std::vector<std::unique_ptr<char[]>> recycle; // spare chunk buffers
   size_t open_cursor = 1;      // next split point to consider opening
   bool reader_waiting = false; // read() is blocked on data_cv
+  // The caller's, under a loan: the workers start decode work ahead of the
+  // reader only while it is set, or when the caller has no work for them.
+  const std::atomic<bool>* short_of_input = nullptr;
+  // Set around the claim of a worker the caller had no work for.
+  bool idle_claim = false;
+  WorkerScratch reader_sc; // reader-owned: the head it inflates itself
   // CRC-32 and length of the current member's pieces the reader has
   // finished, for the trailer check.
   uint32_t member_crc = 0;
@@ -533,6 +544,18 @@ struct MemberParallelGzByteSource::Impl {
            has_ended(s.state);
   }
 
+  // Whether a worker may start decode work ahead of the reader: always in a
+  // private team; under a loan while the caller is short of input, or has no
+  // work for this worker.
+  bool team_ahead_locked() const {
+    return short_of_input == nullptr || idle_claim ||
+           short_of_input->load(std::memory_order_relaxed);
+  }
+
+  // Whether a worker may take the pending head: in a private team. Under a
+  // loan it is the reader's (read()).
+  bool head_claimable_locked() const { return !helper; }
+
   // Whether the head has work nobody is doing. Other pieces yield to it at
   // their next chunk.
   bool head_needs_worker_locked() const {
@@ -540,7 +563,7 @@ struct MemberParallelGzByteSource::Impl {
       return false;
     const Segment& head = *current;
     if (head.state == SegState::kPending)
-      return head.sentinel || !helper || head.staged < chain_cap_locked();
+      return head_claimable_locked();
     return fix_ready(head);
   }
 
@@ -562,7 +585,7 @@ struct MemberParallelGzByteSource::Impl {
   // Otherwise one worker inflating the chain keeps up, and a piece would spend
   // the stand-in pass and the fix-up on bytes nobody is waiting for.
   bool want_speculation_locked() const {
-    if (split_count == 0)
+    if (split_count == 0 || !team_ahead_locked())
       return false;
     return reader_waiting || chain_lead_locked() < spec_watermark;
   }
@@ -665,9 +688,8 @@ struct MemberParallelGzByteSource::Impl {
     if (current && !current->discarded) {
       Segment& head = *current;
       if (head.state == SegState::kPending) {
-        // Under a loan the head may be parked at its cap; hold it back until
-        // the reader frees room, unless it is sentinel (liveness point 4).
-        if (head.sentinel || !helper || head.staged < chain_cap_locked()) {
+        // Under a loan the pending head is the reader's (liveness point 4).
+        if (head_claimable_locked()) {
           head.state = SegState::kRunning;
           job.kind = JobKind::kRun;
           job.seg = current;
@@ -690,7 +712,8 @@ struct MemberParallelGzByteSource::Impl {
           return job;
         }
         if (q->state == SegState::kPending && (q->history || speculate) &&
-            q->staged < segment_cap && speculative_staged() < spec_budget) {
+            team_ahead_locked() && q->staged < segment_cap &&
+            speculative_staged() < spec_budget) {
           q->state = SegState::kRunning;
           job.kind = JobKind::kRun;
           job.seg = q;
@@ -698,7 +721,7 @@ struct MemberParallelGzByteSource::Impl {
         }
       }
     }
-    if (eof || failed)
+    if (eof || failed || !team_ahead_locked())
       return job;
     if (want_speculation_locked() && speculative_staged() < spec_budget) {
       const uint64_t floor = chain_floor_locked();
@@ -938,8 +961,30 @@ struct MemberParallelGzByteSource::Impl {
           break;
         }
       }
-      // Unowned, running with nothing staged yet, or a finished sentinel piece
-      // awaiting its fix-up. Waiting also turns speculation on.
+      // Under a loan the pending head is the reader's, a chunk a call, and
+      // so is its fix-up when no worker has it.
+      if (helper && !current->discarded) {
+        const SegPtr seg = current;
+        if (seg->state == SegState::kPending) {
+          seg->state = SegState::kRunning;
+          lock.unlock();
+          if (reader_sc.input.empty())
+            reader_sc.input.resize(kInputBufferBytes);
+          run_segment(seg, reader_sc);
+          lock.lock();
+          continue;
+        }
+        if (fix_ready(*seg)) {
+          seg->fixing = true;
+          lock.unlock();
+          run_fix(seg, reader_sc);
+          lock.lock();
+          continue;
+        }
+      }
+      // Unowned (a private team), running with nothing staged yet, or a
+      // sentinel piece in or awaiting its fix-up. Waiting also turns
+      // speculation on.
       reader_waiting = true;
       work_cv.notify_all();
       data_cv.wait(lock);
@@ -1510,7 +1555,7 @@ struct MemberParallelGzByteSource::Impl {
   }
 
   // Inflates `seg` until it lands, ends, fails, suspends or is cancelled.
-  // Called without mu.
+  // Called without mu. Under a loan it returns after each chunk of the head.
   void run_segment(const SegPtr& seg, WorkerScratch& sc) {
     Segment& s = *seg;
     InputCursor in(sc.input);
@@ -1756,9 +1801,10 @@ struct MemberParallelGzByteSource::Impl {
         target = open_target_locked(s, in.offset(), chain_role);
       }
       if (seg == current) {
-        if (helper && s.staged >= chain_cap_locked()) {
-          // A loaned thread must not wait on the reader: park the head like a
-          // suspended speculation and look for other work.
+        if (helper) {
+          // Under a loan the head is the reader's: it delivers this chunk
+          // before it inflates another, and a loaned thread whose piece
+          // became the head leaves it here and looks for other work.
           release_locked(seg, SegState::kPending);
           return;
         }
@@ -1830,7 +1876,9 @@ struct MemberParallelGzByteSource::Impl {
     for (;;) {
       if (abort)
         return;
+      idle_claim = helper_was_empty;
       Job job = claim_locked();
+      idle_claim = false;
       if (job.kind != JobKind::kNone) {
         lock.unlock();
         run_job(job, sc);
@@ -1933,6 +1981,8 @@ MemberParallelGzByteSource::MemberParallelGzByteSource(
   self->workers = std::max(1u, wanted);
   self->spec_worker_cap = self->workers > 1 ? self->workers - 1 : 0;
   self->helper = options.helper;
+  if (options.helper)
+    self->short_of_input = options.short_of_input;
   self->chunk_bytes =
       std::min(kMaxChunkBytes, std::max<size_t>(1024, options.chunk_bytes));
   self->segment_cap =
